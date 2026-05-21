@@ -1,0 +1,55 @@
+# Rust
+target/
+Cargo.lock.bak
+**/*.rs.bk
+
+# CMake
+build/
+out/
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# MSVC / VS
+.vs/
+*.user
+*.suo
+*.pdb
+*.ilk
+*.idb
+*.obj
+*.exp
+*.lib.recipe
+[Bb]in/
+[Oo]bj/
+Generated Files/
+*.vcxproj.filters.user
+
+# NuGet
+packages/
+*.nupkg
+project.lock.json
+project.assets.json
+
+# vcpkg
+vcpkg_installed/
+
+# Logs / scratch
+*.log
+*.bak
+*.tmp
+
+# OS
+Thumbs.db
+ehthumbs.db
+desktop.ini
+.DS_Store
+
+# IDE
+.idea/
+.vscode/launch.json
+.vscode/settings.json
+
+# Generated C headers from cbindgen
+audio-core/include/audio_core.h

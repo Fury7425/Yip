@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Application
+    x:Class="yip.App"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <!-- ======================== Brand tokens (shared) ======================== -->
+            <SolidColorBrush x:Key="YipAccentBrush"      Color="#3D7AFF" />
+            <SolidColorBrush x:Key="YipRecordingBrush"   Color="#E5484D" />
+            <SolidColorBrush x:Key="YipMeterTrackBrush"  Color="#2A2A2A" />
+            <SolidColorBrush x:Key="YipMeterFillBrush"   Color="#5BD167" />
+
+            <x:Double x:Key="YipCardCornerRadius">8</x:Double>
+            <Thickness x:Key="YipCardPadding">16</Thickness>
+
+            <!-- ============================ Motion tokens ============================ -->
+            <!-- Fluent standard easing. Reused by all state transitions. -->
+            <x:Double x:Key="YipMotionEaseX1">0.4</x:Double>
+            <x:Double x:Key="YipMotionEaseY1">0.0</x:Double>
+            <x:Double x:Key="YipMotionEaseX2">0.2</x:Double>
+            <x:Double x:Key="YipMotionEaseY2">1.0</x:Double>
+
+            <x:Int32 x:Key="YipMotionFadeMs">180</x:Int32>
+            <x:Int32 x:Key="YipMotionResizeMs">220</x:Int32>
+            <x:Int32 x:Key="YipMotionMeterTickMs">33</x:Int32>
+
+            <!-- ======================= Indicator pill tokens ======================== -->
+            <!-- Inner pill rect (Visual.Size animated). Window HWND is fixed at 320x56. -->
+            <x:Double x:Key="YipIndicatorWindowWidth">320</x:Double>
+            <x:Double x:Key="YipIndicatorWindowHeight">56</x:Double>
+
+            <!--
+                Idle + Armed states are *invisible* by product decision.
+                The window is hidden (AppWindow.Hide) in these states, so
+                the geometry tokens below are kept only for reference and
+                potential future "minimal dim pill" reuse.
+            -->
+            <x:Double x:Key="YipIndicatorIdleWidth">0</x:Double>
+            <x:Double x:Key="YipIndicatorIdleHeight">0</x:Double>
+            <x:Double x:Key="YipIndicatorIdleOpacity">0.00</x:Double>
+
+            <x:Double x:Key="YipIndicatorArmedWidth">0</x:Double>
+            <x:Double x:Key="YipIndicatorArmedHeight">0</x:Double>
+            <x:Double x:Key="YipIndicatorArmedOpacity">0.00</x:Double>
+
+            <x:Double x:Key="YipIndicatorRecordingWidth">188</x:Double>
+            <x:Double x:Key="YipIndicatorRecordingHeight">44</x:Double>
+            <x:Double x:Key="YipIndicatorRecordingOpacity">1.00</x:Double>
+
+            <x:Double x:Key="YipIndicatorExpandedWidth">320</x:Double>
+            <x:Double x:Key="YipIndicatorExpandedHeight">56</x:Double>
+            <x:Double x:Key="YipIndicatorExpandedOpacity">1.00</x:Double>
+
+            <x:Double x:Key="YipIndicatorSavingOpacity">0.85</x:Double>
+
+            <x:Double x:Key="YipIndicatorCornerRadius">22</x:Double>
+            <Thickness x:Key="YipIndicatorPadding">10,4,10,4</Thickness>
+
+            <!-- Level meter (compositor-side bars) -->
+            <x:Double x:Key="YipMeterBarWidth">3</x:Double>
+            <x:Double x:Key="YipMeterBarGap">4</x:Double>
+            <x:Double x:Key="YipMeterBarMaxHeight">18</x:Double>
+            <x:Int32  x:Key="YipMeterBarCount">4</x:Int32>
+            <x:Int32  x:Key="YipMeterBarPhaseOffsetMs">60</x:Int32>
+
+            <!-- Drag affordance + click-through indicator -->
+            <x:Double x:Key="YipIndicatorDragHandleOpacity">0.45</x:Double>
+            <x:Double x:Key="YipIndicatorClickThruDashWidth">1.0</x:Double>
+            <x:Double x:Key="YipIndicatorClickThruDashOpacity">0.55</x:Double>
+
+            <!-- Edge dock magnet -->
+            <x:Double x:Key="YipIndicatorSnapDistance">20</x:Double>
+            <x:Int32  x:Key="YipIndicatorAutoCollapseMs">3000</x:Int32>
+
+            <!-- ===================== Theme-aware surfaces ===================== -->
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"        Color="#FAFAFB" Opacity="0.85" />
+                    <SolidColorBrush x:Key="YipIndicatorStrokeQuietBrush"    Color="#000000" Opacity="0.08" />
+                    <SolidColorBrush x:Key="YipIndicatorAccentNeutralBrush"  Color="#525866" />
+                    <SolidColorBrush x:Key="YipIndicatorMeterTrackQuietBrush" Color="#000000" Opacity="0.06" />
+                    <SolidColorBrush x:Key="YipIndicatorMeterBarIdleBrush"   Color="#525866" />
+                    <SolidColorBrush x:Key="YipIndicatorMeterBarLiveBrush"   Color="#E5484D" />
+                    <SolidColorBrush x:Key="YipIndicatorTimerBrush"          Color="#0A0A0B" />
+                    <SolidColorBrush x:Key="YipIndicatorDragHandleBrush"     Color="#000000" Opacity="0.30" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"        Color="#141518" Opacity="0.78" />
+                    <SolidColorBrush x:Key="YipIndicatorStrokeQuietBrush"    Color="#FFFFFF" Opacity="0.10" />
+                    <SolidColorBrush x:Key="YipIndicatorAccentNeutralBrush"  Color="#B7BCC8" />
+                    <SolidColorBrush x:Key="YipIndicatorMeterTrackQuietBrush" Color="#FFFFFF" Opacity="0.06" />
+                    <SolidColorBrush x:Key="YipIndicatorMeterBarIdleBrush"   Color="#B7BCC8" />
+                    <SolidColorBrush x:Key="YipIndicatorMeterBarLiveBrush"   Color="#FF6B70" />
+                    <SolidColorBrush x:Key="YipIndicatorTimerBrush"          Color="#F2F3F5" />
+                    <SolidColorBrush x:Key="YipIndicatorDragHandleBrush"     Color="#FFFFFF" Opacity="0.35" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

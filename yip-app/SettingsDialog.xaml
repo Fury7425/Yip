@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ContentDialog
+    x:Class="yip.SettingsDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    mc:Ignorable="d"
+    Title="Yip settings"
+    PrimaryButtonText="Save"
+    SecondaryButtonText="Cancel"
+    DefaultButton="Primary">
+
+    <StackPanel Spacing="16" MinWidth="420">
+        <StackPanel Spacing="6">
+            <TextBlock Text="Output folder" FontWeight="SemiBold" Opacity="0.8" />
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="FolderBox" PlaceholderText="C:\Users\You\Music\Yip" />
+                <Button Grid.Column="1" Click="OnPickFolder" Content="Browse…" />
+            </Grid>
+            <TextBlock x:Name="FolderHint" FontSize="11" Opacity="0.55"
+                       Text="Recordings save into this folder. Created automatically if missing." />
+        </StackPanel>
+
+        <StackPanel Spacing="6">
+            <TextBlock Text="Sample rate" FontWeight="SemiBold" Opacity="0.8" />
+            <ComboBox x:Name="SampleRateCombo" MinWidth="180" SelectedIndex="1">
+                <ComboBoxItem Content="44100 Hz" Tag="44100" />
+                <ComboBoxItem Content="48000 Hz" Tag="48000" />
+                <ComboBoxItem Content="88200 Hz" Tag="88200" />
+                <ComboBoxItem Content="96000 Hz" Tag="96000" />
+            </ComboBox>
+            <TextBlock FontSize="11" Opacity="0.55"
+                       Text="Capture follows the device mix format; this rate is used as a target if WASAPI resampling is enabled." />
+        </StackPanel>
+
+        <StackPanel Spacing="6">
+            <TextBlock Text="Channels" FontWeight="SemiBold" Opacity="0.8" />
+            <ComboBox x:Name="ChannelsCombo" MinWidth="180" SelectedIndex="1">
+                <ComboBoxItem Content="Mono"   Tag="1" />
+                <ComboBoxItem Content="Stereo" Tag="2" />
+            </ComboBox>
+        </StackPanel>
+
+        <StackPanel Spacing="6">
+            <TextBlock Text="Format" FontWeight="SemiBold" Opacity="0.8" />
+            <TextBlock Text="PCM float32 (32-bit IEEE)" Opacity="0.7" />
+            <TextBlock FontSize="11" Opacity="0.45"
+                       Text="Other formats are reserved for a future release." />
+        </StackPanel>
+    </StackPanel>
+</ContentDialog>

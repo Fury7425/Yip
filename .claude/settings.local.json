@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo --version)",
+      "Bash(rustc --version)",
+      "Bash(cmake --version)",
+      "Bash(where cl.exe)",
+      "Bash(where msbuild *)",
+      "Bash(xxd)"
+    ]
+  }
+}

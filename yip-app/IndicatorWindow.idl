@@ -1,0 +1,8 @@
+namespace yip
+{
+    [default_interface]
+    runtimeclass IndicatorWindow : Microsoft.UI.Xaml.Window
+    {
+        IndicatorWindow();
+    }
+}

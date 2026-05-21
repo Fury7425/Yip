@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="yip.IndicatorWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid x:Name="Root" Background="Transparent">
+        <!--
+            Window HWND is fixed at 320x56 (YipIndicatorWindow{Width,Height}).
+            The visible pill is the Border below, sized to the maximum state.
+            We attach a Composition GeometricClip whose rounded-rectangle
+            geometry animates to convey state changes — no XAML layout work
+            during transitions. The clip lives on this Border's Visual.
+        -->
+        <Border
+            x:Name="PillFrame"
+            Width="{StaticResource YipIndicatorExpandedWidth}"
+            Height="{StaticResource YipIndicatorExpandedHeight}"
+            CornerRadius="{StaticResource YipIndicatorCornerRadius}"
+            Background="{ThemeResource YipIndicatorSurfaceBrush}"
+            BorderBrush="{ThemeResource YipIndicatorStrokeQuietBrush}"
+            BorderThickness="1"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            ManipulationMode="TranslateX,TranslateY"
+            PointerPressed="OnPillPointerPressed"
+            PointerMoved="OnPillPointerMoved"
+            PointerReleased="OnPillPointerReleased"
+            PointerCaptureLost="OnPillPointerCaptureLost"
+            Tapped="OnPillTapped">
+
+            <Grid x:Name="PillContent" Padding="{StaticResource YipIndicatorPadding}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />  <!-- dot / handle -->
+                    <ColumnDefinition Width="Auto" />  <!-- meter (composition-hosted) -->
+                    <ColumnDefinition Width="*" />     <!-- spacer -->
+                    <ColumnDefinition Width="Auto" />  <!-- expanded buttons -->
+                </Grid.ColumnDefinitions>
+
+                <!-- Dot host — a 12x12 empty Border whose Visual receives a
+                     SpriteVisual fill, animated by code-behind. -->
+                <Border x:Name="DotHost"
+                        Grid.Column="0"
+                        Width="12" Height="12"
+                        Margin="2,0,8,0"
+                        VerticalAlignment="Center" />
+
+                <!-- Meter host — 4 bars are appended as child visuals here. -->
+                <Border x:Name="MeterHost"
+                        Grid.Column="1"
+                        Width="36" Height="22"
+                        VerticalAlignment="Center"
+                        Opacity="0" />
+
+                <StackPanel x:Name="ExpandedActions"
+                            Grid.Column="3"
+                            Orientation="Horizontal"
+                            Spacing="6"
+                            VerticalAlignment="Center"
+                            Opacity="0"
+                            IsHitTestVisible="False">
+                    <Button x:Name="StopButton"
+                            Click="OnStopClicked"
+                            ToolTipService.ToolTip="Stop">
+                        <FontIcon FontFamily="Segoe Fluent Icons"
+                                  Glyph="&#xE71A;"
+                                  FontSize="14" />
+                    </Button>
+                    <Button x:Name="MarkButton"
+                            Click="OnMarkClicked"
+                            ToolTipService.ToolTip="Mark moment">
+                        <FontIcon FontFamily="Segoe Fluent Icons"
+                                  Glyph="&#xE8A9;"
+                                  FontSize="14" />
+                    </Button>
+                    <Button x:Name="OpenLastButton"
+                            Click="OnOpenLastClicked"
+                            ToolTipService.ToolTip="Open last recording">
+                        <FontIcon FontFamily="Segoe Fluent Icons"
+                                  Glyph="&#xE838;"
+                                  FontSize="14" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

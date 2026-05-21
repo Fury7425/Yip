@@ -1,0 +1,53 @@
+namespace yip.viewmodels
+{
+    runtimeclass DeviceEntry
+    {
+        DeviceEntry();
+        String Id;
+        String Name;
+        String Glyph;
+        Boolean IsCapture;
+        Boolean IsDefault;
+    }
+
+    runtimeclass RecordingEntry
+    {
+        RecordingEntry();
+        String FullPath;
+        String FileName;
+        String Duration;
+        String ModifiedAt;
+    }
+
+    [default_interface]
+    runtimeclass MainViewModel : Microsoft.UI.Xaml.Data.INotifyPropertyChanged
+    {
+        MainViewModel();
+
+        Windows.Foundation.Collections.IObservableVector<DeviceEntry> Devices{ get; };
+        Windows.Foundation.Collections.IObservableVector<RecordingEntry> Recordings{ get; };
+
+        Int32 SelectedDeviceIndex;
+
+        Single PeakLevel{ get; };
+        String PeakLabel{ get; };
+
+        String StatusText{ get; };
+        String RecordButtonText{ get; };
+        Microsoft.UI.Xaml.Media.Brush RecordButtonBrush{ get; };
+        Boolean CanRecord{ get; };
+
+        Boolean IsRecording{ get; };
+
+        String OutputFolder{ get; };
+        UInt32 SampleRate{ get; };
+        UInt16 Channels{ get; };
+
+        void RefreshDevices();
+        void RefreshRecordings();
+        void PollPeak();
+        void ToggleRecording();
+        void ApplySettings(String folder, UInt32 sampleRate, UInt16 channels);
+        void RevealRecording(RecordingEntry entry);
+    }
+}

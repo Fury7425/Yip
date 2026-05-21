@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["audio-core"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+debug = false
+
+[profile.dev]
+opt-level = 0
+debug = true

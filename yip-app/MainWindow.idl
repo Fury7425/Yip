@@ -1,0 +1,11 @@
+import "viewmodels/MainViewModel.idl";
+
+namespace yip
+{
+    [default_interface]
+    runtimeclass MainWindow : Microsoft.UI.Xaml.Window
+    {
+        MainWindow();
+        yip.viewmodels.MainViewModel ViewModel{ get; };
+    }
+}

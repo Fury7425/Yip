@@ -1,0 +1,44 @@
+# Yip C++ formatting. Tuned to keep WinRT-heavy headers readable.
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: c++20
+
+ColumnLimit: 110
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -4
+
+AlignAfterOpenBracket: Align
+AlignConsecutiveDeclarations: false
+AlignConsecutiveAssignments: false
+AlignTrailingComments: true
+AllowAllArgumentsOnNextLine: true
+AllowShortBlocksOnASingleLine: Empty
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLambdasOnASingleLine: All
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: false
+  AfterFunction: true
+  AfterControlStatement: Never
+  AfterNamespace: false
+  AfterStruct: false
+  AfterEnum: false
+  BeforeElse: false
+  BeforeCatch: false
+  SplitEmptyFunction: false
+
+NamespaceIndentation: None
+PointerAlignment: Left
+ReferenceAlignment: Left
+SortIncludes: Never
+SpaceAfterCStyleCast: false
+SpacesInParens: Never
+IndentCaseLabels: true
+IndentPPDirectives: None
+
+# Don't reflow Microsoft macros + long WinRT type names.
+PenaltyBreakBeforeFirstCallParameter: 200
+PenaltyReturnTypeOnItsOwnLine: 300

@@ -1,0 +1,11 @@
+namespace yip
+{
+    [default_interface]
+    runtimeclass SettingsDialog : Microsoft.UI.Xaml.Controls.ContentDialog
+    {
+        SettingsDialog();
+        String OutputFolder;
+        UInt32 SampleRate;
+        UInt16 Channels;
+    }
+}
