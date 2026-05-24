@@ -18,7 +18,7 @@
     clippy::similar_names,
     clippy::too_many_arguments,
     clippy::too_many_lines,
-    clippy::unreadable_literal,
+    clippy::unreadable_literal
 )]
 
 //! audio-core: WASAPI capture, lock-free ring, WAV writer.

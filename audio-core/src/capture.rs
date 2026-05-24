@@ -410,8 +410,7 @@ fn parse_format(fmt_ptr: *const WAVEFORMATEX) -> Result<(u32, u16), YipError> {
     // SAFETY: same as above.
     let channels = unsafe { std::ptr::addr_of!((*fmt_ptr).nChannels).read_unaligned() };
     // SAFETY: same as above.
-    let bits_per_sample =
-        unsafe { std::ptr::addr_of!((*fmt_ptr).wBitsPerSample).read_unaligned() };
+    let bits_per_sample = unsafe { std::ptr::addr_of!((*fmt_ptr).wBitsPerSample).read_unaligned() };
     // SAFETY: same as above.
     let format_tag = unsafe { std::ptr::addr_of!((*fmt_ptr).wFormatTag).read_unaligned() };
     // SAFETY: same as above.
@@ -428,8 +427,7 @@ fn parse_format(fmt_ptr: *const WAVEFORMATEX) -> Result<(u32, u16), YipError> {
         // SAFETY: cbSize >= 22 means the trailing EXTENSIBLE fields are
         // present in the same allocation.
         let sub_format = unsafe {
-            std::ptr::addr_of!((*fmt_ptr.cast::<WAVEFORMATEXTENSIBLE>()).SubFormat)
-                .read_unaligned()
+            std::ptr::addr_of!((*fmt_ptr.cast::<WAVEFORMATEXTENSIBLE>()).SubFormat).read_unaligned()
         };
         sub_format == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
     } else {

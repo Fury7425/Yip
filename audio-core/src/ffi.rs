@@ -223,11 +223,7 @@ pub extern "C" fn rec_current_path() -> *const c_char {
 /// thread. Returns null if no error.
 #[unsafe(no_mangle)]
 pub extern "C" fn rec_last_error() -> *const c_char {
-    LAST_ERROR.with(|cell| {
-        cell.borrow()
-            .as_ref()
-            .map_or(ptr::null(), |s| s.as_ptr())
-    })
+    LAST_ERROR.with(|cell| cell.borrow().as_ref().map_or(ptr::null(), |s| s.as_ptr()))
 }
 
 // ----------------------------------------------------------------------------
