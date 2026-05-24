@@ -73,13 +73,22 @@ fn read_friendly_name(dev: &IMMDevice) -> Result<String, YipError> {
     // SAFETY: store live; PKEY is &'static.
     let value = unsafe { store.GetValue(&PKEY_Device_FriendlyName)? };
 
-    // PKEY_Device_FriendlyName returns VT_LPWSTR; access the union member as
-    // PWSTR directly. PROPVARIANT::Drop calls PropVariantClear which frees
-    // the inner pointer, so we must clone the string before the value is
-    // dropped at end of scope.
-    // SAFETY: PROPVARIANT layout is well-defined; this PKEY is documented
-    // to return VT_LPWSTR.
-    let pwstr = unsafe { value.Anonymous.Anonymous.Anonymous.pwszVal };
+    // PKEY_Device_FriendlyName always returns VT_LPWSTR. The Windows ABI
+    // PROPVARIANT layout is: 8-byte header (vt + 3 reserved WORDs) then an
+    // 8-byte union; pwszVal (PWSTR) sits at offset 8. windows-core 0.58
+    // makes the Rust struct opaque (no Anonymous fields), so extract the
+    // pointer via a raw-byte read. PROPVARIANT::Drop calls PropVariantClear
+    // which frees pwszVal, so we must clone the string before `value` drops.
+    // SAFETY: GetValue succeeded; PKEY_Device_FriendlyName is documented to
+    // return VT_LPWSTR; the PROPVARIANT ABI layout is stable across Windows.
+    let pwstr: windows::core::PWSTR = unsafe {
+        std::ptr::read_unaligned(
+            std::ptr::addr_of!(value)
+                .cast::<u8>()
+                .add(8)
+                .cast::<windows::core::PWSTR>(),
+        )
+    };
     if pwstr.is_null() {
         return Err(YipError::Wasapi("device name PROPVARIANT empty".into()));
     }
