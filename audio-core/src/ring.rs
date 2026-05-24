@@ -96,7 +96,7 @@ mod tests {
         m.fold_peak(0.5);
         m.fold_peak(0.2);
         assert!((m.take_peak() - 0.5).abs() < f32::EPSILON);
-        assert_eq!(m.take_peak(), 0.0, "second read drains");
+        assert_eq!(m.take_peak().to_bits(), 0_u32, "second read drains");
     }
 
     #[test]

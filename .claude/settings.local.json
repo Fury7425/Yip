@@ -6,7 +6,12 @@
       "Bash(cmake --version)",
       "Bash(where cl.exe)",
       "Bash(where msbuild *)",
-      "Bash(xxd)"
+      "Bash(xxd)",
+      "Bash(cargo clippy *)",
+      "PowerShell(& \"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\2022\\\\Community\\\\VC\\\\Tools\\\\Llvm\\\\x64\\\\bin\\\\clang-format.exe\" --dry-run -Werror --style=file \"E:\\\\프로젝트\\\\Yip\\\\yip-app\\\\viewmodels\\\\MainViewModel.cpp\" 2>&1; echo \"exit: $LASTEXITCODE\")",
+      "Bash(cargo fmt *)",
+      "Bash(echo \"exit: $?\")",
+      "PowerShell($cargo = \"$env:USERPROFILE\\\\.cargo\\\\bin\\\\cargo.exe\"; if \\(Test-Path $cargo\\) { & $cargo fmt --check 2>&1; echo \"exit: $LASTEXITCODE\" } else { echo \"cargo not at default path\" })"
     ]
   }
 }

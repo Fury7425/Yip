@@ -12,7 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::mpsc::channel;
 use std::thread::JoinHandle;
 
 use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
@@ -72,10 +72,7 @@ impl Recorder {
         let stop_event = SendHandle(stop_event_raw);
         let stop_event_for_thread = SendHandle(stop_event_raw);
 
-        let (ready_tx, ready_rx): (
-            std::sync::mpsc::Sender<Result<WriterConfig, YipError>>,
-            Receiver<Result<WriterConfig, YipError>>,
-        ) = channel();
+        let (ready_tx, ready_rx) = channel::<Result<WriterConfig, YipError>>();
 
         let device_id_owned = device_id.to_string();
         let path_owned: PathBuf = path.to_path_buf();
@@ -187,6 +184,7 @@ impl Drop for Recorder {
 // ---------- capture thread body ----------
 
 #[allow(clippy::too_many_arguments)] // bag of refs is shorter than a struct here
+#[allow(clippy::cast_ptr_alignment)] // SAFETY: WASAPI GetBuffer guarantees f32-aligned data
 fn capture_loop(
     device_id: &str,
     path: &Path,
@@ -324,55 +322,52 @@ fn capture_loop(
             let silent = packet_flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0;
 
             // Copy into ring without allocating. Update peak in same pass.
-            let copied = match producer.write_chunk_uninit(n_samples) {
-                Ok(mut chunk) => {
-                    let (slot_a, slot_b) = chunk.as_mut_slices();
-                    let total_a = slot_a.len();
-                    let total_b = slot_b.len();
+            let copied = if let Ok(mut chunk) = producer.write_chunk_uninit(n_samples) {
+                let (slot_a, slot_b) = chunk.as_mut_slices();
+                let total_a = slot_a.len();
+                let total_b = slot_b.len();
 
-                    if silent {
-                        for s in slot_a.iter_mut() {
-                            s.write(0.0);
-                        }
-                        for s in slot_b.iter_mut() {
-                            s.write(0.0);
-                        }
-                    } else {
-                        // SAFETY: data_ptr valid for n_samples*4 bytes; sample
-                        // format negotiated to f32 above.
-                        let src = unsafe {
-                            std::slice::from_raw_parts(data_ptr.cast::<f32>(), n_samples)
-                        };
-                        let mut peak = 0.0_f32;
-                        for (dst, &s) in slot_a.iter_mut().zip(src.iter()) {
-                            dst.write(s);
-                            let a = s.abs();
-                            if a > peak {
-                                peak = a;
-                            }
-                        }
-                        for (dst, &s) in slot_b.iter_mut().zip(src[total_a..].iter()) {
-                            dst.write(s);
-                            let a = s.abs();
-                            if a > peak {
-                                peak = a;
-                            }
-                        }
-                        if peak > 0.0 {
-                            meter.fold_peak(peak);
+                if silent {
+                    for s in slot_a.iter_mut() {
+                        s.write(0.0);
+                    }
+                    for s in slot_b.iter_mut() {
+                        s.write(0.0);
+                    }
+                } else {
+                    // SAFETY: data_ptr valid for n_samples*4 bytes; sample
+                    // format negotiated to f32 above.
+                    let src = unsafe {
+                        std::slice::from_raw_parts(data_ptr.cast::<f32>(), n_samples)
+                    };
+                    let mut peak = 0.0_f32;
+                    for (dst, &s) in slot_a.iter_mut().zip(src.iter()) {
+                        dst.write(s);
+                        let a = s.abs();
+                        if a > peak {
+                            peak = a;
                         }
                     }
-                    // SAFETY: every slot in slot_a and slot_b was initialised
-                    // in the branches above before this call.
-                    unsafe { chunk.commit_all() };
-                    total_a + total_b
+                    for (dst, &s) in slot_b.iter_mut().zip(src[total_a..].iter()) {
+                        dst.write(s);
+                        let a = s.abs();
+                        if a > peak {
+                            peak = a;
+                        }
+                    }
+                    if peak > 0.0 {
+                        meter.fold_peak(peak);
+                    }
                 }
-                Err(_) => {
-                    // Ring full → writer can't keep up. Mark overrun and
-                    // drop this packet (the only realtime-safe choice).
-                    meter.fold_peak(1.0);
-                    0
-                }
+                // SAFETY: every slot in slot_a and slot_b was initialised
+                // in the branches above before this call.
+                unsafe { chunk.commit_all() };
+                total_a + total_b
+            } else {
+                // Ring full → writer can't keep up. Mark overrun and
+                // drop this packet (the only realtime-safe choice).
+                meter.fold_peak(1.0);
+                0
             };
             meter.frames_captured.fetch_add(
                 (copied as u64) / frames_per_sample.max(1),

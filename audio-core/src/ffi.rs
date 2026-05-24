@@ -270,7 +270,8 @@ pub unsafe extern "C" fn rec_free_devices(ptr: *mut DeviceInfo, len: usize) {
         return;
     }
     // SAFETY: caller contract — pointer and length match a prior `rec_list_devices`.
-    let vec = unsafe { Vec::from_raw_parts(ptr, len, len) };
+    let vec: Vec<DeviceInfo> =
+        unsafe { Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)) }.into();
     for info in vec {
         if !info.id.is_null() {
             // SAFETY: id was CString::into_raw'd.
