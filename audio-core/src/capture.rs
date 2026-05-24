@@ -337,9 +337,8 @@ fn capture_loop(
                 } else {
                     // SAFETY: data_ptr valid for n_samples*4 bytes; sample
                     // format negotiated to f32 above.
-                    let src = unsafe {
-                        std::slice::from_raw_parts(data_ptr.cast::<f32>(), n_samples)
-                    };
+                    let src =
+                        unsafe { std::slice::from_raw_parts(data_ptr.cast::<f32>(), n_samples) };
                     let mut peak = 0.0_f32;
                     for (dst, &s) in slot_a.iter_mut().zip(src.iter()) {
                         dst.write(s);

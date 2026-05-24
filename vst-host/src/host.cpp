@@ -5,6 +5,7 @@
 
 #include "vst_host.h"
 
-extern "C" int32_t yip_vst_dummy(void) {
+extern "C" int32_t yip_vst_dummy(void)
+{
     return 7;
 }

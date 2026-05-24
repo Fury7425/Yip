@@ -5,8 +5,8 @@
 // layout in CLAUDE.md).
 
 namespace yip::vst {
-    // M5 entry: render(const std::filesystem::path& in,
-    //                  const std::filesystem::path& out,
-    //                  std::span<PluginInstance*> chain,
-    //                  std::function<void(float)> on_progress);
-}  // namespace yip::vst
+// M5 entry: render(const std::filesystem::path& in,
+//                  const std::filesystem::path& out,
+//                  std::span<PluginInstance*> chain,
+//                  std::function<void(float)> on_progress);
+} // namespace yip::vst

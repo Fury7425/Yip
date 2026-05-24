@@ -13,12 +13,12 @@ extern "C" {
 
 // Return values from host operations. 0 == success.
 typedef enum YipVstStatus {
-    YIP_VST_OK              = 0,
-    YIP_VST_INVALID_ARG     = 1,
-    YIP_VST_LOAD_FAILED     = 2,
+    YIP_VST_OK = 0,
+    YIP_VST_INVALID_ARG = 1,
+    YIP_VST_LOAD_FAILED = 2,
     YIP_VST_FORMAT_MISMATCH = 3,
-    YIP_VST_RENDER_FAILED   = 4,
-    YIP_VST_UNKNOWN         = 99
+    YIP_VST_RENDER_FAILED = 4,
+    YIP_VST_UNKNOWN = 99
 } YipVstStatus;
 
 // Smoke-test symbol. Returns 7. Lets the build wiring be verified before any
@@ -39,5 +39,5 @@ int32_t yip_vst_dummy(void);
 // );
 
 #ifdef __cplusplus
-}  // extern "C"
+} // extern "C"
 #endif
