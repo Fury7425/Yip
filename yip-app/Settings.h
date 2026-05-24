@@ -7,28 +7,26 @@
 #include <filesystem>
 #include <string>
 
-namespace yip
-{
-    struct Settings
-    {
-        std::filesystem::path output_folder;
-        uint32_t sample_rate{ 48000 };
-        uint16_t channels{ 2 };
+namespace yip {
+struct Settings {
+    std::filesystem::path output_folder;
+    uint32_t sample_rate{48000};
+    uint16_t channels{2};
 
-        // 0 = PCM float32 (only format in v1; reserved for future expansion).
-        uint16_t format{ 0 };
+    // 0 = PCM float32 (only format in v1; reserved for future expansion).
+    uint16_t format{0};
 
-        // Returns the path to the settings file, creating parent dirs.
-        static std::filesystem::path SettingsPath();
+    // Returns the path to the settings file, creating parent dirs.
+    static std::filesystem::path SettingsPath();
 
-        // Default-construct a settings object pointing at the user's
-        // Music\Yip folder.
-        static Settings Defaults();
+    // Default-construct a settings object pointing at the user's
+    // Music\Yip folder.
+    static Settings Defaults();
 
-        // Best-effort load. Falls back to Defaults() on any error.
-        static Settings Load();
+    // Best-effort load. Falls back to Defaults() on any error.
+    static Settings Load();
 
-        // Atomic save (write tmp + rename). Returns false on failure.
-        bool Save() const;
-    };
-}
+    // Atomic save (write tmp + rename). Returns false on failure.
+    bool Save() const;
+};
+} // namespace yip
