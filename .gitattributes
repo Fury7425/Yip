@@ -1,2 +1,39 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Force LF line endings across the repo so cargo fmt --check + clang-format
+# behave identically on Windows checkouts and Linux CI agents. Native VS/MSBuild
+# tooling stays on CRLF for files where the IDE expects it.
+
+* text=auto eol=lf
+
+# Source code → LF
+*.rs           text eol=lf
+*.toml         text eol=lf
+*.lock         text eol=lf
+*.cpp          text eol=lf
+*.cc           text eol=lf
+*.h            text eol=lf
+*.hpp          text eol=lf
+*.xaml         text eol=lf
+*.idl          text eol=lf
+*.cmake        text eol=lf
+CMakeLists.txt text eol=lf
+*.md           text eol=lf
+*.yml          text eol=lf
+*.yaml         text eol=lf
+*.json         text eol=lf
+
+# MSBuild + Windows manifests → CRLF (Visual Studio canonical)
+*.vcxproj          text eol=crlf
+*.vcxproj.filters  text eol=crlf
+*.sln              text eol=crlf
+*.manifest         text eol=crlf
+*.props            text eol=crlf
+*.targets          text eol=crlf
+packages.config    text eol=crlf
+app.manifest       text eol=crlf
+
+# Binary
+*.png  binary
+*.jpg  binary
+*.ico  binary
+*.wav  binary
+*.vst3 binary

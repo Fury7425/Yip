@@ -60,11 +60,7 @@ unsafe impl Send for SendHandle {}
 unsafe impl Sync for SendHandle {}
 
 impl Recorder {
-    pub fn start(
-        device_id: &str,
-        path: &Path,
-        _cfg: RecConfig,
-    ) -> Result<Self, YipError> {
+    pub fn start(device_id: &str, path: &Path, _cfg: RecConfig) -> Result<Self, YipError> {
         let meter = SharedMeter::new();
         let stop = Arc::new(AtomicBool::new(false));
         let writer_stop = Arc::new(AtomicBool::new(false));
@@ -219,8 +215,7 @@ fn capture_loop(
     let is_render = flow == windows::Win32::Media::Audio::eRender;
 
     // SAFETY: standard activation of WASAPI client.
-    let client: IAudioClient =
-        unsafe { device.Activate::<IAudioClient>(CLSCTX_ALL, None)? };
+    let client: IAudioClient = unsafe { device.Activate::<IAudioClient>(CLSCTX_ALL, None)? };
 
     // Negotiate mix format (always f32 shared since Vista).
     // SAFETY: live client; returns CoTaskMem-allocated pointer.
@@ -346,10 +341,7 @@ fn capture_loop(
                         // SAFETY: data_ptr valid for n_samples*4 bytes; sample
                         // format negotiated to f32 above.
                         let src = unsafe {
-                            std::slice::from_raw_parts(
-                                data_ptr.cast::<f32>(),
-                                n_samples,
-                            )
+                            std::slice::from_raw_parts(data_ptr.cast::<f32>(), n_samples)
                         };
                         let mut peak = 0.0_f32;
                         for (dst, &s) in slot_a.iter_mut().zip(src.iter()) {
@@ -380,9 +372,10 @@ fn capture_loop(
                     0
                 }
             };
-            meter
-                .frames_captured
-                .fetch_add((copied as u64) / frames_per_sample.max(1), Ordering::Relaxed);
+            meter.frames_captured.fetch_add(
+                (copied as u64) / frames_per_sample.max(1),
+                Ordering::Relaxed,
+            );
 
             // SAFETY: paired with GetBuffer above.
             unsafe { capture.ReleaseBuffer(packet_frames)? };

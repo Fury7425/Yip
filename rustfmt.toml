@@ -1,3 +1,8 @@
+# Stable-channel rustfmt only. Unstable options (imports_granularity,
+# group_imports, etc.) are intentionally omitted because CI runs stable cargo
+# fmt and rejects them with warnings. Re-enable on a nightly job later if
+# desired.
+
 edition = "2024"
 max_width = 100
 hard_tabs = false
@@ -5,7 +10,5 @@ tab_spaces = 4
 newline_style = "Unix"
 use_field_init_shorthand = true
 use_try_shorthand = true
-imports_granularity = "Module"
-group_imports = "StdExternalCrate"
 reorder_imports = true
 reorder_modules = true
