@@ -93,7 +93,7 @@ impl Recorder {
                     &meter_for_capture,
                     &stop_for_capture,
                     &writer_stop_for_capture,
-                    stop_event_for_thread.0,
+                    stop_event_for_thread,
                     &ready_tx,
                 )
             })
@@ -194,7 +194,7 @@ fn capture_loop(
     meter: &Arc<SharedMeter>,
     stop: &Arc<AtomicBool>,
     writer_stop: &Arc<AtomicBool>,
-    stop_event: HANDLE,
+    stop_event: SendHandle,
     ready_tx: &std::sync::mpsc::Sender<Result<WriterConfig, YipError>>,
 ) -> Result<(), YipError> {
     // SAFETY: per-thread COM init; balanced by CoUninitialize at end.
@@ -281,7 +281,7 @@ fn capture_loop(
     let _ = ready_tx.send(Ok(writer_cfg));
     meter.started.store(true, Ordering::Release);
 
-    let handles = [audio_event, stop_event];
+    let handles = [audio_event, stop_event.0];
     let frames_per_sample = u64::from(channels);
 
     'outer: loop {
@@ -325,7 +325,7 @@ fn capture_loop(
 
             // Copy into ring without allocating. Update peak in same pass.
             let copied = match producer.write_chunk_uninit(n_samples) {
-                Ok(chunk) => {
+                Ok(mut chunk) => {
                     let (slot_a, slot_b) = chunk.as_mut_slices();
                     let total_a = slot_a.len();
                     let total_b = slot_b.len();
@@ -362,7 +362,9 @@ fn capture_loop(
                             meter.fold_peak(peak);
                         }
                     }
-                    chunk.commit_all();
+                    // SAFETY: every slot in slot_a and slot_b was initialised
+                    // in the branches above before this call.
+                    unsafe { chunk.commit_all() };
                     total_a + total_b
                 }
                 Err(_) => {
