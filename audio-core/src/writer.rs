@@ -48,32 +48,26 @@ pub fn run_writer(
     let mut total: u64 = 0;
 
     loop {
-        match consumer.read_chunk(consumer.slots()) {
-            Ok(chunk) => {
-                let (a, b) = chunk.as_slices();
-                for &s in a {
-                    writer.write_sample(s)?;
-                    total += 1;
-                }
-                for &s in b {
-                    writer.write_sample(s)?;
-                    total += 1;
-                }
-                chunk.commit_all();
+        let n = consumer.slots();
+        if n > 0 {
+            // `read_chunk(n)` only fails if n > slots(), which cannot happen here.
+            let chunk = consumer.read_chunk(n).map_err(|_| YipError::Overrun)?;
+            let (a, b) = chunk.as_slices();
+            for &s in a {
+                writer.write_sample(s)?;
+                total += 1;
             }
-            Err(rtrb::chunks::ChunkError::TooFewSlots(0)) => {
-                if stop.load(Ordering::Acquire) {
-                    break;
-                }
-                // Park briefly. Not a hot loop: we wake on every audio buffer.
-                std::thread::sleep(Duration::from_millis(2));
+            for &s in b {
+                writer.write_sample(s)?;
+                total += 1;
             }
-            Err(rtrb::chunks::ChunkError::TooFewSlots(_)) => {
-                // Happens only if we asked for more than slots(); we ask for
-                // exactly slots(), so this branch is unreachable. Treat as
-                // overrun rather than panic.
-                return Err(YipError::Overrun);
-            }
+            chunk.commit_all();
+        } else if stop.load(Ordering::Acquire) {
+            break;
+        } else {
+            // Ring is empty and capture is still running. Park briefly —
+            // not a hot loop: we wake on every audio buffer (~10 ms).
+            std::thread::sleep(Duration::from_millis(2));
         }
     }
 
