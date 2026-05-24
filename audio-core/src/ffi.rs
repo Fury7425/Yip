@@ -226,7 +226,7 @@ pub extern "C" fn rec_last_error() -> *const c_char {
     LAST_ERROR.with(|cell| {
         cell.borrow()
             .as_ref()
-            .map_or(ptr::null(), |s| s.as_ptr().cast_const())
+            .map_or(ptr::null(), |s| s.as_ptr())
     })
 }
 

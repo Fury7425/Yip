@@ -9,8 +9,6 @@ use windows::Win32::Media::Audio::{
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, STGM_READ,
 };
-use windows::Win32::UI::Shell::PropertiesSystem::PropVariantToStringAlloc;
-use windows::core::Interface;
 
 use crate::error::YipError;
 
@@ -74,17 +72,20 @@ fn read_friendly_name(dev: &IMMDevice) -> Result<String, YipError> {
     let store = unsafe { dev.OpenPropertyStore(STGM_READ)? };
     // SAFETY: store live; PKEY is &'static.
     let value = unsafe { store.GetValue(&PKEY_Device_FriendlyName)? };
-    // PROPVARIANT::Drop calls PropVariantClear. Use the Shell helper to
-    // safely decode VT_LPWSTR — robust against variant tag variation.
-    // SAFETY: value is a live PROPVARIANT.
-    let pwstr = unsafe { PropVariantToStringAlloc(&value)? };
-    // SAFETY: pwstr is null-terminated UTF-16, owned by us; freed below.
+
+    // PKEY_Device_FriendlyName returns VT_LPWSTR; access the union member as
+    // PWSTR directly. PROPVARIANT::Drop calls PropVariantClear which frees
+    // the inner pointer, so we must clone the string before the value is
+    // dropped at end of scope.
+    // SAFETY: PROPVARIANT layout is well-defined; this PKEY is documented
+    // to return VT_LPWSTR.
+    let pwstr = unsafe { value.Anonymous.Anonymous.Anonymous.pwszVal };
+    if pwstr.is_null() {
+        return Err(YipError::Wasapi("device name PROPVARIANT empty".into()));
+    }
+    // SAFETY: pwstr is null-terminated UTF-16 owned by the PROPVARIANT.
     let s = unsafe { pwstr.to_string() }
         .map_err(|_| YipError::Wasapi("device name not utf-16".into()))?;
-    // SAFETY: must free with CoTaskMemFree per docs.
-    unsafe {
-        windows::Win32::System::Com::CoTaskMemFree(Some(pwstr.0.cast()));
-    }
     Ok(s)
 }
 

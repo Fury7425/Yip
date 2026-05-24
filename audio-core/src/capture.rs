@@ -31,7 +31,7 @@ use windows::Win32::System::Threading::{
     AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW, CreateEventW, INFINITE,
     WaitForMultipleObjects,
 };
-use windows::core::PCWSTR;
+use windows::core::Interface;
 
 use crate::devices::find_device;
 use crate::error::YipError;
@@ -208,8 +208,8 @@ fn capture_loop(
 
     // Locate device, decide loopback.
     let device = find_device(device_id)?;
-    // SAFETY: device is a live IMMDevice obtained from enumerator.
-    let dataflow = unsafe { device.cast::<windows::Win32::Media::Audio::IMMEndpoint>()? };
+    // `cast` is a safe windows-rs trait method that wraps QueryInterface.
+    let dataflow = device.cast::<windows::Win32::Media::Audio::IMMEndpoint>()?;
     // SAFETY: live IMMEndpoint.
     let flow = unsafe { dataflow.GetDataFlow()? };
     let is_render = flow == windows::Win32::Media::Audio::eRender;
@@ -321,7 +321,7 @@ fn capture_loop(
                 continue;
             }
             let n_samples = (packet_frames as usize) * (channels as usize);
-            let silent = packet_flags & AUDCLNT_BUFFERFLAGS_SILENT.0 != 0;
+            let silent = packet_flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0;
 
             // Copy into ring without allocating. Update peak in same pass.
             let copied = match producer.write_chunk_uninit(n_samples) {
@@ -403,29 +403,41 @@ fn parse_format(fmt_ptr: *const WAVEFORMATEX) -> Result<(u32, u16), YipError> {
     if fmt_ptr.is_null() {
         return Err(YipError::UnsupportedFormat("null mix format".into()));
     }
-    // SAFETY: pointer non-null and points at WAVEFORMATEX-prefixed struct.
-    let base = unsafe { *fmt_ptr };
-    let sample_rate = base.nSamplesPerSec;
-    let channels = base.nChannels;
-    if base.wBitsPerSample != 32 {
+    // WAVEFORMATEX is #[repr(packed)] — refs to its fields are UB without
+    // explicit unaligned reads. Pull every field via addr_of! + read_unaligned.
+    // SAFETY: fmt_ptr is non-null and points at a valid WAVEFORMATEX.
+    let sample_rate = unsafe { std::ptr::addr_of!((*fmt_ptr).nSamplesPerSec).read_unaligned() };
+    // SAFETY: same as above.
+    let channels = unsafe { std::ptr::addr_of!((*fmt_ptr).nChannels).read_unaligned() };
+    // SAFETY: same as above.
+    let bits_per_sample =
+        unsafe { std::ptr::addr_of!((*fmt_ptr).wBitsPerSample).read_unaligned() };
+    // SAFETY: same as above.
+    let format_tag = unsafe { std::ptr::addr_of!((*fmt_ptr).wFormatTag).read_unaligned() };
+    // SAFETY: same as above.
+    let cb_size = unsafe { std::ptr::addr_of!((*fmt_ptr).cbSize).read_unaligned() };
+
+    if bits_per_sample != 32 {
         return Err(YipError::UnsupportedFormat(format!(
-            "engine reported {} bits/sample; need 32",
-            base.wBitsPerSample
+            "engine reported {bits_per_sample} bits/sample; need 32"
         )));
     }
-    let is_float = match base.wFormatTag {
-        t if u32::from(t) == WAVE_FORMAT_IEEE_FLOAT => true,
-        t if u32::from(t) == WAVE_FORMAT_EXTENSIBLE && base.cbSize >= 22 => {
-            // SAFETY: cbSize >= 22 means the trailing fields of EXTENSIBLE are present.
-            let ext = unsafe { *fmt_ptr.cast::<WAVEFORMATEXTENSIBLE>() };
-            ext.SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
-        }
-        _ => false,
+    let is_float = if u32::from(format_tag) == WAVE_FORMAT_IEEE_FLOAT {
+        true
+    } else if u32::from(format_tag) == WAVE_FORMAT_EXTENSIBLE && cb_size >= 22 {
+        // SAFETY: cbSize >= 22 means the trailing EXTENSIBLE fields are
+        // present in the same allocation.
+        let sub_format = unsafe {
+            std::ptr::addr_of!((*fmt_ptr.cast::<WAVEFORMATEXTENSIBLE>()).SubFormat)
+                .read_unaligned()
+        };
+        sub_format == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT
+    } else {
+        false
     };
     if !is_float {
         return Err(YipError::UnsupportedFormat(format!(
-            "engine reported tag {} — only IEEE_FLOAT supported",
-            base.wFormatTag
+            "engine reported tag {format_tag} — only IEEE_FLOAT supported"
         )));
     }
     Ok((sample_rate, channels))
@@ -455,21 +467,31 @@ mod tests {
 
     #[test]
     fn parse_format_rejects_non_float() {
-        let mut f = WAVEFORMATEX::default();
-        f.wFormatTag = 1; // PCM integer
-        f.wBitsPerSample = 16;
-        f.nChannels = 2;
-        f.nSamplesPerSec = 48_000;
+        // WAVEFORMATEX is repr(packed) — must use struct-literal init
+        // rather than field assignment.
+        let f = WAVEFORMATEX {
+            wFormatTag: 1, // PCM integer
+            nChannels: 2,
+            nSamplesPerSec: 48_000,
+            nAvgBytesPerSec: 0,
+            nBlockAlign: 0,
+            wBitsPerSample: 16,
+            cbSize: 0,
+        };
         assert!(parse_format(std::ptr::addr_of!(f)).is_err());
     }
 
     #[test]
     fn parse_format_accepts_plain_float() {
-        let mut f = WAVEFORMATEX::default();
-        f.wFormatTag = WAVE_FORMAT_IEEE_FLOAT as u16;
-        f.wBitsPerSample = 32;
-        f.nChannels = 2;
-        f.nSamplesPerSec = 48_000;
+        let f = WAVEFORMATEX {
+            wFormatTag: WAVE_FORMAT_IEEE_FLOAT as u16,
+            nChannels: 2,
+            nSamplesPerSec: 48_000,
+            nAvgBytesPerSec: 0,
+            nBlockAlign: 0,
+            wBitsPerSample: 32,
+            cbSize: 0,
+        };
         let (sr, ch) = parse_format(std::ptr::addr_of!(f)).unwrap();
         assert_eq!(sr, 48_000);
         assert_eq!(ch, 2);
