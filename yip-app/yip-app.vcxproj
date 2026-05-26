@@ -20,6 +20,10 @@
     </ProjectConfiguration>
   </ItemGroup>
 
+  <PropertyGroup Label="NuGet">
+    <NuGetTargetMoniker>native,Version=v0.0</NuGetTargetMoniker>
+  </PropertyGroup>
+
   <PropertyGroup Label="Globals">
     <ProjectGuid>{C0F7F1B2-6E4B-4F4A-9C5B-9D7A4C2E3F12}</ProjectGuid>
     <ProjectName>yip-app</ProjectName>
@@ -203,16 +207,5 @@
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-
-  <!-- Force restore and build to agree on the same NuGet target moniker.
-       The C++ toolchain resolution target rewrites NuGetTargetMoniker from
-       "UAP,Version=v$(ApplicationTypeRevision)" to
-       "UAP,Version=v$(WindowsTargetPlatformVersion)" during the build graph,
-       but the restore pass only sees the PropertyGroup value (before targets
-       run). By pinning both to the same expression post-import we keep them
-       in sync regardless of MSBuild evaluation order. -->
-  <PropertyGroup>
-    <NuGetTargetMoniker>UAP,Version=v$(WindowsTargetPlatformVersion)</NuGetTargetMoniker>
-  </PropertyGroup>
 
 </Project>
