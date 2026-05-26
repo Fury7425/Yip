@@ -92,10 +92,9 @@ set(YIP_APP_OUT ${CMAKE_BINARY_DIR}/yip-app)
 add_custom_target(yip_app ALL
     COMMAND ${MSBUILD_EXE}
         "${YIP_APP_PROJ}"
-        -t:Restore,Build
+        -restore
         -p:Configuration=${YIP_CONFIG}
         -p:Platform=${YIP_PLATFORM}
-        -p:RestorePackagesConfig=true
         -p:OutDir=${YIP_APP_OUT}/${YIP_CONFIG}/
         -p:IntDir=${YIP_APP_OUT}/${YIP_CONFIG}/obj/
         -p:YipAudioCoreLib=${AUDIO_CORE_LIB}
