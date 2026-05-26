@@ -30,7 +30,6 @@
     <ApplicationType>Windows Store</ApplicationType>
     <ApplicationTypeRevision>10.0</ApplicationTypeRevision>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <NuGetTargetMoniker>UAP,Version=v10.0</NuGetTargetMoniker>
     <WindowsTargetPlatformMinVersion>10.0.19041.0</WindowsTargetPlatformMinVersion>
     <PlatformToolset>v143</PlatformToolset>
     <UseWinUI>true</UseWinUI>
@@ -204,4 +203,16 @@
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+
+  <!-- Microsoft.Cpp.NuGet.props (inside the targets above) derives
+       NuGetTargetMoniker from the resolved WindowsTargetPlatformVersion.
+       When WindowsTargetPlatformVersion is floating ("10.0") the resolved
+       value differs between the NuGet restore pass (minimal evaluation,
+       no SDK lookup) and the build pass (full C++ toolchain, actual SDK
+       version injected). That mismatch makes the build-time assets
+       validation fail with "does not reference UAP,Version=v10.0".
+       Pinning it here — after all imports — ensures both passes agree. -->
+  <PropertyGroup>
+    <NuGetTargetMoniker>UAP,Version=v10.0</NuGetTargetMoniker>
+  </PropertyGroup>
 </Project>
