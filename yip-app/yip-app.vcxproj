@@ -20,10 +20,6 @@
     </ProjectConfiguration>
   </ItemGroup>
 
-  <PropertyGroup Label="NuGet">
-    <NuGetTargetMoniker>native,Version=v0.0</NuGetTargetMoniker>
-  </PropertyGroup>
-
   <PropertyGroup Label="Globals">
     <ProjectGuid>{C0F7F1B2-6E4B-4F4A-9C5B-9D7A4C2E3F12}</ProjectGuid>
     <ProjectName>yip-app</ProjectName>
