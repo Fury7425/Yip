@@ -92,7 +92,13 @@ set(YIP_APP_OUT ${CMAKE_BINARY_DIR}/yip-app)
 add_custom_target(yip_app ALL
     COMMAND ${MSBUILD_EXE}
         "${YIP_APP_PROJ}"
-        -restore
+        -t:Restore
+        -p:Configuration=${YIP_CONFIG}
+        -p:Platform=${YIP_PLATFORM}
+        -v:minimal
+        -nologo
+    COMMAND ${MSBUILD_EXE}
+        "${YIP_APP_PROJ}"
         -t:Build
         -p:Configuration=${YIP_CONFIG}
         -p:Platform=${YIP_PLATFORM}
