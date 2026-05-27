@@ -89,20 +89,10 @@ set(YIP_APP_DIR ${CMAKE_SOURCE_DIR}/yip-app)
 set(YIP_APP_PROJ ${YIP_APP_DIR}/yip-app.vcxproj)
 set(YIP_APP_OUT ${CMAKE_BINARY_DIR}/yip-app)
 
-set(YIP_WTP_VERSION "10.0.26100.0")  # must match WindowsTargetPlatformVersion in yip-app.vcxproj
-set(YIP_NUGET_MONIKER "UAP,Version=v${YIP_WTP_VERSION}")
-
 add_custom_target(yip_app ALL
     COMMAND ${MSBUILD_EXE}
         "${YIP_APP_PROJ}"
-        -t:Restore
-        -p:Configuration=${YIP_CONFIG}
-        -p:Platform=${YIP_PLATFORM}
-        -p:NuGetTargetMoniker=${YIP_NUGET_MONIKER}
-        -v:minimal
-        -nologo
-    COMMAND ${MSBUILD_EXE}
-        "${YIP_APP_PROJ}"
+        -restore
         -t:Build
         -p:Configuration=${YIP_CONFIG}
         -p:Platform=${YIP_PLATFORM}
