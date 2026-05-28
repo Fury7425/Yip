@@ -92,10 +92,16 @@ set(YIP_APP_OUT ${CMAKE_BINARY_DIR}/yip-app)
 add_custom_target(yip_app ALL
     COMMAND ${MSBUILD_EXE}
         "${YIP_APP_PROJ}"
-        -t:Restore,Build
+        -t:Restore
         -p:Configuration=${YIP_CONFIG}
         -p:Platform=${YIP_PLATFORM}
-        -p:RestorePackagesConfig=true
+        -v:minimal
+        -nologo
+    COMMAND ${MSBUILD_EXE}
+        "${YIP_APP_PROJ}"
+        -t:Build
+        -p:Configuration=${YIP_CONFIG}
+        -p:Platform=${YIP_PLATFORM}
         -p:OutDir=${YIP_APP_OUT}/${YIP_CONFIG}/
         -p:IntDir=${YIP_APP_OUT}/${YIP_CONFIG}/obj/
         -p:YipAudioCoreLib=${AUDIO_CORE_LIB}
@@ -106,7 +112,7 @@ add_custom_target(yip_app ALL
         -v:minimal
         -nologo
     DEPENDS audio_core_build vst_host
-    COMMENT "msbuild yip-app.vcxproj"
+    COMMENT "msbuild yip-app.vcxproj (restore + build)"
     VERBATIM
 )
 
