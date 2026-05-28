@@ -204,4 +204,11 @@
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 
+  <!-- Align restore + build on UAP,v$(WTP); toolchain's BeforeTargets="Build" already sets this, restore phase does not. -->
+  <Target Name="YipFixNuGetMoniker" BeforeTargets="Restore;Build">
+    <PropertyGroup>
+      <NuGetTargetMoniker>UAP,Version=v$(WindowsTargetPlatformVersion)</NuGetTargetMoniker>
+    </PropertyGroup>
+  </Target>
+
 </Project>
