@@ -95,6 +95,7 @@ add_custom_target(yip_app ALL
         -t:Restore
         -p:Configuration=${YIP_CONFIG}
         -p:Platform=${YIP_PLATFORM}
+        "-p:NuGetTargetMoniker=UAP,Version=v10.0"
         -v:minimal
         -nologo
     COMMAND ${MSBUILD_EXE}
@@ -102,6 +103,7 @@ add_custom_target(yip_app ALL
         -t:Build
         -p:Configuration=${YIP_CONFIG}
         -p:Platform=${YIP_PLATFORM}
+        "-p:NuGetTargetMoniker=UAP,Version=v10.0"
         -p:OutDir=${YIP_APP_OUT}/${YIP_CONFIG}/
         -p:IntDir=${YIP_APP_OUT}/${YIP_CONFIG}/obj/
         -p:YipAudioCoreLib=${AUDIO_CORE_LIB}
