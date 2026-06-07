@@ -16,6 +16,12 @@ struct Settings {
     // 0 = PCM float32 (only format in v1; reserved for future expansion).
     uint16_t format{0};
 
+    // Global start/stop hotkey. Modifiers are the Win32 MOD_* bitmask
+    // (MOD_ALT=0x1, MOD_CONTROL=0x2, MOD_SHIFT=0x4, MOD_WIN=0x8); vk is a
+    // virtual-key code. Default: Ctrl+Alt+R.
+    uint32_t hotkey_mods{0x2 | 0x1};
+    uint32_t hotkey_vk{0x52};  // 'R'
+
     // Returns the path to the settings file, creating parent dirs.
     static std::filesystem::path SettingsPath();
 

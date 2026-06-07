@@ -7,6 +7,11 @@
 
 #include "AudioCoreInterop.h"
 #include "SettingsDialog.xaml.h"
+#include "ProcessDialog.xaml.h"
+#include "HotkeyManager.h"
+#include "Settings.h"
+
+#include <microsoft.ui.xaml.window.h>
 
 #include <winrt/Windows.System.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
@@ -43,11 +48,28 @@ MainWindow::MainWindow()
     });
 
     StartPolling();
+
+    // Global start/stop hotkey. WM_HOTKEY is delivered to this window's UI
+    // thread, so the callback can touch the view model directly.
+    HWND hwnd = nullptr;
+    if (auto native = try_as<::IWindowNative>()) {
+        native->get_WindowHandle(&hwnd);
+    }
+    if (hwnd) {
+        m_hotkey = std::make_unique<::yip::HotkeyManager>(hwnd, [weak = get_weak()]() {
+            if (auto self = weak.get()) {
+                if (self->m_viewModel) self->m_viewModel.ToggleRecording();
+            }
+        });
+        const auto s = ::yip::Settings::Load();
+        m_hotkey->Register(s.hotkey_mods, s.hotkey_vk);
+    }
 }
 
 MainWindow::~MainWindow()
 {
     StopPolling();
+    m_hotkey.reset();
     m_deviceWatcher.reset();
     if (rec_is_recording()) {
         (void)rec_stop();
@@ -119,6 +141,17 @@ winrt::fire_and_forget MainWindow::OnOpenSettings(winrt::Windows::Foundation::II
     if (result == winrt::Microsoft::UI::Xaml::Controls::ContentDialogResult::Primary) {
         strong->m_viewModel.ApplySettings(dialog.OutputFolder(), dialog.SampleRate(), dialog.Channels());
     }
+    co_return;
+}
+
+winrt::fire_and_forget MainWindow::OnOpenProcess(winrt::Windows::Foundation::IInspectable const& /*sender*/,
+                                                 winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
+{
+    auto strong = get_strong();
+    auto dialog = winrt::make<winrt::yip::implementation::ProcessDialog>();
+    dialog.XamlRoot(strong->Content().XamlRoot());
+    co_await dialog.ShowAsync();
+    strong->m_viewModel.RefreshRecordings();  // pick up *-processed.wav
     co_return;
 }
 

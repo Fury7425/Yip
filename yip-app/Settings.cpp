@@ -83,6 +83,12 @@ Settings Settings::Load()
     if (obj.HasKey(L"format")) {
         s.format = static_cast<uint16_t>(obj.GetNamedNumber(L"format", 0.0));
     }
+    if (obj.HasKey(L"hotkey_mods")) {
+        s.hotkey_mods = static_cast<uint32_t>(obj.GetNamedNumber(L"hotkey_mods", 3.0));
+    }
+    if (obj.HasKey(L"hotkey_vk")) {
+        s.hotkey_vk = static_cast<uint32_t>(obj.GetNamedNumber(L"hotkey_vk", 82.0));
+    }
     return s;
 }
 
@@ -93,6 +99,8 @@ bool Settings::Save() const
     obj.SetNamedValue(L"sample_rate", wdj::JsonValue::CreateNumberValue(static_cast<double>(sample_rate)));
     obj.SetNamedValue(L"channels", wdj::JsonValue::CreateNumberValue(static_cast<double>(channels)));
     obj.SetNamedValue(L"format", wdj::JsonValue::CreateNumberValue(static_cast<double>(format)));
+    obj.SetNamedValue(L"hotkey_mods", wdj::JsonValue::CreateNumberValue(static_cast<double>(hotkey_mods)));
+    obj.SetNamedValue(L"hotkey_vk", wdj::JsonValue::CreateNumberValue(static_cast<double>(hotkey_vk)));
 
     const auto path = SettingsPath();
     const auto tmp = path;

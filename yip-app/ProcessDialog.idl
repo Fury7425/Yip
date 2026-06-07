@@ -1,0 +1,8 @@
+namespace yip
+{
+    [default_interface]
+    runtimeclass ProcessDialog : Microsoft.UI.Xaml.Controls.ContentDialog
+    {
+        ProcessDialog();
+    }
+}

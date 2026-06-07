@@ -8,6 +8,9 @@
 namespace yip::interop {
 class DeviceWatcher;
 }
+namespace yip {
+class HotkeyManager;
+}
 
 namespace winrt::yip::implementation {
 struct MainWindow : MainWindowT<MainWindow> {
@@ -20,6 +23,8 @@ struct MainWindow : MainWindowT<MainWindow> {
                         winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     winrt::fire_and_forget OnOpenSettings(winrt::Windows::Foundation::IInspectable const& sender,
                                           winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+    winrt::fire_and_forget OnOpenProcess(winrt::Windows::Foundation::IInspectable const& sender,
+                                         winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     void OnRefreshList(winrt::Windows::Foundation::IInspectable const& sender,
                        winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     void OnRecordingClicked(winrt::Windows::Foundation::IInspectable const& sender,
@@ -29,6 +34,7 @@ private:
     winrt::yip::viewmodels::MainViewModel m_viewModel{nullptr};
     winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_pollTimer{nullptr};
     std::unique_ptr<::yip::interop::DeviceWatcher> m_deviceWatcher;
+    std::unique_ptr<::yip::HotkeyManager> m_hotkey;
     bool m_focused{true};
 
     void StartPolling();

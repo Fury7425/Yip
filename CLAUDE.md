@@ -105,10 +105,10 @@ Output binary: `build/release/yip-app/Release/yip-app.exe` (self-contained, no W
 ## Milestones
 
 - **M1–M3** ✅ — Rust FFI skeleton, WASAPI capture + WAV writer, MainWindow + device picker + start/stop.
-- **M4** ⏳ — Recording indicator window (`IndicatorWindow.xaml` + `IndicatorPersistence` scaffolded; behavior pending).
-- **M5** ⏳ — VST3 SDK wire-up in `vst-host/`. Sign Steinberg developer agreement, drop SDK under `vst-host/third_party/` (gitignored), implement `yip_vst_load / unload / render`.
-- **M6** ⏳ — Plugin chain UI + offline render pipeline (WAV in → VST chain → WAV out, progress callback).
-- **M7** ⏳ — Polish: clippy pedantic exemption sweep, clang-format gate flip to required, ARM64 CI matrix, installer.
+- **M4** ✅ — Recording indicator pill (Composition state machine, GPU meter, dock/snap, click-through, markers sidecar; idle/armed hidden by product decision).
+- **M5** ✅ — VST3 host C ABI (`yip_vst_load / unload / param_count / param_at / render / last_error`). SDK-gated via `YIP_HAVE_VST3_SDK`; CMake auto-detects `vst-host/third_party/vst3sdk/`. Without SDK: synthetic params + float32-WAV passthrough render so the pipeline runs. **Real Steinberg processing still TODO** — drop SDK + implement `load_with_sdk / unload_with_sdk / process_chain_with_sdk`.
+- **M6** ✅ — Process dialog: pick recording → add `.vst3` chain → edit params as native sliders → offline render on bg thread w/ progress. `VstInterop` wraps the C ABI.
+- **M7** ⏳ — Global start/stop hotkey done (`HotkeyManager`, Ctrl+Alt+R, persisted). Remaining: hotkey config UI, idle-CPU 0% (replace 5 Hz indicator poll w/ FFI state callback), clippy sweep, clang-format gate flip, ARM64 CI, installer, on-device WPR profiling.
 
 TODO/FIXME in code must reference one of these boxes or be removed.
 
