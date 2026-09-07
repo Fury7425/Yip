@@ -81,6 +81,7 @@
                 Background="{x:Bind ViewModel.RecordButtonBrush, Mode=OneWay}"
                 Foreground="White"
                 IsEnabled="{x:Bind ViewModel.CanRecord, Mode=OneWay}"
+                ToolTipService.ToolTip="{x:Bind ViewModel.HotkeyLabel, Mode=OneWay}"
                 AutomationProperties.Name="Record" />
         </Grid>
 

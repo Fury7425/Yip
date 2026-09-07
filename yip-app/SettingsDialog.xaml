@@ -35,7 +35,7 @@
                 <ComboBoxItem Content="96000 Hz" Tag="96000" />
             </ComboBox>
             <TextBlock FontSize="11" Opacity="0.55"
-                       Text="Capture follows the device mix format; this rate is used as a target if WASAPI resampling is enabled." />
+                       Text="WASAPI resamples from the device mix format when this differs. Falls back to the device rate if the endpoint refuses it." />
         </StackPanel>
 
         <StackPanel Spacing="6">
@@ -44,6 +44,25 @@
                 <ComboBoxItem Content="Mono"   Tag="1" />
                 <ComboBoxItem Content="Stereo" Tag="2" />
             </ComboBox>
+        </StackPanel>
+
+        <StackPanel Spacing="6">
+            <TextBlock Text="Global record hotkey" FontWeight="SemiBold" Opacity="0.8" />
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="HotkeyBox"
+                         IsReadOnly="True"
+                         IsSpellCheckEnabled="False"
+                         PreviewKeyDown="OnHotkeyKeyDown"
+                         PlaceholderText="Click here, then press the combo"
+                         AutomationProperties.Name="Global record hotkey" />
+                <Button Grid.Column="1" Click="OnResetHotkey" Content="Reset" />
+            </Grid>
+            <TextBlock x:Name="HotkeyHint" FontSize="11" Opacity="0.55"
+                       Text="Needs at least one of Ctrl, Alt, Shift or Win. Starts and stops recording while Yip is in the background." />
         </StackPanel>
 
         <StackPanel Spacing="6">

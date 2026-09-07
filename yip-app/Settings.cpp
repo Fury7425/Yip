@@ -103,7 +103,6 @@ bool Settings::Save() const
     obj.SetNamedValue(L"hotkey_vk", wdj::JsonValue::CreateNumberValue(static_cast<double>(hotkey_vk)));
 
     const auto path = SettingsPath();
-    const auto tmp = path;
     std::error_code ec;
     fs::create_directories(path.parent_path(), ec);
 

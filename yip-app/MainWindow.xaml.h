@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MainWindow.xaml.g.h"
+#include "RecordingStateBus.h"
 #include "viewmodels/MainViewModel.h"
 
 #include <memory>
@@ -32,13 +33,18 @@ struct MainWindow : MainWindowT<MainWindow> {
 
 private:
     winrt::yip::viewmodels::MainViewModel m_viewModel{nullptr};
-    winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_pollTimer{nullptr};
+    winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_meterTimer{nullptr};
     std::unique_ptr<::yip::interop::DeviceWatcher> m_deviceWatcher;
     std::unique_ptr<::yip::HotkeyManager> m_hotkey;
+    ::yip::RecordingStateBus::Token m_stateToken{0};
+    HWND m_hwnd{nullptr};
     bool m_focused{true};
 
-    void StartPolling();
-    void StopPolling();
+    // Meter polling only runs while capture is live — see OnRecordingStateChanged.
+    void StartMeterPolling();
+    void StopMeterPolling();
+    void OnRecordingStateChanged(bool recording);
+    void ApplyHotkeyFromSettings();
     void OnActivated(winrt::Windows::Foundation::IInspectable const& sender,
                      winrt::Microsoft::UI::Xaml::WindowActivatedEventArgs const& args);
 };

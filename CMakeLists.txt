@@ -42,7 +42,19 @@ find_program(CARGO_EXE cargo REQUIRED
 set(AUDIO_CORE_DIR ${CMAKE_SOURCE_DIR}/audio-core)
 set(AUDIO_CORE_TARGET_DIR ${CMAKE_BINARY_DIR}/cargo-target)
 set(AUDIO_CORE_PROFILE_DIR $<IF:$<CONFIG:Debug>,debug,release>)
-set(AUDIO_CORE_LIB ${AUDIO_CORE_TARGET_DIR}/${AUDIO_CORE_PROFILE_DIR}/audio_core.lib)
+
+# Always build with an explicit --target so the ARM64 preset cross-compiles
+# instead of silently producing an x64 .lib that fails to link. An explicit
+# --target also nests the output under the triple, so the path below must
+# include it for both platforms.
+if(YIP_PLATFORM STREQUAL "ARM64")
+    set(RUST_TARGET_TRIPLE "aarch64-pc-windows-msvc")
+else()
+    set(RUST_TARGET_TRIPLE "x86_64-pc-windows-msvc")
+endif()
+
+set(AUDIO_CORE_LIB
+    ${AUDIO_CORE_TARGET_DIR}/${RUST_TARGET_TRIPLE}/${AUDIO_CORE_PROFILE_DIR}/audio_core.lib)
 set(AUDIO_CORE_HEADER ${AUDIO_CORE_DIR}/include/audio_core.h)
 
 set(CARGO_PROFILE_FLAG $<IF:$<CONFIG:Debug>,--profile=dev,--release>)
@@ -50,10 +62,11 @@ set(CARGO_PROFILE_FLAG $<IF:$<CONFIG:Debug>,--profile=dev,--release>)
 add_custom_target(audio_core_build ALL
     COMMAND ${CARGO_EXE} build ${CARGO_PROFILE_FLAG}
             --manifest-path "${AUDIO_CORE_DIR}/Cargo.toml"
+            --target ${RUST_TARGET_TRIPLE}
             --target-dir "${AUDIO_CORE_TARGET_DIR}"
     BYPRODUCTS ${AUDIO_CORE_LIB} ${AUDIO_CORE_HEADER}
     WORKING_DIRECTORY ${AUDIO_CORE_DIR}
-    COMMENT "cargo build audio-core"
+    COMMENT "cargo build audio-core (${RUST_TARGET_TRIPLE})"
     VERBATIM
 )
 
@@ -127,6 +140,7 @@ message(STATUS "Yip build configured")
 message(STATUS "  generator       : ${CMAKE_GENERATOR}")
 message(STATUS "  platform        : ${YIP_PLATFORM}")
 message(STATUS "  cargo           : ${CARGO_EXE}")
+message(STATUS "  rust target     : ${RUST_TARGET_TRIPLE}")
 message(STATUS "  msbuild         : ${MSBUILD_EXE}")
 message(STATUS "  audio_core lib  : ${AUDIO_CORE_LIB}")
 message(STATUS "  yip-app proj    : ${YIP_APP_PROJ}")

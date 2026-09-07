@@ -7,7 +7,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 use std::cell::RefCell;
-use std::ffi::{CStr, CString, c_char};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::panic::catch_unwind;
 use std::ptr;
 use std::sync::OnceLock;
@@ -95,6 +95,68 @@ fn singleton() -> &'static parking_lot::Mutex<Option<Recorder>> {
     REC.get_or_init(|| parking_lot::Mutex::new(None))
 }
 
+/// Callback invoked whenever the recording state flips. `recording` is 1 while
+/// a capture session is live, 0 otherwise. Delivered on the thread that called
+/// [`rec_start`] / [`rec_stop`], **after** the internal lock is released, so the
+/// callback may re-enter any `rec_*` getter.
+pub type RecStateCallback = Option<extern "C" fn(recording: u8, user: *mut c_void)>;
+
+/// Callback slot plus its opaque user pointer.
+struct StateSink {
+    cb: RecStateCallback,
+    user: *mut c_void,
+}
+
+// SAFETY: `user` is an opaque token the host owns; audio-core only hands it
+// back verbatim. The slot itself is guarded by a mutex, so concurrent access
+// is serialised.
+unsafe impl Send for StateSink {}
+
+fn state_sink() -> &'static parking_lot::Mutex<StateSink> {
+    static SINK: OnceLock<parking_lot::Mutex<StateSink>> = OnceLock::new();
+    SINK.get_or_init(|| {
+        parking_lot::Mutex::new(StateSink {
+            cb: None,
+            user: ptr::null_mut(),
+        })
+    })
+}
+
+/// Last state handed to the host. Lets `notify_state` stay edge-triggered so a
+/// redundant `rec_stop` does not spam the UI.
+static LAST_NOTIFIED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Copy the slot out, drop the guard, then call. Never invoke a host callback
+/// while holding a lock the host might re-enter.
+fn notify_state(recording: bool) {
+    if LAST_NOTIFIED.swap(recording, std::sync::atomic::Ordering::AcqRel) == recording {
+        return;
+    }
+    let (cb, user) = {
+        let guard = state_sink().lock();
+        (guard.cb, guard.user)
+    };
+    if let Some(f) = cb {
+        f(u8::from(recording), user);
+    }
+}
+
+/// Install (or clear, with a null `cb`) the recording-state callback.
+///
+/// Replaces any previous callback. The host must clear it before the callback
+/// target is destroyed. Calling this does not fire the callback — read the
+/// current state with [`rec_is_recording`].
+///
+/// # Safety
+/// `user` is stored and handed back verbatim; it must stay valid until the
+/// callback is cleared or replaced.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rec_set_state_callback(cb: RecStateCallback, user: *mut c_void) {
+    let mut guard = state_sink().lock();
+    guard.cb = cb;
+    guard.user = user;
+}
+
 fn run<F>(f: F) -> RecStatus
 where
     F: FnOnce() -> Result<(), YipError> + std::panic::UnwindSafe,
@@ -141,7 +203,7 @@ pub unsafe extern "C" fn rec_start(
     path: *const c_char,
     config: RecConfig,
 ) -> RecStatus {
-    run(|| {
+    let status = run(|| {
         if device_id.is_null() || path.is_null() {
             return Err(YipError::InvalidArgument("device_id or path was null"));
         }
@@ -161,19 +223,26 @@ pub unsafe extern "C" fn rec_start(
         let rec = Recorder::start(dev, std::path::Path::new(p), config)?;
         *guard = Some(rec);
         Ok(())
-    })
+    });
+    if status == RecStatus::Ok {
+        notify_state(true);
+    }
+    status
 }
 
 /// Stop the active recording. Flushes writer + closes file. Idempotent.
 #[unsafe(no_mangle)]
 pub extern "C" fn rec_stop() -> RecStatus {
-    run(|| {
+    let status = run(|| {
         let mut guard = singleton().lock();
         if let Some(rec) = guard.take() {
             rec.stop()?;
         }
         Ok(())
-    })
+    });
+    // The session is gone either way — a failed flush still ends capture.
+    notify_state(false);
+    status
 }
 
 /// 0.0..=1.0 peak level since last call. Returns 0.0 if not recording.
@@ -243,12 +312,12 @@ pub unsafe extern "C" fn rec_list_devices(
         }
 
         let devs = list_devices()?;
-        let mut boxed: Vec<DeviceInfo> = devs.iter().map(device_to_info).collect();
-        boxed.shrink_to_fit();
-
-        let len = boxed.len();
-        let ptr = boxed.as_mut_ptr();
-        std::mem::forget(boxed);
+        // `into_boxed_slice` guarantees capacity == len, so `rec_free_devices`
+        // can reconstruct the exact same allocation. A bare `Vec` + `forget`
+        // would leave the capacity unknown and the free size wrong.
+        let slice: Box<[DeviceInfo]> = devs.iter().map(device_to_info).collect();
+        let len = slice.len();
+        let ptr = Box::into_raw(slice).cast::<DeviceInfo>();
 
         // SAFETY: caller guarantees out + out_len are valid writable pointers.
         unsafe {

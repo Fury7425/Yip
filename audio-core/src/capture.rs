@@ -60,7 +60,7 @@ unsafe impl Send for SendHandle {}
 unsafe impl Sync for SendHandle {}
 
 impl Recorder {
-    pub fn start(device_id: &str, path: &Path, _cfg: RecConfig) -> Result<Self, YipError> {
+    pub fn start(device_id: &str, path: &Path, cfg: RecConfig) -> Result<Self, YipError> {
         let meter = SharedMeter::new();
         let stop = Arc::new(AtomicBool::new(false));
         let writer_stop = Arc::new(AtomicBool::new(false));
@@ -86,6 +86,7 @@ impl Recorder {
                 capture_loop(
                     &device_id_owned,
                     &path_owned,
+                    cfg,
                     &mut producer,
                     &meter_for_capture,
                     &stop_for_capture,
@@ -188,6 +189,7 @@ impl Drop for Recorder {
 fn capture_loop(
     device_id: &str,
     path: &Path,
+    cfg: RecConfig,
     producer: &mut rtrb::Producer<f32>,
     meter: &Arc<SharedMeter>,
     stop: &Arc<AtomicBool>,
@@ -218,12 +220,7 @@ fn capture_loop(
     // Negotiate mix format (always f32 shared since Vista).
     // SAFETY: live client; returns CoTaskMem-allocated pointer.
     let fmt_ptr = unsafe { client.GetMixFormat()? };
-    let (sample_rate, channels) = parse_format(fmt_ptr)?;
-    let writer_cfg = WriterConfig {
-        path: path.to_path_buf(),
-        sample_rate,
-        channels,
-    };
+    let (mix_rate, mix_channels) = parse_format(fmt_ptr)?;
 
     // Audio event (auto-reset, nonsignaled).
     // SAFETY: standard event creation.
@@ -233,28 +230,83 @@ fn capture_loop(
     if is_render {
         stream_flags |= AUDCLNT_STREAMFLAGS_LOOPBACK;
     }
-    // Let WASAPI rate-convert if the engine differs from device — keeps us
-    // glitch-free at the cost of ~0.5% CPU. Required for shared loopback.
+    // Let WASAPI rate-convert if the requested format differs from the engine
+    // mix format — costs ~0.5% CPU and is what makes the settings dialog's
+    // sample-rate / channel-count picker mean anything in shared mode.
     stream_flags |= AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM | AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY;
 
     // 10 ms buffer = 480 frames at 48 kHz. Hardware aligns up.
     let buffer_100ns: i64 = 10_0000;
 
-    // SAFETY: client live; fmt_ptr live; flags valid.
-    let init_res = unsafe {
-        client.Initialize(
-            AUDCLNT_SHAREMODE_SHARED,
-            stream_flags,
-            buffer_100ns,
-            0,
-            fmt_ptr,
-            None,
-        )
+    // A 0 in either field means "follow the device".
+    let want_rate = if cfg.sample_rate == 0 {
+        mix_rate
+    } else {
+        cfg.sample_rate
     };
-    // Free the format buffer regardless of init result.
-    // SAFETY: pointer returned by GetMixFormat must be freed with CoTaskMemFree.
-    unsafe { CoTaskMemFree(Some(fmt_ptr.cast())) };
-    init_res?;
+    let want_channels = if cfg.channels == 0 {
+        mix_channels
+    } else {
+        cfg.channels
+    };
+
+    // First choice: the caller's format. WASAPI resamples/remixes behind
+    // AUTOCONVERTPCM. A device that refuses it leaves the client unusable, so
+    // fall back on a *fresh* client at the engine mix format.
+    let mut client = client;
+    let mut sample_rate = mix_rate;
+    let mut channels = mix_channels;
+    let mut initialized = false;
+
+    if want_rate != mix_rate || want_channels != mix_channels {
+        let want = float_wfx(want_rate, want_channels);
+        // SAFETY: client live; `want` outlives the call; flags valid.
+        let res = unsafe {
+            client.Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                stream_flags,
+                buffer_100ns,
+                0,
+                std::ptr::addr_of!(want),
+                None,
+            )
+        };
+        if res.is_ok() {
+            sample_rate = want_rate;
+            channels = want_channels;
+            initialized = true;
+        } else {
+            // Initialize consumed this client even on failure. Get a new one.
+            // SAFETY: device is still live.
+            client = unsafe { device.Activate::<IAudioClient>(CLSCTX_ALL, None)? };
+        }
+    }
+
+    if !initialized {
+        // SAFETY: client live; fmt_ptr live; flags valid.
+        let init_res = unsafe {
+            client.Initialize(
+                AUDCLNT_SHAREMODE_SHARED,
+                stream_flags,
+                buffer_100ns,
+                0,
+                fmt_ptr,
+                None,
+            )
+        };
+        // SAFETY: pointer from GetMixFormat must be freed with CoTaskMemFree.
+        unsafe { CoTaskMemFree(Some(fmt_ptr.cast())) };
+        init_res?;
+    } else {
+        // SAFETY: same contract as above.
+        unsafe { CoTaskMemFree(Some(fmt_ptr.cast())) };
+    }
+
+    let writer_cfg = WriterConfig {
+        path: path.to_path_buf(),
+        sample_rate,
+        channels,
+    };
 
     // SAFETY: client live; handle live.
     unsafe { client.SetEventHandle(audio_event)? };
@@ -393,6 +445,21 @@ fn capture_loop(
 
     drop(com_guard);
     Ok(())
+}
+
+/// Build a plain float32 `WAVEFORMATEX`. Valid without the EXTENSIBLE tail for
+/// mono and stereo, which is all the settings dialog offers.
+fn float_wfx(sample_rate: u32, channels: u16) -> WAVEFORMATEX {
+    let block_align = channels.saturating_mul(4);
+    WAVEFORMATEX {
+        wFormatTag: WAVE_FORMAT_IEEE_FLOAT as u16,
+        nChannels: channels,
+        nSamplesPerSec: sample_rate,
+        nAvgBytesPerSec: sample_rate.saturating_mul(u32::from(block_align)),
+        nBlockAlign: block_align,
+        wBitsPerSample: 32,
+        cbSize: 0,
+    }
 }
 
 fn parse_format(fmt_ptr: *const WAVEFORMATEX) -> Result<(u32, u16), YipError> {

@@ -150,6 +150,8 @@
     <ClCompile Include="IndicatorPersistence.cpp" />
     <ClCompile Include="Markers.cpp" />
     <ClCompile Include="HotkeyManager.cpp" />
+    <ClCompile Include="RecordingStateBus.cpp" />
+    <ClCompile Include="WavProbe.cpp" />
   </ItemGroup>
 
   <ItemGroup>
@@ -177,6 +179,8 @@
     <ClInclude Include="IndicatorPersistence.h" />
     <ClInclude Include="Markers.h" />
     <ClInclude Include="HotkeyManager.h" />
+    <ClInclude Include="RecordingStateBus.h" />
+    <ClInclude Include="WavProbe.h" />
   </ItemGroup>
 
   <ItemGroup>

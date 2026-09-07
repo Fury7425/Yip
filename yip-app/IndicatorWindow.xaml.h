@@ -3,6 +3,7 @@
 #include "IndicatorWindow.g.h"
 #include "IndicatorState.h"
 #include "IndicatorPersistence.h"
+#include "RecordingStateBus.h"
 
 #include <array>
 #include <chrono>
@@ -45,9 +46,10 @@ private:
     void StopMeterAnimations();
 
     // ----- State machine -----
-    void SyncFromAudioCore(); // polled by m_pollTimer
+    // Driven by RecordingStateBus, not a timer: an idle pill costs nothing.
+    void OnRecordingStateChanged(bool recording);
     void TransitionTo(::yip::IndicatorState s, bool animate = true);
-    void AnimatePillToState(::yip::IndicatorState s);
+    void AnimatePillToState(::yip::IndicatorState s, bool animate);
 
     // ----- Edge dock / monitor restore -----
     void RestoreFromPersistence();
@@ -68,6 +70,7 @@ private:
     ::yip::IndicatorState m_state{::yip::IndicatorState::Idle};
     ::yip::IndicatorState m_baseState{::yip::IndicatorState::Idle}; // state before expansion
     ::yip::IndicatorPersistence m_persisted{};
+    ::yip::RecordingStateBus::Token m_stateToken{0};
 
     // Composition
     winrt::Microsoft::UI::Composition::Compositor m_compositor{nullptr};
@@ -81,8 +84,9 @@ private:
     winrt::Microsoft::UI::Composition::CompositionColorBrush m_barLiveBrush{nullptr};
     winrt::Microsoft::UI::Composition::CompositionEasingFunction m_ease{nullptr};
 
-    // Timers
-    winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_pollTimer{nullptr};
+    // Timers. m_savingTimer is one-shot: it only exists to hold the Saving
+    // frame on screen briefly after capture ends.
+    winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_savingTimer{nullptr};
     winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_meterTimer{nullptr};
     winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_collapseTimer{nullptr};
 
@@ -92,8 +96,9 @@ private:
     winrt::Windows::Foundation::Point m_windowOriginAtDragStart{};
     bool m_movedDuringPress{false};
 
-    // Saving-state debouncer
-    std::chrono::steady_clock::time_point m_lastRecordingTrueTs{};
+    // Last state delivered by the bus. Cheaper than asking audio-core again
+    // from inside a transition.
+    bool m_recording{false};
 };
 } // namespace winrt::yip::implementation
 

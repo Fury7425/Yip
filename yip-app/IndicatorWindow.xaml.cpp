@@ -43,12 +43,11 @@ constexpr int kResizeMs = 220;
 constexpr int kMeterMs = 33;
 constexpr int kSnapPx = 20;
 constexpr int kAutoCollapseMs = 3000;
-constexpr int kPollMs = 200; // SyncFromAudioCore cadence
 constexpr int kBarCount = 4;
 constexpr float kBarWidth = 3.0f;
 constexpr float kBarGap = 4.0f;
 constexpr float kBarMaxHeight = 18.0f;
-constexpr float kSavingDebounceMs = 350.0f;
+constexpr int kSavingHoldMs = 350; // how long the Saving frame stays up
 
 struct StateGeom {
     float w;
@@ -129,15 +128,20 @@ IndicatorWindow::IndicatorWindow()
     TransitionTo(::yip::IndicatorState::Idle, /*animate*/ false);
     HideWindow();
 
-    // Periodic sync to audio-core (5Hz — low power).
     auto dq = muxd::DispatcherQueue::GetForCurrentThread();
-    m_pollTimer = dq.CreateTimer();
-    m_pollTimer.Interval(std::chrono::milliseconds(kPollMs));
-    m_pollTimer.IsRepeating(true);
-    m_pollTimer.Tick([weak = get_weak()](auto&&, auto&&) {
-        if (auto self = weak.get()) self->SyncFromAudioCore();
+
+    // One-shot: holds the Saving frame for a beat after capture ends, then
+    // drops to Idle. Replaces the old 5 Hz sync poll, which ran forever.
+    m_savingTimer = dq.CreateTimer();
+    m_savingTimer.Interval(std::chrono::milliseconds(kSavingHoldMs));
+    m_savingTimer.IsRepeating(false);
+    m_savingTimer.Tick([weak = get_weak()](auto&&, auto&&) {
+        if (auto self = weak.get()) {
+            if (!self->m_recording && self->m_state == ::yip::IndicatorState::Saving) {
+                self->TransitionTo(::yip::IndicatorState::Idle, true);
+            }
+        }
     });
-    m_pollTimer.Start();
 
     // Meter polling timer — created stopped, started only while Recording.
     m_meterTimer = dq.CreateTimer();
@@ -157,11 +161,22 @@ IndicatorWindow::IndicatorWindow()
             }
         }
     });
+
+    // Subscribe last: the first callback can transition straight into
+    // Recording, which touches every timer created above.
+    m_stateToken = ::yip::RecordingStateBus::Subscribe(dq, [weak = get_weak()](bool recording) {
+        if (auto self = weak.get()) self->OnRecordingStateChanged(recording);
+    });
+    if (::yip::RecordingStateBus::IsRecording()) {
+        OnRecordingStateChanged(true);
+    }
 }
 
 IndicatorWindow::~IndicatorWindow()
 {
-    if (m_pollTimer) m_pollTimer.Stop();
+    ::yip::RecordingStateBus::Unsubscribe(m_stateToken);
+    m_stateToken = 0;
+    if (m_savingTimer) m_savingTimer.Stop();
     if (m_meterTimer) m_meterTimer.Stop();
     if (m_collapseTimer) m_collapseTimer.Stop();
     m_persisted.last_expanded = (m_state == ::yip::IndicatorState::Expanded);
@@ -330,36 +345,31 @@ void IndicatorWindow::StopMeterAnimations()
 
 // =========================================================== State machine
 
-void IndicatorWindow::SyncFromAudioCore()
+void IndicatorWindow::OnRecordingStateChanged(bool recording)
 {
-    const bool recording = ::rec_is_recording() != 0;
-    const auto now = std::chrono::steady_clock::now();
-    if (recording) m_lastRecordingTrueTs = now;
+    if (m_recording == recording) return;
+    m_recording = recording;
 
-    // Expanded is a user-driven overlay. Honor the user's expansion
-    // until either (a) recording stops (drop into Saving so the pill
-    // can fade out cleanly) or (b) auto-collapse fires.
-    if (m_state == ::yip::IndicatorState::Expanded) {
-        if (!recording) {
-            TransitionTo(::yip::IndicatorState::Saving, true);
+    if (recording) {
+        if (m_savingTimer) m_savingTimer.Stop();
+        // Expanded is a user-driven overlay; capture starting under it should
+        // not yank the controls away. Just make sure the meter is live.
+        if (m_state == ::yip::IndicatorState::Expanded) {
+            if (m_meterTimer && !m_meterTimer.IsRunning()) m_meterTimer.Start();
             return;
         }
-        if (!m_meterTimer.IsRunning()) m_meterTimer.Start();
+        TransitionTo(::yip::IndicatorState::Recording, true);
         return;
     }
 
-    if (recording) {
-        if (m_state != ::yip::IndicatorState::Recording) {
-            TransitionTo(::yip::IndicatorState::Recording, true);
-        }
-    } else if (m_state == ::yip::IndicatorState::Recording) {
-        // Brief Saving frame before settling to Idle.
+    // Capture ended: hold a Saving frame so the pill fades out instead of
+    // vanishing, then the one-shot timer drops it to Idle.
+    if (m_state == ::yip::IndicatorState::Recording || m_state == ::yip::IndicatorState::Expanded) {
         TransitionTo(::yip::IndicatorState::Saving, true);
-    } else if (m_state == ::yip::IndicatorState::Saving) {
-        const auto since = std::chrono::duration<float, std::milli>(now - m_lastRecordingTrueTs).count();
-        if (since >= kSavingDebounceMs) {
-            TransitionTo(::yip::IndicatorState::Idle, true);
-        }
+    }
+    if (m_savingTimer) {
+        m_savingTimer.Stop();
+        m_savingTimer.Start();
     }
 }
 
@@ -388,16 +398,17 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
 
     MeterHost().Opacity(wantMeter ? 1.0 : 0.0);
 
-    AnimatePillToState(s);
+    AnimatePillToState(s, animate);
     UpdateDotForState(s);
 
     // Meter timer runs only while a meter is visible AND audio is live.
-    const bool recording = ::rec_is_recording() != 0;
-    const bool meterShouldRun = wantMeter && recording;
-    if (meterShouldRun && !m_meterTimer.IsRunning()) m_meterTimer.Start();
-    if (!meterShouldRun && m_meterTimer.IsRunning()) {
-        m_meterTimer.Stop();
-        StopMeterAnimations();
+    const bool meterShouldRun = wantMeter && m_recording;
+    if (m_meterTimer) {
+        if (meterShouldRun && !m_meterTimer.IsRunning()) m_meterTimer.Start();
+        if (!meterShouldRun && m_meterTimer.IsRunning()) {
+            m_meterTimer.Stop();
+            StopMeterAnimations();
+        }
     }
 
     // Auto-collapse after 3s when expanded.
@@ -406,15 +417,17 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
     else
         StopAutoCollapseTimer();
 
-    if (!animate) {
-        // Force-finalize via 0-duration animation so resting state lands.
-    }
 }
 
-void IndicatorWindow::AnimatePillToState(::yip::IndicatorState s)
+void IndicatorWindow::AnimatePillToState(::yip::IndicatorState s, bool animate)
 {
     if (!m_clipGeo) return;
     const auto g = GeometryFor(s);
+
+    // `animate == false` means "land on the resting values now" — used for the
+    // initial state, which must not visibly slide in on launch.
+    const auto resizeMs = std::chrono::milliseconds(animate ? kResizeMs : 0);
+    const auto fadeMs = std::chrono::milliseconds(animate ? kFadeMs : 0);
 
     // Center the clip rect inside the window.
     const float offX = (static_cast<float>(kWindowW) - g.w) * 0.5f;
@@ -422,19 +435,19 @@ void IndicatorWindow::AnimatePillToState(::yip::IndicatorState s)
 
     auto sizeAnim = m_compositor.CreateVector2KeyFrameAnimation();
     sizeAnim.InsertKeyFrame(1.0f, {g.w, g.h}, m_ease);
-    sizeAnim.Duration(std::chrono::milliseconds(kResizeMs));
+    sizeAnim.Duration(resizeMs);
     m_clipGeo.StartAnimation(L"Size", sizeAnim);
 
     auto offAnim = m_compositor.CreateVector2KeyFrameAnimation();
     offAnim.InsertKeyFrame(1.0f, {offX, offY}, m_ease);
-    offAnim.Duration(std::chrono::milliseconds(kResizeMs));
+    offAnim.Duration(resizeMs);
     m_clipGeo.StartAnimation(L"Offset", offAnim);
 
     // Pill opacity via the Border's Visual.
     auto pillVisual = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
     auto fade = m_compositor.CreateScalarKeyFrameAnimation();
     fade.InsertKeyFrame(1.0f, g.opacity, m_ease);
-    fade.Duration(std::chrono::milliseconds(kFadeMs));
+    fade.Duration(fadeMs);
     pillVisual.StartAnimation(L"Opacity", fade);
 }
 
@@ -524,8 +537,8 @@ void IndicatorWindow::OnStopClicked(winrt::Windows::Foundation::IInspectable con
                                     mux::RoutedEventArgs const& /*args*/)
 {
     (void)::rec_stop();
-    // Don't transition here — SyncFromAudioCore will pull through Saving
-    // → Idle automatically on the next poll tick.
+    // No transition here: rec_stop fires the audio-core state callback, and
+    // OnRecordingStateChanged pulls the pill through Saving → Idle.
     ResetAutoCollapseTimer();
 }
 

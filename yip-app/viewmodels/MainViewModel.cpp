@@ -5,6 +5,8 @@
 #include "viewmodels/RecordingEntry.g.cpp"
 
 #include "AudioCoreInterop.h"
+#include "HotkeyManager.h"
+#include "WavProbe.h"
 
 #include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Windows.System.h>
@@ -131,11 +133,14 @@ void MainViewModel::RefreshRecordings()
         Row r;
         r.path = p;
         r.modified = fs::last_write_time(p, ec);
-        // Probe duration cheaply: size / (rate*channels*4) — accurate
-        // only after writer finalizes. Best-effort.
-        const auto sz = fs::file_size(p, ec);
-        r.duration =
-            std::chrono::milliseconds(sz > 44 ? (static_cast<int64_t>(sz - 44) * 1000) / (48000 * 2 * 4) : 0);
+        // Read the real fmt/data chunks. Deriving duration from file size and
+        // an assumed 48 kHz stereo float32 is wrong for every other format,
+        // and the format is now user-selectable.
+        if (const auto info = ::yip::ProbeWav(p)) {
+            r.duration = info->Duration();
+        } else {
+            r.duration = std::chrono::milliseconds{0};
+        }
         rows.push_back(std::move(r));
     }
 
@@ -194,7 +199,9 @@ void MainViewModel::ToggleRecording()
     const auto path = NextRecordingPath();
 
     const auto idUtf8 = winrt::to_string(dev.Id());
-    const auto pathUtf8 = path.string();
+    // Not path.string(): that encodes with the ANSI codepage and hands
+    // audio-core bytes it rejects as invalid UTF-8 for any non-ASCII folder.
+    const auto pathUtf8 = ::yip::ToUtf8(path.wstring());
 
     RecConfig cfg{};
     cfg.sample_rate = m_settings.sample_rate;
@@ -224,11 +231,16 @@ void MainViewModel::ToggleRecording()
     Raise(L"RecordButtonBrush");
 }
 
-void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleRate, uint16_t channels)
+void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleRate, uint16_t channels,
+                                  uint32_t hotkeyMods, uint32_t hotkeyVk)
 {
     m_settings.output_folder = std::wstring{folder};
     m_settings.sample_rate = sampleRate;
     m_settings.channels = channels;
+    if (::yip::IsValidHotkey(hotkeyMods, hotkeyVk)) {
+        m_settings.hotkey_mods = hotkeyMods;
+        m_settings.hotkey_vk = hotkeyVk;
+    }
 
     std::error_code ec;
     fs::create_directories(m_settings.output_folder, ec);
@@ -237,8 +249,36 @@ void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleR
     Raise(L"OutputFolder");
     Raise(L"SampleRate");
     Raise(L"Channels");
+    Raise(L"HotkeyMods");
+    Raise(L"HotkeyVk");
+    Raise(L"HotkeyLabel");
     RefreshRecordings();
     SetStatus(L"Settings saved");
+}
+
+winrt::hstring MainViewModel::HotkeyLabel() const
+{
+    return winrt::hstring{::yip::FormatHotkey(m_settings.hotkey_mods, m_settings.hotkey_vk)};
+}
+
+void MainViewModel::SyncRecordingState(bool recording)
+{
+    if (m_isRecording == recording) return;
+    m_isRecording = recording;
+    if (!recording) {
+        m_activeRecordingPath.reset();
+        RefreshRecordings();
+    }
+    Raise(L"IsRecording");
+    Raise(L"RecordButtonText");
+    Raise(L"RecordButtonBrush");
+    Raise(L"CanRecord");
+}
+
+void MainViewModel::ReportHotkeyConflict()
+{
+    SetStatus(winrt::hstring{L"Hotkey " + ::yip::FormatHotkey(m_settings.hotkey_mods, m_settings.hotkey_vk) +
+                             L" is already taken by another app"});
 }
 
 void MainViewModel::RevealRecording(winrt::yip::viewmodels::RecordingEntry const& entry)

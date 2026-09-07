@@ -99,12 +99,19 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     uint32_t SampleRate() const noexcept { return m_settings.sample_rate; }
     uint16_t Channels() const noexcept { return m_settings.channels; }
 
+    uint32_t HotkeyMods() const noexcept { return m_settings.hotkey_mods; }
+    uint32_t HotkeyVk() const noexcept { return m_settings.hotkey_vk; }
+    winrt::hstring HotkeyLabel() const;
+
     void RefreshDevices();
     void RefreshRecordings();
     void PollPeak();
     void ToggleRecording();
-    void ApplySettings(winrt::hstring const& folder, uint32_t sampleRate, uint16_t channels);
+    void ApplySettings(winrt::hstring const& folder, uint32_t sampleRate, uint16_t channels,
+                       uint32_t hotkeyMods, uint32_t hotkeyVk);
     void RevealRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
+    void SyncRecordingState(bool recording);
+    void ReportHotkeyConflict();
 
     winrt::event_token PropertyChanged(
         winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler);

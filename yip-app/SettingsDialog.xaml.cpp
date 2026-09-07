@@ -5,9 +5,13 @@
 #include "SettingsDialog.g.cpp"
 #endif
 
+#include "HotkeyManager.h"
+
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
+#include <winrt/Microsoft.UI.Xaml.Input.h>
 #include <winrt/Windows.Storage.h>
+#include <winrt/Windows.System.h>
 #include <winrt/Windows.Storage.Pickers.h>
 
 #include <shobjidl.h>
@@ -90,6 +94,60 @@ void SettingsDialog::Channels(uint16_t v)
     ApplyToControls();
 }
 
+void SettingsDialog::HotkeyMods(uint32_t v)
+{
+    m_hotkeyMods = v;
+    ApplyHotkeyToControls();
+}
+
+void SettingsDialog::HotkeyVk(uint32_t v)
+{
+    m_hotkeyVk = v;
+    ApplyHotkeyToControls();
+}
+
+void SettingsDialog::ApplyHotkeyToControls()
+{
+    if (HotkeyBox()) {
+        HotkeyBox().Text(winrt::hstring{::yip::FormatHotkey(m_hotkeyMods, m_hotkeyVk)});
+    }
+}
+
+void SettingsDialog::OnHotkeyKeyDown(winrt::Windows::Foundation::IInspectable const& /*sender*/,
+                                     winrt::Microsoft::UI::Xaml::Input::KeyRoutedEventArgs const& args)
+{
+    const auto vk = static_cast<uint32_t>(args.Key());
+
+    // Let the dialog keep its own keys when they arrive unmodified, so the box
+    // never traps the user: Esc still cancels and Tab still moves focus.
+    uint32_t mods = 0;
+    if (::GetKeyState(VK_CONTROL) < 0) mods |= ::yip::kModControl;
+    if (::GetKeyState(VK_MENU) < 0) mods |= ::yip::kModAlt;
+    if (::GetKeyState(VK_SHIFT) < 0) mods |= ::yip::kModShift;
+    if (::GetKeyState(VK_LWIN) < 0 || ::GetKeyState(VK_RWIN) < 0) mods |= ::yip::kModWin;
+
+    if (mods == 0) return;
+
+    // A modifier arriving on its own is the first half of a combo, not a combo.
+    if (!::yip::IsValidHotkey(mods, vk)) {
+        args.Handled(true);
+        return;
+    }
+
+    m_hotkeyMods = mods;
+    m_hotkeyVk = vk;
+    ApplyHotkeyToControls();
+    args.Handled(true);
+}
+
+void SettingsDialog::OnResetHotkey(winrt::Windows::Foundation::IInspectable const& /*sender*/,
+                                   winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
+{
+    m_hotkeyMods = ::yip::kModControl | ::yip::kModAlt;
+    m_hotkeyVk = 0x52; // 'R'
+    ApplyHotkeyToControls();
+}
+
 void SettingsDialog::ApplyToControls()
 {
     if (FolderBox()) {
@@ -118,6 +176,7 @@ void SettingsDialog::ApplyToControls()
     if (ChannelsCombo()) {
         ChannelsCombo().SelectedIndex(m_channels == 1 ? 0 : 1);
     }
+    ApplyHotkeyToControls();
 }
 
 void SettingsDialog::ReadFromControls() const

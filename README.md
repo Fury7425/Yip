@@ -7,7 +7,7 @@ Native Windows audio recorder. Minimalist UI, lock-free WASAPI capture, offline 
 ## Build prerequisites
 
 - Visual Studio 2022 with **Desktop development with C++** + **Windows 11 SDK 10.0.22621+**
-- Rust stable 1.80+ via [rustup](https://rustup.rs) (target `x86_64-pc-windows-msvc`)
+- Rust stable 1.85+ via [rustup](https://rustup.rs) (targets `x86_64-pc-windows-msvc`, plus `aarch64-pc-windows-msvc` for the ARM64 preset)
 - CMake 3.27+
 - Windows App SDK 1.6+ runtime ([download](https://learn.microsoft.com/windows/apps/windows-app-sdk/downloads))
 - vcpkg (manifest mode, configured via `VCPKG_ROOT`)
@@ -19,7 +19,21 @@ cmake --preset release
 cmake --build --preset release
 ```
 
-Output: `build/release/yip-app/yip-app.exe`
+Output: `build/release/yip-app/Release/yip-app.exe`
+
+ARM64 cross-build:
+
+```powershell
+cmake --preset release-arm64
+cmake --build --preset release-arm64
+```
+
+Installer (needs [Inno Setup 6](https://jrsoftware.org/isinfo.php) on PATH, see
+[installer/README.md](installer/README.md)):
+
+```powershell
+iscc /DYipSourceDir=..uildelease\yip-app\Release /DYipVersion=0.1.0 installer\yip.iss
+```
 
 ## Layout
 
@@ -35,7 +49,9 @@ GitHub Actions ([ci.yml](.github/workflows/ci.yml)) runs on every push and PR:
 
 1. **`rust` job** — `cargo fmt --check`, `cargo clippy --all-targets --all-features -D warnings`, `cargo test --release`. Publishes `audio_core.lib` + `audio_core.h` as artifacts.
 2. **`native` job** — depends on `rust`. Runs `cmake --preset release` + `cmake --build --preset release` (which msbuild-restores NuGet, builds `vst-host`, then builds `yip-app.vcxproj`). Publishes `yip-app` as a self-contained artifact (`WindowsAppSDKSelfContained=true`, no runtime install required).
-3. **`format-cpp` job** — `clang-format --dry-run -Werror` against `yip-app/` + `vst-host/`.
+3. **`native-arm64` job** — depends on `rust`. Same build against the `release-arm64` preset, cross-compiled on the x64 runner. Publishes `yip-app-arm64`.
+4. **`installer` job** — depends on `native`. Compiles [installer/yip.iss](installer/yip.iss) with Inno Setup against the `native` artifact. Publishes `yip-setup-x64`.
+5. **`format-cpp` job** — `clang-format --dry-run -Werror` against `yip-app/` + `vst-host/`. Still `continue-on-error` pending the first formatting sweep.
 
 NuGet packages and the cargo target dir are cached between runs.
 

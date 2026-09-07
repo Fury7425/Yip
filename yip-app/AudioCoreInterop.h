@@ -5,6 +5,7 @@
 // when endpoints change.
 
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 

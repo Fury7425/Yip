@@ -33,7 +33,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-          targets: x86_64-pc-windows-msvc
+          targets: x86_64-pc-windows-msvc, aarch64-pc-windows-msvc
 
       - name: Cache cargo registry + git
         uses: actions/cache@v4
@@ -132,6 +132,113 @@ jobs:
           name: yip-app-x64
           path: |
             build/release/yip-app/Release/**/*
+          if-no-files-found: error
+          retention-days: 14
+
+  native-arm64:
+    name: native ARM64 (cross-compile)
+    runs-on: windows-latest
+    needs: rust
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      # CMake passes --target aarch64-pc-windows-msvc for the ARM64 preset, so
+      # the toolchain must carry that std. Without it the preset silently built
+      # an x64 .lib and the link failed.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-pc-windows-msvc
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-arm64-${{ runner.os }}-${{ env.WINDOWS_APP_SDK_VERSION }}-${{ env.CPPWINRT_VERSION }}-${{ hashFiles('yip-app/yip-app.vcxproj') }}
+          restore-keys: nuget-arm64-${{ runner.os }}-
+
+      - name: Cache cargo registry + git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: cmake configure (release ARM64)
+        run: cmake --preset release-arm64
+
+      - name: cmake build
+        run: cmake --build --preset release-arm64
+
+      - name: Upload yip-app (ARM64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: yip-app-arm64
+          path: |
+            build/release-arm64/yip-app/Release/**/*
+          if-no-files-found: error
+          retention-days: 14
+
+  installer:
+    name: installer (Inno Setup, x64)
+    runs-on: windows-latest
+    needs: native
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download yip-app build
+        uses: actions/download-artifact@v4
+        with:
+          name: yip-app-x64
+          path: dist
+
+      - name: Locate or install Inno Setup
+        id: iscc
+        run: |
+          $candidates = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          )
+          $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            choco install innosetup --no-progress --yes
+            $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $iscc) { throw "ISCC.exe not found after install" }
+          "path=$iscc" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Compile installer
+        run: |
+          New-Item -ItemType Directory -Force installer/out | Out-Null
+          & "${{ steps.iscc.outputs.path }}" `
+            "/DYipSourceDir=$((Resolve-Path dist).Path)" `
+            "/DYipVersion=0.1.0" `
+            "/DYipArch=x64" `
+            installer/yip.iss
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: yip-setup-x64
+          path: installer/out/*.exe
           if-no-files-found: error
           retention-days: 14
 

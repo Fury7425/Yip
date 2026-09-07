@@ -12,7 +12,10 @@ publish = false
 opt-level = 3
 lto = "thin"
 codegen-units = 1
-panic = "abort"
+# `unwind`, not `abort`: every FFI entry point wraps `catch_unwind` and reports
+# RecStatus::Panic. Under `abort` that net is dead code and a panic anywhere in
+# audio-core takes the whole recorder down mid-session.
+panic = "unwind"
 strip = "symbols"
 debug = false
 

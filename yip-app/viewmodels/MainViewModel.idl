@@ -43,11 +43,22 @@ namespace yip.viewmodels
         UInt32 SampleRate{ get; };
         UInt16 Channels{ get; };
 
+        // Win32 MOD_* bitmask + virtual-key code for the global record hotkey.
+        UInt32 HotkeyMods{ get; };
+        UInt32 HotkeyVk{ get; };
+        String HotkeyLabel{ get; };
+
         void RefreshDevices();
         void RefreshRecordings();
         void PollPeak();
         void ToggleRecording();
-        void ApplySettings(String folder, UInt32 sampleRate, UInt16 channels);
+        void ApplySettings(String folder, UInt32 sampleRate, UInt16 channels,
+                           UInt32 hotkeyMods, UInt32 hotkeyVk);
         void RevealRecording(RecordingEntry entry);
+
+        // Reconcile the view model with audio-core's own state, for the paths
+        // that end a session without going through ToggleRecording.
+        void SyncRecordingState(Boolean recording);
+        void ReportHotkeyConflict();
     }
 }

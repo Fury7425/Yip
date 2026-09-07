@@ -47,9 +47,10 @@ namespace {
         struct Closer { std::FILE* f; ~Closer() { if (f) std::fclose(f); } } closer{ f };
 
         char tag[4];
-        uint32_t riff_size = 0;
+        uint32_t riff_size = 0;  // read to advance the cursor; chunk walk ignores it
         if (!read_tag(f, tag) || std::memcmp(tag, "RIFF", 4) != 0) { set_last_error(L"render: not RIFF"); return false; }
         if (!read_le(f, riff_size)) return false;
+        (void)riff_size;
         if (!read_tag(f, tag) || std::memcmp(tag, "WAVE", 4) != 0) { set_last_error(L"render: not WAVE"); return false; }
 
         WavFmt fmt{};
@@ -58,15 +59,20 @@ namespace {
             uint32_t chunk_size = 0;
             if (!read_le(f, chunk_size)) break;
             if (std::memcmp(tag, "fmt ", 4) == 0) {
+                if (chunk_size < sizeof(WavFmt)) { set_last_error(L"render: short fmt chunk"); return false; }
                 if (std::fread(&fmt, 1, sizeof(WavFmt), f) != sizeof(WavFmt)) return false;
                 have_fmt = true;
                 if (chunk_size > sizeof(WavFmt)) {
-                    std::fseek(f, static_cast<long>(chunk_size - sizeof(WavFmt)), SEEK_CUR);
+                    if (_fseeki64(f, static_cast<int64_t>(chunk_size - sizeof(WavFmt)), SEEK_CUR) != 0) return false;
                 }
             } else if (std::memcmp(tag, "data", 4) == 0) {
                 if (!have_fmt) { set_last_error(L"render: data before fmt"); return false; }
                 if (fmt.bits_per_sample != 32 || fmt.audio_format != 3) {
                     set_last_error(L"render: only float32 WAV supported");
+                    return false;
+                }
+                if (fmt.channels == 0 || fmt.sample_rate == 0) {
+                    set_last_error(L"render: fmt chunk declares no channels or rate");
                     return false;
                 }
                 out.sample_rate = fmt.sample_rate;
@@ -79,7 +85,13 @@ namespace {
                 }
                 return true;
             } else {
-                std::fseek(f, static_cast<long>(chunk_size), SEEK_CUR);  // skip unknown
+                // Skip unknown chunk. 64-bit seek: a WAV can carry chunks past
+                // the 2 GB that `long` covers on Windows.
+                if (_fseeki64(f, static_cast<int64_t>(chunk_size), SEEK_CUR) != 0) return false;
+            }
+            // RIFF chunks are word-aligned; an odd size carries a pad byte.
+            if ((chunk_size & 1u) != 0) {
+                if (_fseeki64(f, 1, SEEK_CUR) != 0) break;
             }
         }
         set_last_error(L"render: no data chunk");
@@ -95,8 +107,8 @@ namespace {
         struct Closer { std::FILE* f; ~Closer() { if (f) std::fclose(f); } } closer{ f };
 
         const uint32_t data_bytes = static_cast<uint32_t>(in.interleaved.size() * sizeof(float));
-        const uint32_t byte_rate = in.sample_rate * in.channels * sizeof(float);
         const uint16_t block_align = static_cast<uint16_t>(in.channels * sizeof(float));
+        const uint32_t byte_rate = in.sample_rate * static_cast<uint32_t>(block_align);
 
         auto w_tag = [&](const char* t) { std::fwrite(t, 1, 4, f); };
         auto w_u32 = [&](uint32_t v) { std::fwrite(&v, sizeof(v), 1, f); };
@@ -111,8 +123,15 @@ namespace {
         w_u16(block_align);
         w_u16(32);                     // bits/sample
         w_tag("data"); w_u32(data_bytes);
-        if (data_bytes) {
-            std::fwrite(in.interleaved.data(), sizeof(float), in.interleaved.size(), f);
+        if (data_bytes && std::fwrite(in.interleaved.data(), sizeof(float), in.interleaved.size(), f) !=
+                              in.interleaved.size()) {
+            set_last_error(L"render: short data write");
+            return false;
+        }
+        // Catch a full disk: buffered writes only surface their error at flush.
+        if (std::fflush(f) != 0 || std::ferror(f) != 0) {
+            set_last_error(L"render: write failed");
+            return false;
         }
         return true;
     }
