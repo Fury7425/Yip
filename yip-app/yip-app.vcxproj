@@ -239,4 +239,23 @@
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 
+  <!-- module.g.cpp defines the activation-factory entry points that the XAML
+       compiler's XamlTypeInfo.g.cpp calls into. It is generated, so it cannot be
+       a static item; add it once codegen has run, and only if nothing else
+       already put it in the compile list. -->
+  <Target Name="YipEnsureModuleFile" BeforeTargets="ClCompile">
+    <PropertyGroup>
+      <YipModuleFile Condition="'$(CppWinRTGeneratedFilesDir)' != ''">$(CppWinRTGeneratedFilesDir)module.g.cpp</YipModuleFile>
+      <YipModuleFile Condition="'$(YipModuleFile)' == ''">$(ProjectDir)Generated Files\module.g.cpp</YipModuleFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <YipModuleFileAlready Include="@(ClCompile)" Condition="'%(Filename)%(Extension)' == 'module.g.cpp'" />
+      <ClCompile Include="$(YipModuleFile)"
+                 Condition="'@(YipModuleFileAlready)' == '' And Exists('$(YipModuleFile)')">
+        <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      </ClCompile>
+    </ItemGroup>
+    <Message Importance="high" Text="yip: module file = $(YipModuleFile); already listed = '@(YipModuleFileAlready)'" />
+  </Target>
+
 </Project>
