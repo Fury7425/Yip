@@ -93,7 +93,7 @@ void MainViewModel::RefreshDevices()
     int defaultIdx = -1;
     int idx = 0;
     for (auto& d : devices) {
-        auto entry = winrt::make<DeviceEntry>(winrt::hstring{d.id}, winrt::hstring{d.name},
+        auto entry = winrt::make<DeviceEntry>(winrt::to_hstring(d.id), winrt::to_hstring(d.name),
                                               winrt::hstring{d.isCapture ? kMicGlyph : kSpeakerGlyph},
                                               d.isCapture, d.isDefault);
         m_devices.Append(entry);
