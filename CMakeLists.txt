@@ -102,13 +102,16 @@ set(YIP_APP_DIR ${CMAKE_SOURCE_DIR}/yip-app)
 set(YIP_APP_PROJ ${YIP_APP_DIR}/yip-app.vcxproj)
 set(YIP_APP_OUT ${CMAKE_BINARY_DIR}/yip-app)
 
+# Restore and build are separate msbuild invocations: PackageReference restore
+# has to finish before the build reads the generated props. Do not pass
+# NuGetTargetMoniker here — the WinUI 3 project globals already resolve it, and
+# forcing "UAP,Version=v10.0" makes NuGet's restore reject the version string.
 add_custom_target(yip_app ALL
     COMMAND ${MSBUILD_EXE}
         "${YIP_APP_PROJ}"
         -t:Restore
         -p:Configuration=${YIP_CONFIG}
         -p:Platform=${YIP_PLATFORM}
-        "-p:NuGetTargetMoniker=UAP,Version=v10.0"
         -v:minimal
         -nologo
     COMMAND ${MSBUILD_EXE}
@@ -116,7 +119,6 @@ add_custom_target(yip_app ALL
         -t:Build
         -p:Configuration=${YIP_CONFIG}
         -p:Platform=${YIP_PLATFORM}
-        "-p:NuGetTargetMoniker=UAP,Version=v10.0"
         -p:OutDir=${YIP_APP_OUT}/${YIP_CONFIG}/
         -p:IntDir=${YIP_APP_OUT}/${YIP_CONFIG}/obj/
         -p:YipAudioCoreLib=${AUDIO_CORE_LIB}
