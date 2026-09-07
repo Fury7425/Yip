@@ -184,11 +184,11 @@ void SettingsDialog::ReadFromControls() const
     // SettingsDialog is the implementation type; cast away const for the
     // mutable cached fields below.
     auto* self = const_cast<SettingsDialog*>(this);
-    if (FolderBox()) {
-        self->m_outputFolder = FolderBox().Text();
+    if (self->FolderBox()) {
+        self->m_outputFolder = self->FolderBox().Text();
     }
-    if (SampleRateCombo()) {
-        switch (SampleRateCombo().SelectedIndex()) {
+    if (self->SampleRateCombo()) {
+        switch (self->SampleRateCombo().SelectedIndex()) {
             case 0:
                 self->m_sampleRate = 44100;
                 break;
@@ -205,8 +205,8 @@ void SettingsDialog::ReadFromControls() const
                 break;
         }
     }
-    if (ChannelsCombo()) {
-        self->m_channels = (ChannelsCombo().SelectedIndex() == 0) ? 1 : 2;
+    if (self->ChannelsCombo()) {
+        self->m_channels = (self->ChannelsCombo().SelectedIndex() == 0) ? 1 : 2;
     }
 }
 

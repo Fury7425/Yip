@@ -77,7 +77,8 @@ private:
     winrt::Microsoft::UI::Composition::ContainerVisual m_pillRoot{nullptr};
     winrt::Microsoft::UI::Composition::CompositionRoundedRectangleGeometry m_clipGeo{nullptr};
     winrt::Microsoft::UI::Composition::SpriteVisual m_dotVisual{nullptr};
-    std::array<winrt::Microsoft::UI::Composition::SpriteVisual, 4> m_barVisuals{};
+    std::array<winrt::Microsoft::UI::Composition::SpriteVisual, 4> m_barVisuals{
+        nullptr, nullptr, nullptr, nullptr};
     winrt::Microsoft::UI::Composition::CompositionColorBrush m_dotNeutralBrush{nullptr};
     winrt::Microsoft::UI::Composition::CompositionColorBrush m_dotRecordBrush{nullptr};
     winrt::Microsoft::UI::Composition::CompositionColorBrush m_barIdleBrush{nullptr};

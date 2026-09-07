@@ -224,7 +224,7 @@ namespace winrt::yip::implementation
             },
             &err);
 
-        co_await winrt::resume_foreground(dq);
+        co_await winrt::Microsoft::UI::Dispatching::resume_foreground(dq);
 
         if (ok) {
             SetStatus(winrt::hstring{ L"Saved: " + out.filename().wstring() });
