@@ -282,9 +282,13 @@ fn capture_loop(
         }
     }
 
-    if !initialized {
+    // Either the caller's format was refused or it matched the mix format
+    // anyway: fall back to initialising at the engine format.
+    let init_res = if initialized {
+        None
+    } else {
         // SAFETY: client live; fmt_ptr live; flags valid.
-        let init_res = unsafe {
+        Some(unsafe {
             client.Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
                 stream_flags,
@@ -293,13 +297,13 @@ fn capture_loop(
                 fmt_ptr,
                 None,
             )
-        };
-        // SAFETY: pointer from GetMixFormat must be freed with CoTaskMemFree.
-        unsafe { CoTaskMemFree(Some(fmt_ptr.cast())) };
-        init_res?;
-    } else {
-        // SAFETY: same contract as above.
-        unsafe { CoTaskMemFree(Some(fmt_ptr.cast())) };
+        })
+    };
+    // SAFETY: pointer from GetMixFormat must be freed with CoTaskMemFree, on
+    // both paths, and only after Initialize is done reading it.
+    unsafe { CoTaskMemFree(Some(fmt_ptr.cast())) };
+    if let Some(res) = init_res {
+        res?;
     }
 
     let writer_cfg = WriterConfig {
