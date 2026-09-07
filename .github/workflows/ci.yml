@@ -52,13 +52,13 @@ jobs:
           restore-keys: target-${{ runner.os }}-
 
       - name: cargo fmt --check
-        run: cargo fmt --check
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cargo fmt" -Command "cargo fmt --check"'
 
       - name: cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "clippy" -Command "cargo clippy --all-targets --all-features --message-format=short -- -D warnings"'
 
       - name: cargo test
-        run: cargo test --release --no-fail-fast
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cargo test" -Command "cargo test --release --no-fail-fast"'
 
       - name: Generate C header
         run: cargo build --release
@@ -121,10 +121,10 @@ jobs:
           restore-keys: cmake-cargo-${{ runner.os }}-
 
       - name: cmake configure (release x64)
-        run: cmake --preset release
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cmake configure x64" -Command "cmake --preset release" -Tail'
 
       - name: cmake build
-        run: cmake --build --preset release
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cmake build x64" -Command "cmake --build --preset release" -Tail'
 
       - name: Upload yip-app
         uses: actions/upload-artifact@v4
@@ -179,10 +179,10 @@ jobs:
           restore-keys: cargo-${{ runner.os }}-
 
       - name: cmake configure (release ARM64)
-        run: cmake --preset release-arm64
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cmake configure arm64" -Command "cmake --preset release-arm64" -Tail'
 
       - name: cmake build
-        run: cmake --build --preset release-arm64
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cmake build arm64" -Command "cmake --build --preset release-arm64" -Tail'
 
       - name: Upload yip-app (ARM64)
         uses: actions/upload-artifact@v4
@@ -258,12 +258,4 @@ jobs:
 
       - name: Run clang-format --dry-run -Werror
         shell: pwsh
-        run: |
-          $files = Get-ChildItem -Recurse -Include *.cpp,*.h `
-            -Path yip-app, vst-host |
-            Where-Object { $_.FullName -notmatch '\\build\\' -and $_.FullName -notmatch '\\Generated Files\\' }
-          if ($files.Count -eq 0) {
-            Write-Host "No C++ files to format-check."
-            exit 0
-          }
-          & clang-format --dry-run -Werror --style=file $files.FullName
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "clang-format" -Command "& ''${{ github.workspace }}/.github/scripts/format-cpp.ps1''"'
