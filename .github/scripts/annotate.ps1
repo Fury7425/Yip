@@ -20,9 +20,20 @@ param(
 $ErrorActionPreference = 'Continue'
 $env:CARGO_TERM_COLOR = 'never'
 
-$lines = & { Invoke-Expression $Command } 2>&1 | ForEach-Object { $_.ToString() }
+$global:LASTEXITCODE = 0
+$raw = & { Invoke-Expression $Command } 2>&1
 $code = $LASTEXITCODE
 if ($null -eq $code) { $code = 0 }
+
+# A command that never launched leaves LASTEXITCODE at whatever it was, so a
+# missing tool would report a green gate that checked nothing.
+$missing = @($raw | Where-Object {
+        $_ -is [System.Management.Automation.ErrorRecord] -and
+        $_.Exception -is [System.Management.Automation.CommandNotFoundException]
+    }).Count
+if ($missing -gt 0 -and $code -eq 0) { $code = 127 }
+
+$lines = $raw | ForEach-Object { $_.ToString() }
 
 $text = ($lines -join "`n")
 if ($text) { Write-Host $text }

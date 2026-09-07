@@ -54,6 +54,15 @@
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
 
+  <!-- ApplicationType 'Windows Store' routes this project through the legacy
+       ResolveNuGetPackageAssets task, which looks for a UAP,Version=v10.0 entry
+       in the lock file that a PackageReference restore never writes. The real
+       package props and targets arrive through NuGet's generated .nuget.g.props
+       and .nuget.g.targets, so the legacy pass has nothing to contribute. -->
+  <PropertyGroup>
+    <ResolveNuGetPackages>false</ResolveNuGetPackages>
+  </PropertyGroup>
+
   <PropertyGroup>
     <OutDir Condition="'$(OutDir)'==''">$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
     <IntDir Condition="'$(IntDir)'==''">$(SolutionDir)build\$(Platform)\$(Configuration)\obj\$(ProjectName)\</IntDir>
