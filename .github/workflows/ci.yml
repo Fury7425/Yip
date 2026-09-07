@@ -124,10 +124,10 @@ jobs:
           restore-keys: cmake-cargo-${{ runner.os }}-
 
       - name: cmake configure (release x64)
-        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cmake configure x64" -Command "cmake --preset release"'
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cmake configure x64" -Command "cmake --preset release" -Grep ''(: (error|fatal error) |CMake Error)'''
 
       - name: cmake build
-        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cmake build x64" -Command "cmake --build --preset release"'
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cmake build x64" -Command "cmake --build --preset release" -Grep ''(: (error|fatal error) |CMake Error)'''
 
       - name: Upload yip-app
         uses: actions/upload-artifact@v4
@@ -185,10 +185,10 @@ jobs:
           restore-keys: cargo-${{ runner.os }}-
 
       - name: cmake configure (release ARM64)
-        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cmake configure arm64" -Command "cmake --preset release-arm64"'
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cmake configure arm64" -Command "cmake --preset release-arm64" -Grep ''(: (error|fatal error) |CMake Error)'''
 
       - name: cmake build
-        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cmake build arm64" -Command "cmake --build --preset release-arm64"'
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "cmake build arm64" -Command "cmake --build --preset release-arm64" -Grep ''(: (error|fatal error) |CMake Error)'''
 
       - name: Upload yip-app (ARM64)
         uses: actions/upload-artifact@v4

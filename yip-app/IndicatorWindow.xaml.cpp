@@ -8,13 +8,16 @@
 #include "Markers.h"
 #include "Settings.h"
 
+#include <microsoft.ui.interop.h>
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Microsoft.UI.h>
 #include <winrt/Microsoft.UI.Composition.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
+#include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Microsoft.UI.Xaml.Hosting.h>
 #include <winrt/Microsoft.UI.Xaml.Input.h>
+#include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.h>
 #include <winrt/Windows.UI.Core.h>
 
@@ -623,7 +626,7 @@ void IndicatorWindow::RestoreFromPersistence()
         }
     }
     if (!chosen) {
-        chosen = muw::DisplayArea::Primary(muw::DisplayAreaFallback::Primary);
+        chosen = muw::DisplayArea::Primary();
     }
     if (!chosen) return;
 

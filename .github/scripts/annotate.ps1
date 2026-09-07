@@ -14,7 +14,10 @@ param(
     [int]$MaxChunks = 8,
     # Keep the last chunk-worth of output instead of the first. Both cargo and
     # MSBuild put their diagnostics after a long preamble of progress lines.
-    [switch]$Head
+    [switch]$Head,
+    # Keep only lines matching this regex. MSVC prints every rejected overload
+    # candidate, which buries the diagnostics the annotation is for.
+    [string]$Grep
 )
 
 $ErrorActionPreference = 'Continue'
@@ -46,6 +49,10 @@ if ($code -eq 0) { exit 0 }
 $noise = '^\s*(Downloading|Downloaded|Compiling|Checking|Updating|Locking|Adding|Fresh|Installing|Blocking|Ignored) '
 $kept = ((($text -replace "`e\[[0-9;?]*[a-zA-Z]", '') -replace "`r", '') -split "`n") |
     Where-Object { $_ -notmatch $noise }
+if ($Grep) {
+    $filtered = @($kept | Where-Object { $_ -match $Grep })
+    if ($filtered.Count -gt 0) { $kept = $filtered }
+}
 $clean = ($kept -join "`n").Trim()
 if (-not $clean) { $clean = "$Title failed with exit code $code (no output captured)." }
 
