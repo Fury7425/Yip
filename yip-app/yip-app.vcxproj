@@ -78,6 +78,9 @@
       <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
+      <!-- DISABLE_XAML_GENERATED_MAIN: main.cpp owns the entry point, because it
+           has to bootstrap the Windows App SDK runtime before Application::Start
+           and the generated main does not. -->
       <PreprocessorDefinitions>
         WIN32;
         _WINDOWS;
@@ -85,6 +88,7 @@
         NOMINMAX;
         WIN32_LEAN_AND_MEAN;
         WINRT_LEAN_AND_MEAN;
+        DISABLE_XAML_GENERATED_MAIN;
         %(PreprocessorDefinitions)
       </PreprocessorDefinitions>
       <AdditionalIncludeDirectories>
@@ -120,6 +124,8 @@
         propsys.lib;
         comctl32.lib;
         shell32.lib;
+        user32.lib;
+        gdi32.lib;
         runtimeobject.lib;
         windowsapp.lib;
         %(AdditionalDependencies)

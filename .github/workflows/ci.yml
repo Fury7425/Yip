@@ -135,7 +135,7 @@ jobs:
       # wrapper early, which is what makes the listing reach an annotation.
       - name: List generated files (on failure)
         if: failure()
-        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "codegen inventory" -Command "Get-ChildItem -Recurse -Name ''yip-app/Generated Files'' -ErrorAction SilentlyContinue | Sort-Object; Get-ChildItem -Recurse -Name -Filter *.winmd ''yip-app'' -ErrorAction SilentlyContinue; cmd /c exit 1" -Head'
+        run: '& "${{ github.workspace }}/.github/scripts/annotate.ps1" -Title "codegen inventory" -Command "& ''${{ github.workspace }}/.github/scripts/codegen-inventory.ps1''" -Head'
 
       - name: Upload yip-app
         uses: actions/upload-artifact@v4
