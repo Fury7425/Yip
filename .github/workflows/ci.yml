@@ -75,7 +75,10 @@ jobs:
 
   native:
     name: native (vst-host + yip-app)
-    runs-on: windows-latest
+    # windows-latest is Windows Server 2025 carrying Visual Studio 2026, where
+    # the "Visual Studio 17 2022" generator finds no instance. The toolset is
+    # pinned to v143, so pin the image that ships it.
+    runs-on: windows-2022
     needs: rust
     timeout-minutes: 35
     defaults:
@@ -137,7 +140,10 @@ jobs:
 
   native-arm64:
     name: native ARM64 (cross-compile)
-    runs-on: windows-latest
+    # windows-latest is Windows Server 2025 carrying Visual Studio 2026, where
+    # the "Visual Studio 17 2022" generator finds no instance. The toolset is
+    # pinned to v143, so pin the image that ships it.
+    runs-on: windows-2022
     needs: rust
     timeout-minutes: 35
     defaults:
