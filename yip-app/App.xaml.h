@@ -13,3 +13,7 @@ private:
     winrt::Microsoft::UI::Xaml::Window m_indicator{nullptr};
 };
 } // namespace winrt::yip::implementation
+
+namespace winrt::yip::factory_implementation {
+struct App : AppT<App, implementation::App> {};
+} // namespace winrt::yip::factory_implementation
