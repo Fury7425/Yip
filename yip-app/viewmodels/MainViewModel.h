@@ -1,8 +1,8 @@
 #pragma once
 
-#include "viewmodels/MainViewModel.g.h"
-#include "viewmodels/DeviceEntry.g.h"
-#include "viewmodels/RecordingEntry.g.h"
+#include "viewmodels.MainViewModel.g.h"
+#include "viewmodels.DeviceEntry.g.h"
+#include "viewmodels.RecordingEntry.g.h"
 
 #include "Settings.h"
 

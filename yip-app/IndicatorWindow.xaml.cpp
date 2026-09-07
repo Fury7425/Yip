@@ -8,7 +8,6 @@
 #include "Markers.h"
 #include "Settings.h"
 
-#include <microsoft.ui.interop.h>
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Microsoft.UI.h>
 #include <winrt/Microsoft.UI.Composition.h>
@@ -205,7 +204,7 @@ void IndicatorWindow::ApplyToolWindowStyle()
 void IndicatorWindow::ApplyAlwaysOnTop()
 {
     if (!m_hwnd) return;
-    auto wid = winrt::Microsoft::UI::GetWindowIdFromWindow(m_hwnd);
+    auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
     if (auto presenter = appWindow.Presenter().try_as<muw::OverlappedPresenter>()) {
         presenter.SetBorderAndTitleBar(false, false);
@@ -498,7 +497,7 @@ void IndicatorWindow::OnPillPointerMoved(winrt::Windows::Foundation::IInspectabl
     const int newX = static_cast<int>(std::lround(m_windowOriginAtDragStart.X + dx));
     const int newY = static_cast<int>(std::lround(m_windowOriginAtDragStart.Y + dy));
 
-    auto wid = winrt::Microsoft::UI::GetWindowIdFromWindow(m_hwnd);
+    auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
     appWindow.Move({newX, newY});
 }
@@ -613,7 +612,7 @@ void IndicatorWindow::RestoreFromPersistence()
 {
     if (!m_hwnd) return;
 
-    auto wid = winrt::Microsoft::UI::GetWindowIdFromWindow(m_hwnd);
+    auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
 
     // Find target monitor.
@@ -668,7 +667,7 @@ void IndicatorWindow::SnapToNearestEdgeIfClose()
     const int cx = (rc.left + rc.right) / 2;
     const int cy = (rc.top + rc.bottom) / 2;
 
-    auto wid = winrt::Microsoft::UI::GetWindowIdFromWindow(m_hwnd);
+    auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
 
     // Pick the DisplayArea containing the window center.
@@ -700,7 +699,7 @@ void IndicatorWindow::RememberPosition()
 {
     if (!m_hwnd) return;
 
-    auto wid = winrt::Microsoft::UI::GetWindowIdFromWindow(m_hwnd);
+    auto wid = AppWindow().Id();
     muw::DisplayArea host{muw::DisplayArea::GetFromWindowId(wid, muw::DisplayAreaFallback::Primary)};
     if (!host) return;
 
@@ -743,7 +742,7 @@ void IndicatorWindow::RememberPosition()
 void IndicatorWindow::ShowWindow()
 {
     if (!m_hwnd) return;
-    auto wid = winrt::Microsoft::UI::GetWindowIdFromWindow(m_hwnd);
+    auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
     if (appWindow) appWindow.Show();
     // Re-assert TOPMOST + NoActivate after show, in case the Win32
@@ -754,7 +753,7 @@ void IndicatorWindow::ShowWindow()
 void IndicatorWindow::HideWindow()
 {
     if (!m_hwnd) return;
-    auto wid = winrt::Microsoft::UI::GetWindowIdFromWindow(m_hwnd);
+    auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
     if (appWindow) appWindow.Hide();
 }
