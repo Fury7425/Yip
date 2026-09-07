@@ -1,8 +1,8 @@
 #include "pch.h"
 #include "App.xaml.h"
 
-#if __has_include("App.xaml.g.cpp")
-#include "App.xaml.g.cpp"
+#if __has_include("App.g.cpp")
+#include "App.g.cpp"
 #endif
 
 #include "MainWindow.xaml.h"
