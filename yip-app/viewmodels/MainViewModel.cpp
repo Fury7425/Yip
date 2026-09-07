@@ -1,8 +1,8 @@
 #include "pch.h"
 #include "viewmodels/MainViewModel.h"
-#include "viewmodels/MainViewModel.g.cpp"
-#include "viewmodels/DeviceEntry.g.cpp"
-#include "viewmodels/RecordingEntry.g.cpp"
+#include "viewmodels.MainViewModel.g.cpp"
+#include "viewmodels.DeviceEntry.g.cpp"
+#include "viewmodels.RecordingEntry.g.cpp"
 
 #include "AudioCoreInterop.h"
 #include "HotkeyManager.h"

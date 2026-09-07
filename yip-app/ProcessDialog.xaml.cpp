@@ -15,6 +15,7 @@
 #include <winrt/Windows.Storage.Pickers.h>
 
 #include <algorithm>
+#include <coroutine>
 #include <filesystem>
 
 namespace fs = std::filesystem;
@@ -23,6 +24,22 @@ namespace muxc = winrt::Microsoft::UI::Xaml::Controls;
 
 namespace
 {
+    // C++/WinRT ships resume_foreground for the Windows.System and
+    // CoreDispatcher queues only, not for the Windows App SDK one.
+    struct ResumeOnQueue
+    {
+        winrt::Microsoft::UI::Dispatching::DispatcherQueue queue{nullptr};
+
+        bool await_ready() const noexcept { return false; }
+
+        void await_suspend(std::coroutine_handle<> handle) const
+        {
+            if (!queue || !queue.TryEnqueue([handle] { handle(); })) handle();
+        }
+
+        void await_resume() const noexcept {}
+    };
+
     HWND ForegroundHwndForProcess()
     {
         HWND fg = ::GetForegroundWindow();
@@ -224,7 +241,7 @@ namespace winrt::yip::implementation
             },
             &err);
 
-        co_await winrt::Microsoft::UI::Dispatching::resume_foreground(dq);
+        co_await ResumeOnQueue{dq};
 
         if (ok) {
             SetStatus(winrt::hstring{ L"Saved: " + out.filename().wstring() });
