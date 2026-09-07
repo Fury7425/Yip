@@ -12,9 +12,9 @@ param(
     [Parameter(Mandatory = $true)][string]$Command,
     [int]$ChunkChars = 6000,
     [int]$MaxChunks = 8,
-    # Keep the last chunk-worth of output instead of the first. MSBuild puts
-    # its error summary at the end; cargo puts its diagnostics at the start.
-    [switch]$Tail
+    # Keep the last chunk-worth of output instead of the first. Both cargo and
+    # MSBuild put their diagnostics after a long preamble of progress lines.
+    [switch]$Head
 )
 
 $ErrorActionPreference = 'Continue'
@@ -29,12 +29,17 @@ if ($text) { Write-Host $text }
 
 if ($code -eq 0) { exit 0 }
 
-# Strip ANSI, normalise newlines, then escape for the workflow command grammar.
-$clean = ($text -replace "`e\[[0-9;?]*[a-zA-Z]", '') -replace "`r", ''
+# Strip ANSI, normalise newlines, drop cargo/MSBuild progress chatter, then
+# escape for the workflow-command grammar. The annotation budget is small; a
+# hundred "Downloaded ..." lines would push the real diagnostics out of it.
+$noise = '^\s*(Downloading|Downloaded|Compiling|Checking|Updating|Locking|Adding|Fresh|Installing|Blocking|Ignored) '
+$kept = ((($text -replace "`e\[[0-9;?]*[a-zA-Z]", '') -replace "`r", '') -split "`n") |
+    Where-Object { $_ -notmatch $noise }
+$clean = ($kept -join "`n").Trim()
 if (-not $clean) { $clean = "$Title failed with exit code $code (no output captured)." }
 
 $budget = $ChunkChars * $MaxChunks
-if ($Tail -and $clean.Length -gt $budget) {
+if (-not $Head -and $clean.Length -gt $budget) {
     $clean = $clean.Substring($clean.Length - $budget)
 }
 
