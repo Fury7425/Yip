@@ -8,287 +8,315 @@
 <x-dc>
 <helmet>
   <style>
-    /* Yip — Aurora Glass. Palette, type ramp and window size are lifted from
-       yip-app/App.xaml and MainWindow.xaml.cpp; the material is new. */
+    /* Yip as it currently ships. Every value below is the live one from
+       yip-app/App.xaml (Dark dictionary) — edit anything here and it maps
+       straight back to a token. */
     :root {
-      --ink:        #F2F3F5;
-      --ink-2:      #B7BCC8;
-      --ink-3:      #767C8C;
-      --accent:     #3D7AFF;
-      --record:     #E5484D;
-      --ok:         #35C46A;
+      --ink:        #F2F3F5;   /* YipTextPrimaryBrush   */
+      --ink-2:      #C9CED8;   /* YipTextSecondaryBrush */
+      --ink-3:      #9BA2B2;   /* YipTextTertiaryBrush  */
+      --card:       rgba(11,12,17,0.42);   /* YipCardBrush         */
+      --card-line:  rgba(255,255,255,0.075);/* YipCardStrokeBrush  */
+      --ctrl:       rgba(255,255,255,0.10); /* YipControlFillBrush */
+      --ctrl-line:  rgba(255,255,255,0.055);/* YipControlStrokeBrush */
+      --trough:     rgba(0,0,0,0.34);       /* YipMeterTrackQuietBrush */
+      --baseline:   rgba(255,255,255,0.11); /* YipWaveBaselineBrush */
+      --hold:       rgba(255,255,255,0.55); /* YipMeterHoldBrush */
+      --clip:       #FF6B70;                /* YipClipLitBrush */
+      --rec-fill:   rgba(229,72,77,0.28);   /* YipRecordFillIdleBrush */
+      --rec-line:   rgba(255,255,255,0.10); /* YipRecordStrokeBrush */
+      --rec-core:   #FFF2F2;                /* YipRecordCoreBrush */
+      --lamp:       #767C8C;                /* YipLampIdleBrush */
 
-      /* Glass recipe. One tint, one stroke, two speculars — every surface in
-         the app is this recipe at one of three depths. */
-      --g-tint:     rgba(255,255,255,0.055);
-      --g-tint-2:   rgba(255,255,255,0.085);
-      --g-stroke:   rgba(255,255,255,0.065);
-      --g-spec-t:   rgba(255,255,255,0.10);
-      --g-spec-b:   rgba(0,0,0,0.10);
-      --g-blur:     blur(28px) saturate(150%);
-
-      --r-card:     22px;
-      --r-ctrl:     14px;
-      --r-pill:     999px;
+      --r-card: 14px;   /* YipCardCornerRadius   */
+      --r-ctrl: 8px;    /* YipControlCornerRadius */
+      --r-wave: 8px;    /* YipMeterCornerRadius  */
 
       --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
       --mono: "Cascadia Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: var(--font); }
-    a { color: var(--accent); } a:hover { color: #6B99FF; }
+    a { color: #6B99FF; } a:hover { color: #9FBDFF; }
 
-    /* The desktop the window sits on. Glass is only legible over something
-       with structure, so the artboard carries a wallpaper. */
+    /* A bright, busy desktop on purpose: acrylic is only as legible as what
+       is behind it, and judging contrast over a dark backdrop is what got the
+       first pass wrong. */
     .desk {
-      width: 470px; height: 640px; overflow: hidden; position: relative;
+      width: 620px; height: 780px; position: relative; overflow: hidden;
       background:
-        radial-gradient(120% 80% at 12% 4%,  #2C3C7A 0%, rgba(44,60,122,0) 58%),
-        radial-gradient(90%  70% at 92% 14%, #6B3F86 0%, rgba(107,63,134,0) 55%),
-        radial-gradient(110% 90% at 70% 98%, #0F5C63 0%, rgba(15,92,99,0) 60%),
-        linear-gradient(168deg, #14161D 0%, #0B0C11 100%);
+        radial-gradient(60% 45% at 22% 12%, #FFE8A8 0%, rgba(255,232,168,0) 60%),
+        radial-gradient(55% 45% at 78% 26%, #FFB9CF 0%, rgba(255,185,207,0) 62%),
+        radial-gradient(70% 50% at 62% 84%, #FFD9A0 0%, rgba(255,217,160,0) 58%),
+        linear-gradient(150deg, #F6C88A 0%, #E9A4B6 48%, #D8B487 100%);
     }
-    .grain {
-      position: absolute; inset: 0; pointer-events: none; opacity: 0.30;
-      background-image:
-        repeating-linear-gradient(0deg,   rgba(255,255,255,0.016) 0 1px, transparent 1px 3px),
-        repeating-linear-gradient(90deg,  rgba(255,255,255,0.012) 0 1px, transparent 1px 3px);
+    .desk::after {
+      content: ""; position: absolute; inset: 0; opacity: .5;
+      background:
+        repeating-linear-gradient(112deg, rgba(255,255,255,.22) 0 26px, rgba(0,0,0,.05) 26px 60px);
     }
 
-    .win { position: relative; display: flex; flex-direction: column; height: 100%; }
-
-    /* ---------------- title bar ---------------- */
-    .bar {
-      height: 48px; flex: none; display: flex; align-items: center;
-      gap: 10px; padding: 0 12px 0 18px;
+    /* The window. backdrop-filter stands in for DesktopAcrylicBackdrop. */
+    .win {
+      position: absolute; left: 75px; top: 60px;
+      width: 470px; height: 660px; border-radius: 8px; overflow: hidden;
+      display: flex; flex-direction: column;
+      backdrop-filter: blur(42px) saturate(115%);
+      -webkit-backdrop-filter: blur(42px) saturate(115%);
+      background: rgba(18,19,24,0.30);
+      box-shadow: 0 18px 50px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.07);
     }
-    .lamp { width: 9px; height: 9px; border-radius: 50%; flex: none;
-            background: var(--ink-3); box-shadow: 0 0 0 0 rgba(0,0,0,0); }
-    .wordmark { font-size: 14px; font-weight: 600; color: var(--ink); letter-spacing: 0.1px; }
-    .spacer { flex: 1 1 auto; }
-    .iconbtn {
-      width: 32px; height: 32px; flex: none; display: grid; place-items: center;
-      border-radius: 10px; color: var(--ink-2);
-      background: var(--g-tint); backdrop-filter: var(--g-blur);
-      -webkit-backdrop-filter: var(--g-blur);
-      box-shadow: inset 0 0 0 1px var(--g-stroke);
-    }
-    .caption { display: flex; gap: 2px; margin-left: 4px; color: var(--ink-3); }
-    .caption span { width: 30px; height: 30px; display: grid; place-items: center; font-size: 11px; }
 
-    /* ---------------- glass card ---------------- */
+    /* ---- title bar (44) ---- */
+    .bar { height: 44px; flex: none; display: flex; align-items: center; gap: 9px; padding: 0 0 0 18px; }
+    .lamp { width: 8px; height: 8px; border-radius: 50%; background: var(--lamp); flex: none; }
+    .word { font-size: 14px; font-weight: 600; color: var(--ink); }
+    .grow { flex: 1 1 auto; }
+    .tbtn { width: 34px; height: 30px; display: grid; place-items: center; color: var(--ink-3); }
+    .caps { display: flex; color: var(--ink-2); }
+    .caps span { width: 45px; height: 32px; display: grid; place-items: center; font-size: 11px; }
+
+    /* ---- cards ---- */
     .card {
-      position: relative; border-radius: var(--r-card);
-      background: var(--g-tint);
-      backdrop-filter: var(--g-blur); -webkit-backdrop-filter: var(--g-blur);
-      box-shadow:
-        inset 0 0 0 1px var(--g-stroke),
-        inset 0 1px 0 var(--g-spec-t),
-        inset 0 -1px 0 var(--g-spec-b),
-        0 6px 18px rgba(0,0,0,0.22);
+      border-radius: var(--r-card); background: var(--card);
+      box-shadow: inset 0 0 0 1px var(--card-line);
+    }
+    .hero { flex: none; margin: 2px 16px 0; padding: 14px 16px 16px; }
+
+    .toprow { display: flex; align-items: center; gap: 10px; }
+    .dev {
+      display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px;
+      border-radius: 999px; background: var(--ctrl);
+      box-shadow: inset 0 0 0 1px var(--ctrl-line);
+      color: var(--ink); font-size: 13px; max-width: 248px;
+    }
+    .dev b { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fmt { margin-left: auto; font-size: 10px; color: var(--ink-3); letter-spacing: .4px; white-space: nowrap; }
+
+    .clock {
+      font-family: var(--mono); font-size: 46px; line-height: 1.1; font-weight: 300;
+      color: var(--ink); text-align: center; margin: 12px 0 0;
+      font-variant-numeric: tabular-nums; opacity: .55;
     }
 
-    .hero { flex: none; margin: 0 16px; padding: 16px 18px 18px; }
-
-    /* device + format row */
-    .toprow { display: flex; align-items: center; gap: 10px; height: 30px; }
-    .devpill {
-      display: flex; align-items: center; gap: 8px; height: 30px;
-      padding: 0 12px 0 10px; border-radius: var(--r-pill);
-      background: var(--g-tint-2);
-      box-shadow: inset 0 0 0 1px var(--g-stroke);
-      color: var(--ink); font-size: 12.5px; max-width: 250px;
+    .wave {
+      position: relative; height: 76px; margin-top: 12px; border-radius: var(--r-wave);
+      background: var(--trough); overflow: hidden;
     }
-    .devname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .fmt { margin-left: auto; font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.2px;
-           white-space: nowrap; }
+    .wave .base { position: absolute; left: 10px; right: 10px; top: 50%; height: 1px;
+                  background: var(--baseline); }
+    .wave .bars { position: absolute; inset: 0; display: flex; align-items: center;
+                  gap: 2px; padding: 0 2px; }
+    .wave .bars i { width: 3px; border-radius: 1.5px; flex: none; }
+    .wave .holdline { position: absolute; left: 0; right: 0; height: 1px; background: var(--hold); }
 
-    /* timer */
-    .timer {
-      font-family: var(--mono); font-size: 46px; line-height: 1; font-weight: 300;
-      letter-spacing: -1.5px; color: var(--ink); text-align: center;
-      margin: 14px 0 0; font-variant-numeric: tabular-nums;
-      opacity: 0.38;
-    }
-
-    /* waveform */
-    .wave { position: relative; height: 76px; margin-top: 12px; border-radius: 10px; overflow: hidden;
-            background: rgba(0,0,0,0.22);
-            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05); }
-    .grid { position: absolute; inset: 0; }
-    .grid i { position: absolute; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.055); }
-    .grid b { position: absolute; right: 6px; font-size: 9px; font-style: normal; font-family: var(--mono);
-              color: var(--ink-3); opacity: 0.75; transform: translateY(-50%); }
-    .bars { position: absolute; inset: 0; display: flex; align-items: center; gap: 2px;
-            padding: 0 8px; }
-    .bars i { flex: 1 1 0; border-radius: 1px; background: rgba(255,255,255,0.13); height: 2px; }
-    .idlehint { position: absolute; inset: 0; display: grid; place-items: center;
-                font-size: 11.5px; color: var(--ink-3); letter-spacing: 0.3px; }
-
-    /* readouts */
-    .readout { display: flex; align-items: center; gap: 18px; height: 24px; margin-top: 14px; }
-    .ro { display: flex; align-items: baseline; gap: 6px; }
-    .ro em { font-style: normal; font-size: 9.5px; letter-spacing: 1.1px; color: var(--ink-3); }
-    .ro span { font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+    .ro { display: flex; align-items: center; gap: 16px; margin-top: 12px; }
+    .ro .lbl { font-size: 9px; letter-spacing: 1.1px; color: var(--ink-3); }
+    .ro .val { font-family: var(--mono); font-size: 12px; color: var(--ink-2);
                font-variant-numeric: tabular-nums; }
-    .clip { margin-left: auto; display: flex; align-items: center; gap: 6px; opacity: 0.22; }
-    .clip i { width: 22px; height: 4px; border-radius: 2px; background: #FF6B70; }
-    .clip em { font-style: normal; font-size: 9.5px; letter-spacing: 1.1px; color: #FF6B70; }
+    .ro .pair { display: flex; align-items: center; gap: 6px; }
+    .cliplamp { margin-left: auto; opacity: .18; text-align: center; }
+    .cliplamp i { display: block; width: 24px; height: 3px; border-radius: 2px;
+                  background: var(--clip); margin: 0 auto 3px; }
+    .cliplamp span { font-size: 9px; letter-spacing: 1.1px; color: var(--clip); }
 
-    /* record control */
-    .transport { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 16px; }
-    .rec {
-      width: 62px; height: 62px; border-radius: 50%; display: grid; place-items: center;
-      position: relative;
-      background: rgba(229,72,77,0.18);
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10);
-      backdrop-filter: var(--g-blur); -webkit-backdrop-filter: var(--g-blur);
-    }
-    .rec b { width: 22px; height: 22px; border-radius: 50%; background: var(--record); }
-    .hint { position: absolute; bottom: -2px; left: 50%; transform: translate(-50%, 100%);
-            font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); white-space: nowrap; }
+    .transport { margin-top: 16px; display: flex; flex-direction: column;
+                 align-items: center; gap: 5px; }
+    .rec { width: 62px; height: 62px; border-radius: 50%; display: grid; place-items: center;
+           background: var(--rec-fill); box-shadow: inset 0 0 0 1px var(--rec-line); }
+    .rec b { width: 22px; height: 22px; border-radius: 50%; background: var(--rec-core); }
+    .hk { font-family: var(--mono); font-size: 9px; color: var(--ink-3); }
 
-    /* ---------------- list ---------------- */
-    .list { flex: 1 1 auto; margin: 12px 16px 0; padding: 0; display: flex; flex-direction: column;
+    /* ---- list ---- */
+    .list { flex: 1 1 auto; margin: 10px 16px 0; display: flex; flex-direction: column;
             overflow: hidden; }
-    .lhead { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; }
-    .lhead h2 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink); }
-    .lhead small { font-size: 10.5px; color: var(--ink-3); }
-    .search {
-      margin-left: auto; display: flex; align-items: center; gap: 6px;
-      height: 26px; padding: 0 10px; border-radius: var(--r-pill);
-      background: rgba(0,0,0,0.20);
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
-      font-size: 11px; color: var(--ink-3);
-    }
-    .rows { flex: 1 1 auto; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 2px; }
-    .row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 12px; }
-    .row.sel { background: rgba(255,255,255,0.07);
-               box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07); }
-    .rowmain { min-width: 0; flex: 1 1 auto; }
-    .rowmain b { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink);
-                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .rowmain small { display: block; margin-top: 2px; font-size: 10px; color: var(--ink-3); }
-    .rowmeta { text-align: right; flex: none; }
-    .rowmeta b { display: block; font-family: var(--mono); font-size: 11.5px; font-weight: 400;
-                 color: var(--ink-2); font-variant-numeric: tabular-nums; }
-    .rowmeta small { display: block; margin-top: 2px; font-size: 10px; color: var(--ink-3); }
+    .lhead { display: flex; align-items: center; gap: 8px; padding: 10px 10px 8px 14px; }
+    .lhead h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+    .lhead .sum { font-size: 12px; color: var(--ink-3); }
+    .filter { margin-left: auto; width: 152px; height: 30px; border-radius: 999px;
+              background: var(--ctrl); box-shadow: inset 0 0 0 1px var(--ctrl-line);
+              display: flex; align-items: center; padding: 0 12px;
+              font-size: 12px; color: var(--ink-3); }
+    .rows { flex: 1 1 auto; padding: 0 6px 8px; display: flex; flex-direction: column; gap: 2px; }
+    .row { display: flex; align-items: center; gap: 12px; padding: 6px 10px; border-radius: 10px; }
+    .row .mainc { flex: 1 1 auto; min-width: 0; }
+    .row .mainc b { display: block; font-size: 12px; font-weight: 400; color: var(--ink);
+                    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row .mainc small { display: block; margin-top: 2px; font-size: 10px; color: var(--ink-3); }
+    .row .meta { text-align: right; flex: none; min-width: 86px; }
+    .row .meta b { display: block; font-family: var(--mono); font-size: 12px; font-weight: 400;
+                   color: var(--ink-2); font-variant-numeric: tabular-nums; }
+    .row .meta small { display: block; margin-top: 2px; font-size: 10px; color: var(--ink-3); }
 
-    /* ---------------- status ---------------- */
-    .status { flex: none; height: 30px; display: flex; align-items: center; gap: 10px;
-              padding: 0 22px; }
-    .status p { margin: 0; font-size: 11px; color: var(--ink-2); }
-    .status code { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+    .status { flex: none; padding: 9px 20px 11px; font-size: 12px; color: var(--ink-2); }
   </style>
 </helmet>
 
 <div class="desk">
-  <div class="grain"></div>
   <div class="win">
-
     <div class="bar">
       <div class="lamp"></div>
-      <div class="wordmark">Yip</div>
-      <div class="spacer"></div>
-      <div class="iconbtn">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-          <path d="M4 8h10M18 8h2M4 16h4M12 16h8"></path>
-          <circle cx="16" cy="8" r="2.2"></circle><circle cx="10" cy="16" r="2.2"></circle>
+      <div class="word">Yip</div>
+      <div class="grow"></div>
+      <div class="tbtn">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <rect x="1" y="3" width="14" height="1.5" rx=".75" fill="currentColor" opacity=".85"/>
+          <circle cx="11.2" cy="3.75" r="2.25" fill="#C9CED8"/>
+          <rect x="1" y="7.25" width="14" height="1.5" rx=".75" fill="currentColor" opacity=".85"/>
+          <circle cx="5.2" cy="8" r="2.25" fill="#C9CED8"/>
+          <rect x="1" y="11.5" width="14" height="1.5" rx=".75" fill="currentColor" opacity=".85"/>
+          <circle cx="8.2" cy="12.25" r="2.25" fill="#C9CED8"/>
         </svg>
       </div>
-      <div class="iconbtn">
+      <div class="tbtn">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
           <circle cx="12" cy="12" r="3.2"></circle>
           <path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M18 6l-1.6 1.6M7.6 16.4 6 18M18 18l-1.6-1.6M7.6 7.6 6 6" stroke-linecap="round"></path>
         </svg>
       </div>
-      <div class="caption"><span>&#8722;</span><span>&#9633;</span><span>&#10005;</span></div>
+      <div class="caps"><span>&#8722;</span><span>&#9633;</span><span>&#10005;</span></div>
     </div>
 
     <div class="card hero">
       <div class="toprow">
-        <div class="devpill">
+        <div class="dev">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
             <rect x="9" y="3" width="6" height="11" rx="3"></rect>
             <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"></path>
           </svg>
-          <span class="devname">Shure MV7</span>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="opacity:.55">
-            <path d="m6 9 6 6 6-6"></path>
-          </svg>
+          <b>&#47560;&#51060;&#53356; &#48176;&#50676;(&#46356;&#51648;&#53844; &#47560;&#51060;...</b>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="opacity:.6"><path d="m6 9 6 6 6-6"></path></svg>
         </div>
-        <div class="fmt">48 kHz &#183; STEREO &#183; 32-BIT FLOAT</div>
+        <div class="fmt">48 kHz &#183; stereo &#183; 32-bit float</div>
       </div>
 
-      <div class="timer">00:00.0</div>
+      <div class="clock">00:00.0</div>
 
-      <div class="wave">
-        <div class="grid">
-          <i style="top:14px"></i><b style="top:14px">-6</b>
-          <i style="top:28px"></i><b style="top:28px">-12</b>
-          <i style="top:48px"></i><b style="top:48px">-24</b>
-        </div>
+      <div class="wave" style="opacity:.32">
+        <div class="base"></div>
         <div class="bars">
-          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          <i style="height:3px;background:#38C56A"></i>
+          <i style="height:3px;background:#38C56A"></i>
+          <i style="height:3px;background:#38C56A"></i>
+          <i style="height:5px;background:#3AC66A"></i>
+          <i style="height:7px;background:#3BC66A"></i>
+          <i style="height:9px;background:#3DC769"></i>
+          <i style="height:12px;background:#40C869"></i>
+          <i style="height:14px;background:#42C869"></i>
+          <i style="height:16px;background:#43C969"></i>
+          <i style="height:17px;background:#45C969"></i>
+          <i style="height:19px;background:#46CA69"></i>
+          <i style="height:26px;background:#4CCC68"></i>
+          <i style="height:34px;background:#54CE68"></i>
+          <i style="height:42px;background:#5BD167"></i>
+          <i style="height:49px;background:#93CA5F"></i>
+          <i style="height:56px;background:#C0C459"></i>
+          <i style="height:60px;background:#DDC055"></i>
+          <i style="height:61px;background:#E5BF54"></i>
+          <i style="height:59px;background:#D8C155"></i>
+          <i style="height:54px;background:#B6C55A"></i>
+          <i style="height:48px;background:#86CC61"></i>
+          <i style="height:40px;background:#59D067"></i>
+          <i style="height:42px;background:#60D066"></i>
+          <i style="height:45px;background:#72CE64"></i>
+          <i style="height:45px;background:#75CE63"></i>
+          <i style="height:43px;background:#67CF65"></i>
+          <i style="height:40px;background:#59D067"></i>
+          <i style="height:35px;background:#54CF68"></i>
+          <i style="height:29px;background:#4FCD68"></i>
+          <i style="height:23px;background:#4ACB68"></i>
+          <i style="height:18px;background:#45CA69"></i>
+          <i style="height:13px;background:#41C869"></i>
+          <i style="height:10px;background:#3EC769"></i>
+          <i style="height:9px;background:#3DC769"></i>
+          <i style="height:9px;background:#3DC769"></i>
+          <i style="height:10px;background:#3EC769"></i>
+          <i style="height:12px;background:#3FC869"></i>
+          <i style="height:13px;background:#41C869"></i>
+          <i style="height:16px;background:#43C969"></i>
+          <i style="height:18px;background:#46CA69"></i>
+          <i style="height:21px;background:#48CB68"></i>
+          <i style="height:23px;background:#4ACB68"></i>
+          <i style="height:25px;background:#4BCC68"></i>
+          <i style="height:25px;background:#4CCC68"></i>
+          <i style="height:27px;background:#4DCC68"></i>
+          <i style="height:35px;background:#55CF67"></i>
+          <i style="height:44px;background:#6ACF65"></i>
+          <i style="height:52px;background:#A7C75C"></i>
+          <i style="height:59px;background:#DBC155"></i>
+          <i style="height:65px;background:#F4AA59"></i>
+          <i style="height:67px;background:#F89461"></i>
+          <i style="height:66px;background:#F7995F"></i>
+          <i style="height:63px;background:#F1B954"></i>
+          <i style="height:57px;background:#C8C358"></i>
+          <i style="height:49px;background:#90CA60"></i>
+          <i style="height:41px;background:#5AD167"></i>
+          <i style="height:45px;background:#73CE64"></i>
+          <i style="height:48px;background:#86CC61"></i>
+          <i style="height:48px;background:#88CB61"></i>
+          <i style="height:46px;background:#7BCD63"></i>
+          <i style="height:42px;background:#5FD066"></i>
+          <i style="height:37px;background:#57D067"></i>
+          <i style="height:31px;background:#51CE68"></i>
+          <i style="height:25px;background:#4CCC68"></i>
+          <i style="height:19px;background:#46CA69"></i>
+          <i style="height:14px;background:#42C869"></i>
+          <i style="height:10px;background:#3EC769"></i>
+          <i style="height:8px;background:#3DC769"></i>
+          <i style="height:7px;background:#3CC669"></i>
+          <i style="height:6px;background:#3BC66A"></i>
+          <i style="height:5px;background:#3AC66A"></i>
+          <i style="height:4px;background:#39C56A"></i>
+          <i style="height:3px;background:#38C56A"></i>
+          <i style="height:3px;background:#38C56A"></i>
+          <i style="height:3px;background:#38C56A"></i>
+          <i style="height:3px;background:#38C56A"></i>
+          <i style="height:3px;background:#38C56A"></i>
+          <i style="height:3px;background:#38C56A"></i>
+          <i style="height:3px;background:#38C56A"></i>
+          <i style="height:3px;background:#38C56A"></i>
         </div>
-        <div class="idlehint">armed &#183; nothing on the input yet</div>
       </div>
 
-      <div class="readout">
-        <div class="ro"><em>PEAK</em><span>&#8722;&#8734;</span></div>
-        <div class="ro"><em>RMS</em><span>&#8722;&#8734;</span></div>
-        <div class="clip"><i></i><em>CLIP</em></div>
+      <div class="ro">
+        <div class="pair"><span class="lbl">PEAK</span><span class="val">&#8722;&#8734; dB</span></div>
+        <div class="pair"><span class="lbl">RMS</span><span class="val">&#8722;&#8734; dB</span></div>
+        <div class="cliplamp"><i></i><span>CLIP</span></div>
       </div>
 
       <div class="transport">
-        <div class="rec"><b></b><div class="hint">Ctrl+Alt+R</div></div>
+        <div class="rec"><b></b></div>
+        <div class="hk">Ctrl + Alt + R</div>
       </div>
     </div>
 
     <div class="card list">
       <div class="lhead">
         <h2>Recordings</h2>
-        <small>12 &#183; 486 MB</small>
-        <div class="search">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.5 4.5" stroke-linecap="round"></path>
-          </svg>
-          Filter
-        </div>
+        <span class="sum">10 recordings &#183; 64.6 MB</span>
+        <div class="filter">Filter</div>
       </div>
       <div class="rows">
-        <div class="row sel">
-          <div class="rowmain">
-            <b>yip-20260915-142233.wav</b>
-            <small>48 kHz &#183; stereo &#183; 32-bit float &#183; 6.2 MB</small>
-          </div>
-          <div class="rowmeta"><b>00:34</b><small>2 min ago</small></div>
+        <div class="row">
+          <div class="mainc"><b>yip-20260915-185714.wav</b><small>48 kHz &#183; stereo &#183; 32-bit float &#183; 1.8 MB</small></div>
+          <div class="meta"><b>00:04</b><small>just now</small></div>
         </div>
         <div class="row">
-          <div class="rowmain">
-            <b>yip-20260915-135901.wav</b>
-            <small>48 kHz &#183; stereo &#183; 32-bit float &#183; 41 MB</small>
-          </div>
-          <div class="rowmeta"><b>03:44</b><small>26 min ago</small></div>
+          <div class="mainc"><b>yip-20260915-182011.wav</b><small>48 kHz &#183; stereo &#183; 32-bit float &#183; 11.5 MB</small></div>
+          <div class="meta"><b>00:31</b><small>36 min ago</small></div>
         </div>
         <div class="row">
-          <div class="rowmain">
-            <b>yip-20260914-201115-processed.wav</b>
-            <small>48 kHz &#183; stereo &#183; 32-bit float &#183; 128 MB</small>
-          </div>
-          <div class="rowmeta"><b>11:38</b><small>Yesterday</small></div>
+          <div class="mainc"><b>yip-20260915-181246.wav</b><small>48 kHz &#183; stereo &#183; 32-bit float &#183; 1.8 MB</small></div>
+          <div class="meta"><b>00:04</b><small>44 min ago</small></div>
+        </div>
+        <div class="row">
+          <div class="mainc"><b>yip-20260915-170601.wav</b><small>48 kHz &#183; stereo &#183; 32-bit float &#183; 3.0 MB</small></div>
+          <div class="meta"><b>00:08</b><small>1 h ago</small></div>
         </div>
       </div>
     </div>
 
-    <div class="status">
-      <p>Ready</p>
-      <code>Ctrl+Alt+R</code>
-    </div>
-
+    <div class="status">Saved</div>
   </div>
 </div>
 </x-dc>

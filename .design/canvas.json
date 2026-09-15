@@ -4,49 +4,41 @@
       "file": "Main.dc.html",
       "x": 0,
       "y": 0,
-      "w": 470,
-      "h": 640,
+      "w": 620,
+      "h": 780,
       "title": "Main — idle"
     },
     {
       "file": "Recording.dc.html",
-      "x": 570,
+      "x": 720,
       "y": 0,
-      "w": 470,
-      "h": 640,
+      "w": 620,
+      "h": 780,
       "title": "Main — recording"
     },
     {
       "file": "Pill.dc.html",
-      "x": 1140,
+      "x": 1440,
       "y": 0,
-      "w": 720,
-      "h": 420,
+      "w": 700,
+      "h": 430,
       "title": "Floating pill"
-    },
-    {
-      "file": "Material.dc.html",
-      "x": 1140,
-      "y": 560,
-      "w": 900,
-      "h": 800,
-      "title": "Material & rendering budget"
     }
   ],
   "annotations": [
     {
-      "id": "brief",
+      "id": "how-to",
       "x": 0,
-      "y": -150,
-      "w": 470,
-      "text": "Aurora Glass — One UI geometry (22px cards, capsule controls, generous padding) over Apple-style layered glass (tint + specular rim + off-axis sheen).\n\nStructure is Windows Voice Recorder: hero waveform, big centred record button, list beneath. Restraint and the mono readouts are Superwhisper."
+      "y": -210,
+      "w": 620,
+      "text": "This is Yip as it actually ships right now — every colour, radius, size and font here is the live value from App.xaml.\n\nChange anything you like: click an element, use the properties panel, drag things around, retype text. Then hit Save.\n\nTell me you've saved and I'll read it back and make the app match exactly. No more guessing from screenshots."
     },
     {
-      "id": "grounding",
-      "x": 1140,
-      "y": 452,
-      "w": 900,
-      "text": "Palette, meter ramp, type ramp and window size are lifted from the real source — App.xaml's Dark dictionary and MainWindow.xaml.cpp. Nothing here invents a colour."
+      "id": "wallpaper",
+      "x": 1440,
+      "y": 480,
+      "w": 700,
+      "text": "The desktop behind these is deliberately bright and busy, like yours. Judging contrast over a dark backdrop is exactly what made the first pass unreadable — so tune it here and it will transfer."
     }
   ],
   "launch": {

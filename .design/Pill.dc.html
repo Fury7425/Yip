@@ -8,128 +8,104 @@
 <x-dc>
 <helmet>
   <style>
+    /* The floating pill as it currently ships: its own always-on-top window,
+       sized to the state it is in, with DesktopAcrylicBackdrop behind it. */
     :root {
-      --ink:      #F2F3F5;
-      --ink-2:    #B7BCC8;
-      --ink-3:    #767C8C;
-      --record:   #E5484D;
-      --g-stroke: rgba(255,255,255,0.075);
-      --g-spec-t: rgba(255,255,255,0.12);
-      --g-spec-b: rgba(0,0,0,0.12);
-      --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      --ink:       #F2F3F5;                 /* YipIndicatorTimerBrush */
+      --ink-2:     #C9CED8;
+      --surface:   rgba(20,21,24,0.62);     /* YipIndicatorSurfaceBrush */
+      --line:      rgba(255,255,255,0.075); /* YipIndicatorStrokeQuietBrush */
+      --dot-live:  #E5484D;                 /* YipIndicatorDotLiveBrush */
+      --dot-idle:  #767C8C;                 /* YipIndicatorDotIdleBrush */
       --mono: "Cascadia Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+      --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
     }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: var(--font); }
-    a { color: #3D7AFF; } a:hover { color: #6B99FF; }
+    a { color: #6B99FF; } a:hover { color: #9FBDFF; }
 
     .stage {
-      width: 720px; height: 420px; position: relative; overflow: hidden;
-      background:
-        radial-gradient(90% 70% at 18% 8%,  #33407E 0%, rgba(51,64,126,0) 55%),
-        radial-gradient(80% 70% at 88% 82%, #1C6470 0%, rgba(28,100,112,0) 58%),
-        linear-gradient(160deg, #171A22 0%, #0A0B0F 100%);
+      width: 700px; height: 430px; position: relative; overflow: hidden;
       display: flex; flex-direction: column; align-items: center;
-      justify-content: center; gap: 30px;
+      justify-content: center; gap: 34px;
+      background:
+        radial-gradient(55% 45% at 20% 14%, #FFE8A8 0%, rgba(255,232,168,0) 62%),
+        radial-gradient(50% 45% at 80% 30%, #FFB9CF 0%, rgba(255,185,207,0) 64%),
+        linear-gradient(150deg, #F6C88A 0%, #E9A4B6 50%, #D8B487 100%);
+    }
+    .stage::after {
+      content: ""; position: absolute; inset: 0; opacity: .5; pointer-events: none;
+      background: repeating-linear-gradient(112deg, rgba(255,255,255,.22) 0 26px, rgba(0,0,0,.05) 26px 60px);
     }
 
-    /* Something with structure behind the glass — without it, translucency
-       reads as "slightly grey rectangle". */
-    .behind { position: absolute; inset: 0; opacity: 0.5; }
-    .behind .lines { position: absolute; left: 48px; top: 40px; width: 300px; }
-    .behind .lines i { display: block; height: 7px; border-radius: 4px; margin-bottom: 11px;
-                       background: rgba(255,255,255,0.15); }
-    .behind .thumb { position: absolute; right: 54px; top: 62px; width: 214px; height: 128px;
-                     border-radius: 14px;
-                     background: linear-gradient(135deg, #E0A33A 0%, #E5484D 52%, #6B3F86 100%); }
-    .behind .thumb2 { position: absolute; right: 96px; bottom: 44px; width: 150px; height: 92px;
-                      border-radius: 12px;
-                      background: linear-gradient(200deg, #35C46A 0%, #0F5C63 100%); }
-    .behind .code { position: absolute; left: 54px; bottom: 44px; width: 260px; }
-    .behind .code i { display: block; height: 6px; border-radius: 3px; margin-bottom: 9px;
-                      background: rgba(255,255,255,0.12); }
+    .slot { position: relative; display: flex; flex-direction: column;
+            align-items: center; gap: 9px; }
+    .cap { font-size: 10px; letter-spacing: 1.2px; color: rgba(40,28,26,.62);
+           text-transform: uppercase; }
 
-    .slot { position: relative; display: flex; flex-direction: column; align-items: center; gap: 9px; }
-    .cap { font-size: 10px; letter-spacing: 1.3px; color: var(--ink-3); text-transform: uppercase; }
-
-    /* ---- the pill ---- */
+    /* The window IS the pill: it is resized per state and its region rounds it,
+       so the radius is always half the height. */
     .pill {
-      position: relative; display: flex; align-items: center;
-      border-radius: 999px;
-      background: rgba(20,21,24,0.38);
-      backdrop-filter: blur(34px) saturate(170%);
-      -webkit-backdrop-filter: blur(34px) saturate(170%);
-      box-shadow:
-        inset 0 0 0 1px var(--g-stroke),
-        inset 0 1px 0 var(--g-spec-t),
-        0 6px 18px rgba(0,0,0,0.30);
+      display: flex; align-items: center; position: relative;
+      padding: 4px 10px;
+      background: var(--surface);
+      backdrop-filter: blur(40px) saturate(130%);
+      -webkit-backdrop-filter: blur(40px) saturate(130%);
+      box-shadow: inset 0 0 0 1px var(--line), 0 8px 22px rgba(0,0,0,.30);
     }
+    .pill.rec { width: 210px; height: 44px; border-radius: 22px; }
+    .pill.exp { width: 320px; height: 56px; border-radius: 28px; }
+    .pill.save { width: 210px; height: 44px; border-radius: 22px; opacity: .85; }
 
-    .pill.rec  { width: 210px; height: 44px; padding: 0 16px 0 14px; gap: 10px; }
-    .pill.exp  { width: 320px; height: 56px; padding: 0 8px 0 18px; gap: 12px; }
-    .pill.save { width: 210px; height: 44px; padding: 0 16px 0 14px; gap: 10px; opacity: 0.85; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot-live);
+           flex: none; margin: 0 8px 0 2px; }
+    .dot.quiet { background: var(--dot-idle); }
 
-    .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--record); }
-    .dot.quiet { background: var(--ink-3); box-shadow: none; }
+    /* 4 bars, 3px wide, 4px apart, 18px travel — the shipped geometry. */
+    .meter { width: 36px; height: 22px; flex: none; display: flex; align-items: center;
+             gap: 4px; }
+    .meter i { width: 3px; border-radius: 1.5px; }
 
-    .mini { display: flex; align-items: flex-end; gap: 3px; height: 20px; flex: none; }
-    .mini i { width: 3px; border-radius: 2px; background: #B7BCC8; }
-    .mini.hot i { background: var(--record); }
-
-    .t { font-family: var(--mono); font-size: 13.5px; color: var(--ink);
-         font-variant-numeric: tabular-nums; letter-spacing: 0.2px; }
-    .t.dim { color: var(--ink-2); }
+    .t { font-family: var(--mono); font-size: 13px; color: var(--ink);
+         font-variant-numeric: tabular-nums; margin: 0 8px 0 10px; }
     .grow { flex: 1 1 auto; }
 
-    .acts { display: flex; align-items: center; gap: 4px; flex: none; }
-    .act {
-      width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
-      color: var(--ink-2); background: rgba(255,255,255,0.07);
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07);
-    }
-    .act.stop { color: #FFD9DA; background: rgba(229,72,77,0.24);
-                box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10); }
-
-    .spin { width: 15px; height: 15px; border-radius: 50%; flex: none;
-            border: 2px solid rgba(255,255,255,0.18); border-top-color: var(--ink-2); }
+    .acts { display: flex; align-items: center; gap: 6px; flex: none; }
+    .act { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+           color: var(--ink-2); background: rgba(255,255,255,0.07);
+           box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07); }
   </style>
 </helmet>
 
 <div class="stage">
-  <div class="behind">
-    <div class="lines">
-      <i style="width:88%"></i><i style="width:96%"></i><i style="width:72%"></i>
-      <i style="width:91%"></i><i style="width:56%"></i>
-    </div>
-    <div class="thumb"></div>
-    <div class="thumb2"></div>
-    <div class="code">
-      <i style="width:64%"></i><i style="width:80%"></i><i style="width:44%"></i>
-    </div>
-  </div>
-
   <div class="slot">
     <div class="pill rec">
       <div class="dot"></div>
-      <div class="mini hot">
-        <i style="height:7px"></i><i style="height:14px"></i><i style="height:19px"></i><i style="height:11px"></i>
+      <div class="meter">
+        <i style="height:9px;background:#3FC868"></i>
+        <i style="height:15px;background:#4DCC68"></i>
+        <i style="height:13px;background:#47CA69"></i>
+        <i style="height:7px;background:#3AC66A"></i>
       </div>
-      <div class="t">02:47</div>
+      <div class="t">00:08</div>
       <div class="grow"></div>
     </div>
-    <div class="cap">Recording &#183; 210 &#215; 44</div>
+    <div class="cap">Recording &#183; window is 210 &#215; 44</div>
   </div>
 
   <div class="slot">
     <div class="pill exp">
       <div class="dot"></div>
-      <div class="mini hot">
-        <i style="height:9px"></i><i style="height:17px"></i><i style="height:13px"></i><i style="height:6px"></i>
+      <div class="meter">
+        <i style="height:11px;background:#43C969"></i>
+        <i style="height:18px;background:#59D067"></i>
+        <i style="height:14px;background:#4ACB68"></i>
+        <i style="height:8px;background:#3CC669"></i>
       </div>
-      <div class="t">02:47</div>
+      <div class="t">00:08</div>
       <div class="grow"></div>
       <div class="acts">
-        <div class="act stop">
+        <div class="act">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"></rect></svg>
         </div>
         <div class="act">
@@ -140,17 +116,22 @@
         </div>
       </div>
     </div>
-    <div class="cap">Expanded on tap &#183; 320 &#215; 56</div>
+    <div class="cap">Expanded on tap &#183; window is 320 &#215; 56</div>
   </div>
 
   <div class="slot">
     <div class="pill save">
       <div class="dot quiet"></div>
-      <div class="spin"></div>
-      <div class="t dim">02:47</div>
+      <div class="meter">
+        <i style="height:2px;background:#35C46A"></i>
+        <i style="height:2px;background:#35C46A"></i>
+        <i style="height:2px;background:#35C46A"></i>
+        <i style="height:2px;background:#35C46A"></i>
+      </div>
+      <div class="t" style="opacity:.75">00:08</div>
       <div class="grow"></div>
     </div>
-    <div class="cap">Saving &#183; holds 350 ms, then fades out</div>
+    <div class="cap">Saving &#183; holds 350 ms, then hides</div>
   </div>
 </div>
 </x-dc>
