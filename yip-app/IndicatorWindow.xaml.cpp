@@ -9,6 +9,7 @@
 #include "Settings.h"
 #include "ThemeColors.h"
 
+#include <dwmapi.h>
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Microsoft.UI.h>
 #include <winrt/Microsoft.UI.Composition.h>
@@ -246,6 +247,15 @@ void IndicatorWindow::ApplyToolWindowStyle()
     ex |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     ex &= ~(WS_EX_APPWINDOW | WS_EX_LAYERED);
     ::SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, ex);
+
+    // Windows 11 rounds top-level windows to 8px and draws a 1px frame along
+    // the rectangle. The region already makes the pill a capsule, so that
+    // frame showed as square-ish corners outside it. Neither attribute exists
+    // before Windows 11; the calls just fail there, which is fine.
+    const DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_DONOTROUND;
+    (void)::DwmSetWindowAttribute(m_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
+    const COLORREF noBorder = DWMWA_COLOR_NONE;
+    (void)::DwmSetWindowAttribute(m_hwnd, DWMWA_BORDER_COLOR, &noBorder, sizeof(noBorder));
 }
 
 void IndicatorWindow::ApplyAlwaysOnTop()
@@ -381,7 +391,9 @@ void IndicatorWindow::UpdateMeterBars(float level, bool hot)
 void IndicatorWindow::UpdateDotForState(::yip::IndicatorState s)
 {
     if (!m_dotVisual) return;
-    const bool live = (s == ::yip::IndicatorState::Recording);
+    // Expanding the pill mid-take is still a live take: the lamp stays red.
+    const bool live = (s == ::yip::IndicatorState::Recording) ||
+                      (s == ::yip::IndicatorState::Expanded && m_recording);
     m_dotVisual.Brush(live ? m_dotRecordBrush : m_dotNeutralBrush);
 
     // Pulse opacity gently during recording for "alive" feel.
@@ -468,6 +480,7 @@ void IndicatorWindow::OnRecordingStateChanged(bool recording)
         // not yank the controls away. Just make sure the meter is live.
         if (m_state == ::yip::IndicatorState::Expanded) {
             if (m_meterTimer && !m_meterTimer.IsRunning()) m_meterTimer.Start();
+            UpdateDotForState(m_state);
             return;
         }
         TransitionTo(::yip::IndicatorState::Recording, true);
@@ -551,12 +564,17 @@ void IndicatorWindow::SyncWindowToState(::yip::IndicatorState s)
     // content is left-anchored, so the dot and the meter were cut off the left
     // edge and the timer lost its first digit. Sizing the window to the state
     // cannot drift out of step with the content.
+    //
+    // The HWND and its region are physical pixels while the geometry is DIPs:
+    // unscaled, a 210x44 pill at 200% got a 105x22 window and lost half its
+    // content off the right and bottom edges.
+    const int pw = static_cast<int>(std::lround(g.w * DpiScale()));
+    const int ph = static_cast<int>(std::lround(g.h * DpiScale()));
     auto appWindow = muw::AppWindow::GetFromWindowId(AppWindow().Id());
-    if (appWindow) appWindow.Resize({w, h});
+    if (appWindow) appWindow.Resize({pw, ph});
 
     // Windows takes ownership of the region.
-    const int diameter = h;
-    ::SetWindowRgn(m_hwnd, ::CreateRoundRectRgn(0, 0, w + 1, h + 1, diameter, diameter), TRUE);
+    ::SetWindowRgn(m_hwnd, ::CreateRoundRectRgn(0, 0, pw + 1, ph + 1, ph, ph), TRUE);
 
     const double radius = g.h * 0.5;
     PillFrame().Width(g.w);
@@ -736,9 +754,20 @@ void IndicatorWindow::OnOpenLastClicked(winrt::Windows::Foundation::IInspectable
 
 // =========================================================== Edge snap + persistence
 
+double IndicatorWindow::DpiScale() const noexcept
+{
+    const UINT dpi = m_hwnd ? ::GetDpiForWindow(m_hwnd) : 0;
+    return dpi > 0 ? static_cast<double>(dpi) / 96.0 : 1.0;
+}
+
 void IndicatorWindow::RestoreFromPersistence()
 {
     if (!m_hwnd) return;
+
+    // WorkArea is physical pixels, so the pill's DIP size has to be scaled
+    // before it is used to centre or dock against it.
+    const int winW = static_cast<int>(std::lround(kWindowW * DpiScale()));
+    const int winH = static_cast<int>(std::lround(kWindowH * DpiScale()));
 
     auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
@@ -759,26 +788,26 @@ void IndicatorWindow::RestoreFromPersistence()
 
     const auto work = chosen.WorkArea();
 
-    int x = work.X + (work.Width - kWindowW) / 2;
+    int x = work.X + (work.Width - winW) / 2;
     int y = work.Y + 20;
 
     const double t = std::clamp(m_persisted.edge_offset, 0.0, 1.0);
     switch (m_persisted.dock_edge) {
         case ::yip::DockEdge::Top:
-            x = work.X + static_cast<int>(std::lround((work.Width - kWindowW) * t));
+            x = work.X + static_cast<int>(std::lround((work.Width - winW) * t));
             y = work.Y + 12;
             break;
         case ::yip::DockEdge::Bottom:
-            x = work.X + static_cast<int>(std::lround((work.Width - kWindowW) * t));
-            y = work.Y + work.Height - kWindowH - 12;
+            x = work.X + static_cast<int>(std::lround((work.Width - winW) * t));
+            y = work.Y + work.Height - winH - 12;
             break;
         case ::yip::DockEdge::Left:
             x = work.X + 12;
-            y = work.Y + static_cast<int>(std::lround((work.Height - kWindowH) * t));
+            y = work.Y + static_cast<int>(std::lround((work.Height - winH) * t));
             break;
         case ::yip::DockEdge::Right:
-            x = work.X + work.Width - kWindowW - 12;
-            y = work.Y + static_cast<int>(std::lround((work.Height - kWindowH) * t));
+            x = work.X + work.Width - winW - 12;
+            y = work.Y + static_cast<int>(std::lround((work.Height - winH) * t));
             break;
         case ::yip::DockEdge::None:
         default:

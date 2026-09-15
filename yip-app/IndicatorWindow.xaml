@@ -77,26 +77,49 @@
                             VerticalAlignment="Center"
                             Visibility="Collapsed"
                             IsHitTestVisible="False">
+                    <StackPanel.Resources>
+                        <!-- Round glass buttons, as drawn in .design/Pill.dc.html. -->
+                        <Style x:Key="PillActionButton" TargetType="Button">
+                            <Setter Property="Width" Value="34" />
+                            <Setter Property="Height" Value="34" />
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="CornerRadius" Value="17" />
+                            <Setter Property="BorderThickness" Value="1" />
+                            <Setter Property="Background" Value="{ThemeResource YipIndicatorActionFillBrush}" />
+                            <Setter Property="BorderBrush" Value="{ThemeResource YipIndicatorActionStrokeBrush}" />
+                            <Setter Property="Foreground" Value="{ThemeResource YipIndicatorActionInkBrush}" />
+                            <Setter Property="HorizontalContentAlignment" Value="Center" />
+                            <Setter Property="VerticalContentAlignment" Value="Center" />
+                        </Style>
+                    </StackPanel.Resources>
                     <Button x:Name="StopButton"
+                            Style="{StaticResource PillActionButton}"
                             Click="OnStopClicked"
+                            AutomationProperties.Name="Stop"
                             ToolTipService.ToolTip="Stop">
-                        <FontIcon FontFamily="Segoe Fluent Icons"
-                                  Glyph="&#xE71A;"
-                                  FontSize="14" />
+                        <Rectangle Width="9" Height="9" RadiusX="2" RadiusY="2"
+                                   Fill="{ThemeResource YipIndicatorActionInkBrush}" />
                     </Button>
                     <Button x:Name="MarkButton"
+                            Style="{StaticResource PillActionButton}"
                             Click="OnMarkClicked"
+                            AutomationProperties.Name="Mark moment"
                             ToolTipService.ToolTip="Mark moment">
-                        <FontIcon FontFamily="Segoe Fluent Icons"
-                                  Glyph="&#xE8A9;"
-                                  FontSize="14" />
+                        <!-- Three strokes: a waveform tick, not a generic glyph. -->
+                        <Path Width="14" Height="14" Stretch="Uniform"
+                              Data="M12,4 L12,20 M6,9 L6,15 M18,9 L18,15"
+                              Stroke="{ThemeResource YipIndicatorActionInkBrush}"
+                              StrokeThickness="1.6"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
                     </Button>
                     <Button x:Name="OpenLastButton"
+                            Style="{StaticResource PillActionButton}"
                             Click="OnOpenLastClicked"
+                            AutomationProperties.Name="Open last recording"
                             ToolTipService.ToolTip="Open last recording">
                         <FontIcon FontFamily="Segoe Fluent Icons"
-                                  Glyph="&#xE838;"
-                                  FontSize="14" />
+                                  Glyph="&#xE8B7;"
+                                  FontSize="13" />
                     </Button>
                 </StackPanel>
             </Grid>

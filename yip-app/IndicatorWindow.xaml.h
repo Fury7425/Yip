@@ -64,6 +64,7 @@ private:
 
     // ----- Edge dock / monitor restore -----
     void RestoreFromPersistence();
+    double DpiScale() const noexcept;
     void SnapToNearestEdgeIfClose();
     void RememberPosition();
 
