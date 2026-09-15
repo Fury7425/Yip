@@ -172,6 +172,7 @@
     <ClCompile Include="HotkeyManager.cpp" />
     <ClCompile Include="RecordingStateBus.cpp" />
     <ClCompile Include="WavProbe.cpp" />
+    <ClCompile Include="ThemeColors.cpp" />
   </ItemGroup>
 
   <ItemGroup>
@@ -201,6 +202,7 @@
     <ClInclude Include="HotkeyManager.h" />
     <ClInclude Include="RecordingStateBus.h" />
     <ClInclude Include="WavProbe.h" />
+    <ClInclude Include="ThemeColors.h" />
   </ItemGroup>
 
   <ItemGroup>

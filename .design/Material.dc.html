@@ -55,11 +55,11 @@
     .sw span { position: absolute; left: 0; right: 0; bottom: 4px; text-align: center;
                font-size: 8.5px; letter-spacing: 0.8px; color: rgba(255,255,255,0.85); }
     .d1 i { background: rgba(255,255,255,0.055);
-            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.09), inset 0 1px 0 rgba(255,255,255,0.22); }
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.065); }
     .d2 i { background: rgba(255,255,255,0.085);
-            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10), inset 0 1px 0 rgba(255,255,255,0.26); }
-    .d3 i { background: rgba(20,21,24,0.44);
-            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.11), inset 0 1.2px 0 rgba(255,255,255,0.30); }
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.065); }
+    .d3 i { background: rgba(20,21,24,0.38);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.075), inset 0 1px 0 rgba(255,255,255,0.12); }
 
     ul { margin: 0; padding-left: 15px; }
     li { font-size: 11px; line-height: 1.5; color: var(--ink-2); margin-bottom: 5px; }
@@ -103,13 +103,13 @@
         <div class="sw d3"><i></i><span>PILL</span></div>
       </div>
       <table>
-        <tr><td class="k">Card tint / stroke</td><td class="v">#FFF 5.5% &#183; #FFF 9%</td></tr>
-        <tr><td class="k">Control tint / stroke</td><td class="v">#FFF 8.5% &#183; #FFF 10%</td></tr>
-        <tr><td class="k">Pill tint / stroke</td><td class="v">#141518 44% &#183; #FFF 11%</td></tr>
-        <tr><td class="k">Specular top / bottom</td><td class="v">#FFF 22% &#183; #000 30%</td></tr>
+        <tr><td class="k">Card tint / stroke</td><td class="v">#FFF 5.5% &#183; #FFF 6.5%</td></tr>
+        <tr><td class="k">Control tint / stroke</td><td class="v">#FFF 8.5% &#183; #FFF 6.5%</td></tr>
+        <tr><td class="k">Pill tint / stroke</td><td class="v">#141518 38% &#183; #FFF 7.5%</td></tr>
+        <tr><td class="k">Rim light (top only)</td><td class="v">#FFF 10% &#8212; pill 12%</td></tr>
         <tr><td class="k">Blur / saturate</td><td class="v">28px / 150% &#8212; pill 34px / 170%</td></tr>
-        <tr><td class="k">Sheen</td><td class="v">radial 130% 90% at 6% -10%</td></tr>
-        <tr><td class="k">Elevation</td><td class="v">0 14px 34px #000 38%</td></tr>
+        <tr><td class="k">Sheen</td><td class="v">none &#8212; flat surfaces</td></tr>
+        <tr><td class="k">Elevation</td><td class="v">0 6px 18px #000 22%</td></tr>
       </table>
       <h2 style="margin-top:2px">Geometry &amp; type</h2>
       <table>
@@ -128,6 +128,8 @@
         <li><b>The pill needs no effect at all</b> &#8212; it is its own window, so <code>DesktopAcrylicBackdrop</code> gives it the blur at window level, for free.</li>
         <li>Specular edge is a 1&#8239;px <code>CompositionNineGridBrush</code> over a vertical <code>CompositionLinearGradientBrush</code>, not a stack of box-shadows.</li>
         <li>Elevation is a composition <code>DropShadow</code> on the card visual, not a painted border.</li>
+        <li><b>No colour is written in C++.</b> Every value above is a brush in <code>App.xaml</code>&#8217;s Light and Dark dictionaries; code resolves it by key and re-resolves on <code>ActualThemeChanged</code>. Composition needs a <code>Color</code>, not a <code>Brush</code>, so it reads <code>.Color</code> off the looked-up brush &#8212; it still does not own the value.</li>
+        <li><b>Nothing paints opaque.</b> Cards are a tint over the window backdrop; if a surface ever needs a solid fill, the backdrop has stopped doing its job.</li>
       </ul>
       <h2 style="margin-top:2px">Per meter tick, at 60&#8239;Hz</h2>
       <div class="budget">

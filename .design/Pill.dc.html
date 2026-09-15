@@ -13,9 +13,9 @@
       --ink-2:    #B7BCC8;
       --ink-3:    #767C8C;
       --record:   #E5484D;
-      --g-stroke: rgba(255,255,255,0.11);
-      --g-spec-t: rgba(255,255,255,0.30);
-      --g-spec-b: rgba(0,0,0,0.34);
+      --g-stroke: rgba(255,255,255,0.075);
+      --g-spec-t: rgba(255,255,255,0.12);
+      --g-spec-b: rgba(0,0,0,0.12);
       --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
       --mono: "Cascadia Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
     }
@@ -56,28 +56,20 @@
     .pill {
       position: relative; display: flex; align-items: center;
       border-radius: 999px;
-      background: rgba(20,21,24,0.44);
+      background: rgba(20,21,24,0.38);
       backdrop-filter: blur(34px) saturate(170%);
       -webkit-backdrop-filter: blur(34px) saturate(170%);
       box-shadow:
         inset 0 0 0 1px var(--g-stroke),
-        inset 0 1.2px 0 var(--g-spec-t),
-        inset 0 -1.2px 0 var(--g-spec-b),
-        0 12px 30px rgba(0,0,0,0.46),
-        0 2px 6px rgba(0,0,0,0.30);
-    }
-    /* Liquid Glass edge: light gathers on the upper-left arc and falls off. */
-    .pill::after {
-      content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-      background: radial-gradient(120% 160% at 10% -30%, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0) 46%);
+        inset 0 1px 0 var(--g-spec-t),
+        0 6px 18px rgba(0,0,0,0.30);
     }
 
     .pill.rec  { width: 210px; height: 44px; padding: 0 16px 0 14px; gap: 10px; }
     .pill.exp  { width: 320px; height: 56px; padding: 0 8px 0 18px; gap: 12px; }
     .pill.save { width: 210px; height: 44px; padding: 0 16px 0 14px; gap: 10px; opacity: 0.85; }
 
-    .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--record);
-           box-shadow: 0 0 12px rgba(229,72,77,0.9); }
+    .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--record); }
     .dot.quiet { background: var(--ink-3); box-shadow: none; }
 
     .mini { display: flex; align-items: flex-end; gap: 3px; height: 20px; flex: none; }
@@ -93,10 +85,10 @@
     .act {
       width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
       color: var(--ink-2); background: rgba(255,255,255,0.07);
-      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), inset 0 1px 0 rgba(255,255,255,0.14);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07);
     }
-    .act.stop { color: #FFD9DA; background: rgba(229,72,77,0.26);
-                box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14), inset 0 1px 0 rgba(255,255,255,0.26); }
+    .act.stop { color: #FFD9DA; background: rgba(229,72,77,0.24);
+                box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10); }
 
     .spin { width: 15px; height: 15px; border-radius: 50%; flex: none;
             border: 2px solid rgba(255,255,255,0.18); border-top-color: var(--ink-2); }

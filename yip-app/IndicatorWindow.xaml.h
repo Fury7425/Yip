@@ -41,6 +41,11 @@ private:
 
     // ----- Composition layer -----
     void BuildCompositionLayer();
+    // Composition holds Colors, not {ThemeResource} bindings, so the tokens
+    // have to be re-read whenever the system theme flips.
+    void ResolveThemeBrushes();
+    void OnActualThemeChanged(winrt::Microsoft::UI::Xaml::FrameworkElement const& sender,
+                              winrt::Windows::Foundation::IInspectable const& args);
     // One rec_meter() snapshot per tick, fanned out to the bars and the timer.
     void UpdateFromMeter();
     void UpdateMeterBars(float level, bool hot);
@@ -73,6 +78,7 @@ private:
     ::yip::IndicatorState m_baseState{::yip::IndicatorState::Idle}; // state before expansion
     ::yip::IndicatorPersistence m_persisted{};
     ::yip::RecordingStateBus::Token m_stateToken{0};
+    winrt::event_token m_themeToken{};
 
     // Composition
     winrt::Microsoft::UI::Composition::Compositor m_compositor{nullptr};

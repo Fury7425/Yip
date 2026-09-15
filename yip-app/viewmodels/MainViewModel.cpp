@@ -7,6 +7,7 @@
 #include "AudioCoreInterop.h"
 #include "HotkeyManager.h"
 #include "Markers.h"
+#include "ThemeColors.h"
 #include "WavProbe.h"
 
 #include <winrt/Microsoft.UI.Xaml.Media.h>
@@ -223,17 +224,22 @@ void MainViewModel::SelectedDeviceIndex(int32_t v)
 
 winrt::Microsoft::UI::Xaml::Media::Brush MainViewModel::RecordButtonBrush() const
 {
-    // Built once each. This is read on every state flip and by the button's
-    // own visual states, so handing back a fresh brush each time was waste.
-    if (!m_idleBrush) {
-        m_idleBrush = winrt::Microsoft::UI::Xaml::Media::SolidColorBrush{
-            winrt::Windows::UI::ColorHelper::FromArgb(0xFF, 0x3D, 0x7A, 0xFF)};
+    // Both values live in App.xaml's theme dictionaries, so light and dark each
+    // get their own and nothing is written twice. Cached because the button's
+    // visual states read this often.
+    if (m_isRecording) {
+        if (!m_recordBrush) m_recordBrush = ::yip::theme::Brush(L"YipRecordFillLiveBrush");
+        return m_recordBrush;
     }
-    if (!m_recordBrush) {
-        m_recordBrush = winrt::Microsoft::UI::Xaml::Media::SolidColorBrush{
-            winrt::Windows::UI::ColorHelper::FromArgb(0xFF, 0xE5, 0x48, 0x4D)};
-    }
-    return m_isRecording ? m_recordBrush : m_idleBrush;
+    if (!m_idleBrush) m_idleBrush = ::yip::theme::Brush(L"YipRecordFillIdleBrush");
+    return m_idleBrush;
+}
+
+void MainViewModel::InvalidateThemeBrushes()
+{
+    m_idleBrush = nullptr;
+    m_recordBrush = nullptr;
+    Raise(L"RecordButtonBrush");
 }
 
 void MainViewModel::RefreshDevices()
@@ -509,11 +515,29 @@ void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleR
     Raise(L"OutputFolder");
     Raise(L"SampleRate");
     Raise(L"Channels");
+    Raise(L"FormatLabel");
     Raise(L"HotkeyMods");
     Raise(L"HotkeyVk");
     Raise(L"HotkeyLabel");
     RefreshRecordings();
     if (!HasError()) SetStatus(L"Settings saved");
+}
+
+winrt::hstring MainViewModel::FormatLabel() const
+{
+    // audio-core always writes IEEE float32; only the rate and channel count
+    // are the user's to choose.
+    wchar_t const* channels = m_settings.channels == 1   ? L"mono"
+                              : m_settings.channels == 2 ? L"stereo"
+                                                         : L"multi";
+    wchar_t buf[96];
+    if (m_settings.sample_rate % 1000 == 0) {
+        swprintf_s(buf, L"%u kHz\u00B7%s\u00B732-BIT FLOAT", m_settings.sample_rate / 1000, channels);
+    } else {
+        swprintf_s(buf, L"%.1f kHz\u00B7%s\u00B732-BIT FLOAT",
+                   static_cast<double>(m_settings.sample_rate) / 1000.0, channels);
+    }
+    return winrt::hstring{buf};
 }
 
 winrt::hstring MainViewModel::HotkeyLabel() const

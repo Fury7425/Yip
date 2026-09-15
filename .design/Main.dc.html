@@ -22,9 +22,9 @@
          the app is this recipe at one of three depths. */
       --g-tint:     rgba(255,255,255,0.055);
       --g-tint-2:   rgba(255,255,255,0.085);
-      --g-stroke:   rgba(255,255,255,0.09);
-      --g-spec-t:   rgba(255,255,255,0.22);
-      --g-spec-b:   rgba(0,0,0,0.30);
+      --g-stroke:   rgba(255,255,255,0.065);
+      --g-spec-t:   rgba(255,255,255,0.10);
+      --g-spec-b:   rgba(0,0,0,0.10);
       --g-blur:     blur(28px) saturate(150%);
 
       --r-card:     22px;
@@ -71,7 +71,7 @@
       border-radius: 10px; color: var(--ink-2);
       background: var(--g-tint); backdrop-filter: var(--g-blur);
       -webkit-backdrop-filter: var(--g-blur);
-      box-shadow: inset 0 0 0 1px var(--g-stroke), inset 0 1px 0 var(--g-spec-t);
+      box-shadow: inset 0 0 0 1px var(--g-stroke);
     }
     .caption { display: flex; gap: 2px; margin-left: 4px; color: var(--ink-3); }
     .caption span { width: 30px; height: 30px; display: grid; place-items: center; font-size: 11px; }
@@ -85,14 +85,7 @@
         inset 0 0 0 1px var(--g-stroke),
         inset 0 1px 0 var(--g-spec-t),
         inset 0 -1px 0 var(--g-spec-b),
-        0 14px 34px rgba(0,0,0,0.38);
-    }
-    /* The "liquid" read: a soft off-axis sheen, as if the panel were bending
-       the light behind it. One gradient, no per-frame cost. */
-    .card::after {
-      content: ""; position: absolute; inset: 0; border-radius: inherit;
-      pointer-events: none;
-      background: radial-gradient(130% 90% at 6% -10%, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 52%);
+        0 6px 18px rgba(0,0,0,0.22);
     }
 
     .hero { flex: none; margin: 0 16px; padding: 16px 18px 18px; }
@@ -103,7 +96,7 @@
       display: flex; align-items: center; gap: 8px; height: 30px;
       padding: 0 12px 0 10px; border-radius: var(--r-pill);
       background: var(--g-tint-2);
-      box-shadow: inset 0 0 0 1px var(--g-stroke), inset 0 1px 0 rgba(255,255,255,0.16);
+      box-shadow: inset 0 0 0 1px var(--g-stroke);
       color: var(--ink); font-size: 12.5px; max-width: 250px;
     }
     .devname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -147,16 +140,11 @@
     .rec {
       width: 62px; height: 62px; border-radius: 50%; display: grid; place-items: center;
       position: relative;
-      background: radial-gradient(120% 120% at 32% 22%, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.02) 46%),
-                  rgba(229,72,77,0.20);
-      box-shadow:
-        inset 0 0 0 1px rgba(255,255,255,0.14),
-        inset 0 1px 0 rgba(255,255,255,0.30),
-        0 8px 22px rgba(229,72,77,0.28);
+      background: rgba(229,72,77,0.18);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.10);
       backdrop-filter: var(--g-blur); -webkit-backdrop-filter: var(--g-blur);
     }
-    .rec b { width: 22px; height: 22px; border-radius: 50%; background: var(--record);
-             box-shadow: 0 0 14px rgba(229,72,77,0.55); }
+    .rec b { width: 22px; height: 22px; border-radius: 50%; background: var(--record); }
     .hint { position: absolute; bottom: -2px; left: 50%; transform: translate(-50%, 100%);
             font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); white-space: nowrap; }
 

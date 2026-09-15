@@ -58,6 +58,9 @@ namespace yip.viewmodels
         UInt32 SampleRate{ get; };
         UInt16 Channels{ get; };
 
+        // "48 kHz · stereo · 32-bit float" - what the next take will be.
+        String FormatLabel{ get; };
+
         // Win32 MOD_* bitmask + virtual-key code for the global record hotkey.
         UInt32 HotkeyMods{ get; };
         UInt32 HotkeyVk{ get; };
@@ -89,6 +92,10 @@ namespace yip.viewmodels
         // that end a session without going through ToggleRecording.
         void SyncRecordingState(Boolean recording);
         void ReportHotkeyConflict();
+
+        // Drop the cached transport brushes so the next read resolves against
+        // the theme dictionary that is now current.
+        void InvalidateThemeBrushes();
         void DismissError();
         void AcknowledgeClip();
     }

@@ -4,128 +4,84 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
+    <!--
+        Every colour in Yip lives in the theme dictionaries at the bottom of
+        this file, including the ones only C++ reads: `yip::theme::Color()`
+        resolves them by key so nothing is written twice. Geometry and motion
+        constants that only code consumes are NOT mirrored here — the code owns
+        those outright rather than pretending this file is their source.
+    -->
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <XamlControlsResources xmlns="using:Microsoft.UI.Xaml.Controls" />
             </ResourceDictionary.MergedDictionaries>
 
-            <!-- ======================== Brand tokens (shared) ======================== -->
-            <SolidColorBrush x:Key="YipAccentBrush"      Color="#3D7AFF" />
-            <SolidColorBrush x:Key="YipRecordingBrush"   Color="#E5484D" />
-            <SolidColorBrush x:Key="YipMeterTrackBrush"  Color="#2A2A2A" />
-            <SolidColorBrush x:Key="YipMeterFillBrush"   Color="#5BD167" />
-
             <!-- ============================== Geometry ============================== -->
-            <CornerRadius x:Key="YipCardCornerRadius">8</CornerRadius>
-            <CornerRadius x:Key="YipControlCornerRadius">6</CornerRadius>
-            <CornerRadius x:Key="YipMeterCornerRadius">4</CornerRadius>
-            <Thickness x:Key="YipCardPadding">16</Thickness>
-            <Thickness x:Key="YipWindowPadding">20,16,20,16</Thickness>
+            <CornerRadius x:Key="YipCardCornerRadius">14</CornerRadius>
+            <CornerRadius x:Key="YipControlCornerRadius">8</CornerRadius>
+            <CornerRadius x:Key="YipMeterCornerRadius">8</CornerRadius>
+            <CornerRadius x:Key="YipPillCornerRadius">999</CornerRadius>
 
             <!-- Spacing scale. Every gap in the app is one of these five. -->
             <x:Double x:Key="YipSpaceXs">4</x:Double>
             <x:Double x:Key="YipSpaceSm">8</x:Double>
             <x:Double x:Key="YipSpaceMd">12</x:Double>
             <x:Double x:Key="YipSpaceLg">16</x:Double>
-            <x:Double x:Key="YipSpaceXl">24</x:Double>
+            <x:Double x:Key="YipSpaceXl">20</x:Double>
 
             <!-- ============================ Type scale ============================== -->
             <!-- Numerals (timer, dB, durations) are monospaced so digits do not
-                 jitter as they change. Font names are inline at each use site:
+                 jitter as they change. Font names stay inline at each use site:
                  a FontFamily resource is not reliably constructible from XAML. -->
-            <x:Double x:Key="YipFontTimer">34</x:Double>
-            <x:Double x:Key="YipFontTitle">20</x:Double>
+            <x:Double x:Key="YipFontTimer">46</x:Double>
             <x:Double x:Key="YipFontSection">13</x:Double>
             <x:Double x:Key="YipFontBody">14</x:Double>
             <x:Double x:Key="YipFontCaption">12</x:Double>
-            <x:Double x:Key="YipFontMicro">11</x:Double>
-
-            <!-- ============================ Motion tokens ============================ -->
-            <!-- Fluent standard easing. Reused by all state transitions. -->
-            <x:Double x:Key="YipMotionEaseX1">0.4</x:Double>
-            <x:Double x:Key="YipMotionEaseY1">0.0</x:Double>
-            <x:Double x:Key="YipMotionEaseX2">0.2</x:Double>
-            <x:Double x:Key="YipMotionEaseY2">1.0</x:Double>
-
-            <x:Int32 x:Key="YipMotionFadeMs">180</x:Int32>
-            <x:Int32 x:Key="YipMotionResizeMs">220</x:Int32>
-            <x:Int32 x:Key="YipMotionMeterTickMs">33</x:Int32>
+            <x:Double x:Key="YipFontMicro">10</x:Double>
 
             <!-- ========================= Level meter scale ========================== -->
             <!-- The meter is logarithmic: a linear-amplitude bar spends its whole
                  travel in the bottom fifth and tells you nothing. Position maps
-                 dBFS over YipMeterFloorDb..0 onto 0..1; the tick marks in
-                 MainWindow are placed on the same curve. -->
+                 dBFS over YipMeterFloorDb..0 onto 0..1; the gridlines in
+                 MainWindow sit on the same curve. -->
             <x:Double x:Key="YipMeterFloorDb">-60</x:Double>
-            <x:Double x:Key="YipMeterHeight">10</x:Double>
-            <x:Double x:Key="YipMeterHoldWidth">2</x:Double>
+            <x:Double x:Key="YipWaveHeight">76</x:Double>
 
-            <!-- ======================= Indicator pill tokens ======================== -->
-            <!-- Inner pill rect (Visual.Size animated). Window HWND is fixed at 320x56. -->
-            <x:Double x:Key="YipIndicatorWindowWidth">320</x:Double>
-            <x:Double x:Key="YipIndicatorWindowHeight">56</x:Double>
-
-            <!--
-                Idle + Armed states are *invisible* by product decision.
-                The window is hidden (AppWindow.Hide) in these states, so
-                the geometry tokens below are kept only for reference and
-                potential future "minimal dim pill" reuse.
-            -->
-            <x:Double x:Key="YipIndicatorIdleWidth">0</x:Double>
-            <x:Double x:Key="YipIndicatorIdleHeight">0</x:Double>
-            <x:Double x:Key="YipIndicatorIdleOpacity">0.00</x:Double>
-
-            <x:Double x:Key="YipIndicatorArmedWidth">0</x:Double>
-            <x:Double x:Key="YipIndicatorArmedHeight">0</x:Double>
-            <x:Double x:Key="YipIndicatorArmedOpacity">0.00</x:Double>
-
-            <x:Double x:Key="YipIndicatorRecordingWidth">210</x:Double>
-            <x:Double x:Key="YipIndicatorRecordingHeight">44</x:Double>
-            <x:Double x:Key="YipIndicatorRecordingOpacity">1.00</x:Double>
-
+            <!-- ===================== Indicator pill (XAML-side) ===================== -->
+            <!-- Only what the pill's XAML reads. Its state geometry and motion
+                 timings are constants in IndicatorWindow.xaml.cpp. -->
             <x:Double x:Key="YipIndicatorExpandedWidth">320</x:Double>
             <x:Double x:Key="YipIndicatorExpandedHeight">56</x:Double>
-            <x:Double x:Key="YipIndicatorExpandedOpacity">1.00</x:Double>
-
-            <x:Double x:Key="YipIndicatorSavingOpacity">0.85</x:Double>
-
             <CornerRadius x:Key="YipIndicatorCornerRadius">22</CornerRadius>
             <Thickness x:Key="YipIndicatorPadding">10,4,10,4</Thickness>
-
-            <!-- Level meter (compositor-side bars) -->
-            <x:Double x:Key="YipMeterBarWidth">3</x:Double>
-            <x:Double x:Key="YipMeterBarGap">4</x:Double>
-            <x:Double x:Key="YipMeterBarMaxHeight">18</x:Double>
-            <x:Int32  x:Key="YipMeterBarCount">4</x:Int32>
-            <x:Int32  x:Key="YipMeterBarPhaseOffsetMs">60</x:Int32>
-
-            <!-- Drag affordance + click-through indicator -->
-            <x:Double x:Key="YipIndicatorDragHandleOpacity">0.45</x:Double>
-            <x:Double x:Key="YipIndicatorClickThruDashWidth">1.0</x:Double>
-            <x:Double x:Key="YipIndicatorClickThruDashOpacity">0.55</x:Double>
-
-            <!-- Edge dock magnet -->
-            <x:Double x:Key="YipIndicatorSnapDistance">20</x:Double>
-            <x:Int32  x:Key="YipIndicatorAutoCollapseMs">3000</x:Int32>
 
             <!-- ===================== Theme-aware surfaces ===================== -->
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Light">
-                    <!-- Main window -->
-                    <SolidColorBrush x:Key="YipCardBrush"              Color="#FFFFFF" Opacity="0.70" />
-                    <SolidColorBrush x:Key="YipCardStrokeBrush"        Color="#000000" Opacity="0.08" />
-                    <SolidColorBrush x:Key="YipTextPrimaryBrush"       Color="#0A0A0B" />
-                    <SolidColorBrush x:Key="YipTextSecondaryBrush"     Color="#525866" />
-                    <SolidColorBrush x:Key="YipTextTertiaryBrush"      Color="#8A90A0" />
-                    <SolidColorBrush x:Key="YipMeterTrackQuietBrush"   Color="#000000" Opacity="0.08" />
-                    <SolidColorBrush x:Key="YipMeterTickBrush"         Color="#000000" Opacity="0.18" />
-                    <SolidColorBrush x:Key="YipMeterHoldBrush"         Color="#0A0A0B" Opacity="0.65" />
-                    <SolidColorBrush x:Key="YipClipIdleBrush"          Color="#000000" Opacity="0.10" />
-                    <SolidColorBrush x:Key="YipClipLitBrush"           Color="#E5484D" />
+                    <!-- Surfaces. A tint over the window backdrop, never a fill:
+                         if one of these ever needs to be opaque, Mica has
+                         stopped doing its job. -->
+                    <SolidColorBrush x:Key="YipCardBrush"            Color="#FFFFFF" Opacity="0.55" />
+                    <SolidColorBrush x:Key="YipCardStrokeBrush"      Color="#000000" Opacity="0.06" />
+                    <SolidColorBrush x:Key="YipControlFillBrush"     Color="#FFFFFF" Opacity="0.70" />
+                    <SolidColorBrush x:Key="YipControlStrokeBrush"   Color="#000000" Opacity="0.07" />
 
-                    <!-- Meter gradient. Green until it matters, amber at the
-                         point where headroom gets thin, red at the top. -->
+                    <!-- Text -->
+                    <SolidColorBrush x:Key="YipTextPrimaryBrush"     Color="#0A0A0B" />
+                    <SolidColorBrush x:Key="YipTextSecondaryBrush"   Color="#525866" />
+                    <SolidColorBrush x:Key="YipTextTertiaryBrush"    Color="#8A90A0" />
+
+                    <!-- Meter + waveform -->
+                    <SolidColorBrush x:Key="YipMeterTrackQuietBrush" Color="#000000" Opacity="0.05" />
+                    <SolidColorBrush x:Key="YipMeterTickBrush"       Color="#000000" Opacity="0.13" />
+                    <SolidColorBrush x:Key="YipMeterHoldBrush"       Color="#0A0A0B" Opacity="0.50" />
+                    <SolidColorBrush x:Key="YipWaveRestBrush"        Color="#000000" Opacity="0.16" />
+                    <SolidColorBrush x:Key="YipClipLitBrush"         Color="#E5484D" />
+
+                    <!-- Meter gradient. Green until it matters, amber where
+                         headroom gets thin, red at the top. Code reads these
+                         stops to colour the waveform, so there is one ramp. -->
                     <LinearGradientBrush x:Key="YipMeterGradientBrush" StartPoint="0,0" EndPoint="1,0">
                         <GradientStop Color="#2FA84F" Offset="0.00" />
                         <GradientStop Color="#4FBF63" Offset="0.55" />
@@ -134,28 +90,39 @@
                         <GradientStop Color="#E5484D" Offset="1.00" />
                     </LinearGradientBrush>
 
+                    <!-- Transport -->
+                    <SolidColorBrush x:Key="YipRecordFillIdleBrush"  Color="#E5484D" Opacity="0.14" />
+                    <SolidColorBrush x:Key="YipRecordFillLiveBrush"  Color="#E5484D" Opacity="0.30" />
+                    <SolidColorBrush x:Key="YipRecordStrokeBrush"    Color="#000000" Opacity="0.08" />
+                    <SolidColorBrush x:Key="YipRecordCoreBrush"      Color="#E5484D" />
+                    <SolidColorBrush x:Key="YipLampIdleBrush"        Color="#8A90A0" />
+                    <SolidColorBrush x:Key="YipLampLiveBrush"        Color="#E5484D" />
+
                     <!-- Indicator pill -->
-                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"        Color="#FAFAFB" Opacity="0.85" />
-                    <SolidColorBrush x:Key="YipIndicatorStrokeQuietBrush"    Color="#000000" Opacity="0.08" />
-                    <SolidColorBrush x:Key="YipIndicatorAccentNeutralBrush"  Color="#525866" />
-                    <SolidColorBrush x:Key="YipIndicatorMeterTrackQuietBrush" Color="#000000" Opacity="0.06" />
-                    <SolidColorBrush x:Key="YipIndicatorMeterBarIdleBrush"   Color="#525866" />
-                    <SolidColorBrush x:Key="YipIndicatorMeterBarLiveBrush"   Color="#E5484D" />
-                    <SolidColorBrush x:Key="YipIndicatorTimerBrush"          Color="#0A0A0B" />
-                    <SolidColorBrush x:Key="YipIndicatorDragHandleBrush"     Color="#000000" Opacity="0.30" />
+                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"      Color="#FAFAFB" Opacity="0.72" />
+                    <SolidColorBrush x:Key="YipIndicatorStrokeQuietBrush"  Color="#000000" Opacity="0.07" />
+                    <SolidColorBrush x:Key="YipIndicatorMeterBarIdleBrush" Color="#525866" />
+                    <SolidColorBrush x:Key="YipIndicatorMeterBarLiveBrush" Color="#E5484D" />
+                    <SolidColorBrush x:Key="YipIndicatorDotIdleBrush"      Color="#8A90A0" />
+                    <SolidColorBrush x:Key="YipIndicatorDotLiveBrush"      Color="#E5484D" />
+                    <SolidColorBrush x:Key="YipIndicatorTimerBrush"        Color="#0A0A0B" />
                 </ResourceDictionary>
+
                 <ResourceDictionary x:Key="Dark">
-                    <!-- Main window -->
-                    <SolidColorBrush x:Key="YipCardBrush"              Color="#FFFFFF" Opacity="0.045" />
-                    <SolidColorBrush x:Key="YipCardStrokeBrush"        Color="#FFFFFF" Opacity="0.08" />
-                    <SolidColorBrush x:Key="YipTextPrimaryBrush"       Color="#F2F3F5" />
-                    <SolidColorBrush x:Key="YipTextSecondaryBrush"     Color="#B7BCC8" />
-                    <SolidColorBrush x:Key="YipTextTertiaryBrush"      Color="#767C8C" />
-                    <SolidColorBrush x:Key="YipMeterTrackQuietBrush"   Color="#000000" Opacity="0.35" />
-                    <SolidColorBrush x:Key="YipMeterTickBrush"         Color="#FFFFFF" Opacity="0.16" />
-                    <SolidColorBrush x:Key="YipMeterHoldBrush"         Color="#FFFFFF" Opacity="0.75" />
-                    <SolidColorBrush x:Key="YipClipIdleBrush"          Color="#FFFFFF" Opacity="0.10" />
-                    <SolidColorBrush x:Key="YipClipLitBrush"           Color="#FF6B70" />
+                    <SolidColorBrush x:Key="YipCardBrush"            Color="#FFFFFF" Opacity="0.045" />
+                    <SolidColorBrush x:Key="YipCardStrokeBrush"      Color="#FFFFFF" Opacity="0.055" />
+                    <SolidColorBrush x:Key="YipControlFillBrush"     Color="#FFFFFF" Opacity="0.075" />
+                    <SolidColorBrush x:Key="YipControlStrokeBrush"   Color="#FFFFFF" Opacity="0.055" />
+
+                    <SolidColorBrush x:Key="YipTextPrimaryBrush"     Color="#F2F3F5" />
+                    <SolidColorBrush x:Key="YipTextSecondaryBrush"   Color="#B7BCC8" />
+                    <SolidColorBrush x:Key="YipTextTertiaryBrush"    Color="#767C8C" />
+
+                    <SolidColorBrush x:Key="YipMeterTrackQuietBrush" Color="#000000" Opacity="0.22" />
+                    <SolidColorBrush x:Key="YipMeterTickBrush"       Color="#FFFFFF" Opacity="0.055" />
+                    <SolidColorBrush x:Key="YipMeterHoldBrush"       Color="#FFFFFF" Opacity="0.55" />
+                    <SolidColorBrush x:Key="YipWaveRestBrush"        Color="#FFFFFF" Opacity="0.13" />
+                    <SolidColorBrush x:Key="YipClipLitBrush"         Color="#FF6B70" />
 
                     <LinearGradientBrush x:Key="YipMeterGradientBrush" StartPoint="0,0" EndPoint="1,0">
                         <GradientStop Color="#35C46A" Offset="0.00" />
@@ -165,15 +132,20 @@
                         <GradientStop Color="#FF6B70" Offset="1.00" />
                     </LinearGradientBrush>
 
-                    <!-- Indicator pill -->
-                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"        Color="#141518" Opacity="0.78" />
-                    <SolidColorBrush x:Key="YipIndicatorStrokeQuietBrush"    Color="#FFFFFF" Opacity="0.10" />
-                    <SolidColorBrush x:Key="YipIndicatorAccentNeutralBrush"  Color="#B7BCC8" />
-                    <SolidColorBrush x:Key="YipIndicatorMeterTrackQuietBrush" Color="#FFFFFF" Opacity="0.06" />
-                    <SolidColorBrush x:Key="YipIndicatorMeterBarIdleBrush"   Color="#B7BCC8" />
-                    <SolidColorBrush x:Key="YipIndicatorMeterBarLiveBrush"   Color="#E5484D" />
-                    <SolidColorBrush x:Key="YipIndicatorTimerBrush"          Color="#F2F3F5" />
-                    <SolidColorBrush x:Key="YipIndicatorDragHandleBrush"     Color="#FFFFFF" Opacity="0.35" />
+                    <SolidColorBrush x:Key="YipRecordFillIdleBrush"  Color="#E5484D" Opacity="0.18" />
+                    <SolidColorBrush x:Key="YipRecordFillLiveBrush"  Color="#E5484D" Opacity="0.34" />
+                    <SolidColorBrush x:Key="YipRecordStrokeBrush"    Color="#FFFFFF" Opacity="0.10" />
+                    <SolidColorBrush x:Key="YipRecordCoreBrush"      Color="#FF6B70" />
+                    <SolidColorBrush x:Key="YipLampIdleBrush"        Color="#767C8C" />
+                    <SolidColorBrush x:Key="YipLampLiveBrush"        Color="#E5484D" />
+
+                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"      Color="#141518" Opacity="0.62" />
+                    <SolidColorBrush x:Key="YipIndicatorStrokeQuietBrush"  Color="#FFFFFF" Opacity="0.075" />
+                    <SolidColorBrush x:Key="YipIndicatorMeterBarIdleBrush" Color="#B7BCC8" />
+                    <SolidColorBrush x:Key="YipIndicatorMeterBarLiveBrush" Color="#FF6B70" />
+                    <SolidColorBrush x:Key="YipIndicatorDotIdleBrush"      Color="#767C8C" />
+                    <SolidColorBrush x:Key="YipIndicatorDotLiveBrush"      Color="#E5484D" />
+                    <SolidColorBrush x:Key="YipIndicatorTimerBrush"        Color="#F2F3F5" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>

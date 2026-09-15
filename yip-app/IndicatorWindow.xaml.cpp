@@ -7,6 +7,7 @@
 
 #include "Markers.h"
 #include "Settings.h"
+#include "ThemeColors.h"
 
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Microsoft.UI.h>
@@ -35,8 +36,10 @@ namespace muw = winrt::Microsoft::UI::Windowing;
 namespace muxd = winrt::Microsoft::UI::Dispatching;
 
 namespace {
-// Token defaults — duplicated as fallback for code that runs before
-// Application resources are queryable. App.xaml is the source of truth.
+// Geometry and motion for the pill are owned here, not in App.xaml: only the
+// two sizes the pill's XAML actually binds to live there. Colours are the
+// other way round — every one of them is resolved from the theme dictionaries
+// by ResolveThemeBrushes().
 constexpr int kWindowW = 320;
 constexpr int kWindowH = 56;
 constexpr float kCorner = 22.0f;
@@ -124,15 +127,9 @@ mucomp::CompositionEasingFunction StandardEase(mucomp::Compositor const& c)
     return c.CreateCubicBezierEasingFunction(cp1, cp2);
 }
 
-winrt::Windows::UI::Color FromHex(uint32_t argb) noexcept
-{
-    return {
-        static_cast<uint8_t>((argb >> 24) & 0xff),
-        static_cast<uint8_t>((argb >> 16) & 0xff),
-        static_cast<uint8_t>((argb >> 8) & 0xff),
-        static_cast<uint8_t>(argb & 0xff),
-    };
-}
+// Shown only if a token key is wrong. A deliberate flat grey rather than a
+// second copy of the palette, so a miss is visible instead of plausible.
+constexpr winrt::Windows::UI::Color kMissingToken{0xFF, 0x80, 0x80, 0x80};
 } // namespace
 
 namespace winrt::yip::implementation {
@@ -205,6 +202,10 @@ IndicatorWindow::IndicatorWindow()
         }
     });
 
+    // A theme flip has to reach the composition brushes too — they are not
+    // {ThemeResource} bindings, they are colours copied at build time.
+    m_themeToken = Root().ActualThemeChanged({this, &IndicatorWindow::OnActualThemeChanged});
+
     // Subscribe last: the first callback can transition straight into
     // Recording, which touches every timer created above.
     m_stateToken = ::yip::RecordingStateBus::Subscribe(dq, [weak = get_weak()](bool recording) {
@@ -219,6 +220,10 @@ IndicatorWindow::~IndicatorWindow()
 {
     ::yip::RecordingStateBus::Unsubscribe(m_stateToken);
     m_stateToken = 0;
+    if (m_themeToken) {
+        Root().ActualThemeChanged(m_themeToken);
+        m_themeToken = {};
+    }
     if (m_savingTimer) m_savingTimer.Stop();
     if (m_meterTimer) m_meterTimer.Stop();
     if (m_collapseTimer) m_collapseTimer.Stop();
@@ -277,6 +282,10 @@ void IndicatorWindow::BuildCompositionLayer()
     m_compositor = pillVisual.Compositor();
     m_ease = StandardEase(m_compositor);
 
+    // Brushes first: the bars and the dot below are handed one as they are
+    // created.
+    ResolveThemeBrushes();
+
     // Composition geometric clip on the Border's visual. Animating this
     // geometry's Size + Offset is what conveys state changes — no XAML
     // layout passes, no UI-thread wakes during the tween.
@@ -296,8 +305,6 @@ void IndicatorWindow::BuildCompositionLayer()
 
     // 4 vertical bars, anchored center-Y, with idle scale ~ 0.06 (a thin
     // resting glyph). Live updates drive Scale.Y via composition anims.
-    m_barIdleBrush = m_compositor.CreateColorBrush(FromHex(0xFF525866));
-    m_barLiveBrush = m_compositor.CreateColorBrush(FromHex(0xFFE5484D));
     for (int i = 0; i < kBarCount; ++i) {
         auto bar = m_compositor.CreateSpriteVisual();
         bar.Size({kBarWidth, kBarMaxHeight});
@@ -318,8 +325,6 @@ void IndicatorWindow::BuildCompositionLayer()
     dotContainer.Size({12.0f, 12.0f});
     muxh::ElementCompositionPreview::SetElementChildVisual(DotHost(), dotContainer);
 
-    m_dotNeutralBrush = m_compositor.CreateColorBrush(FromHex(0xFF525866));
-    m_dotRecordBrush = m_compositor.CreateColorBrush(FromHex(0xFFE5484D));
     m_dotVisual = m_compositor.CreateSpriteVisual();
     m_dotVisual.Size({8.0f, 8.0f});
     m_dotVisual.AnchorPoint({0.5f, 0.5f});
@@ -410,6 +415,33 @@ void IndicatorWindow::StopMeterAnimations()
         anim.Duration(std::chrono::milliseconds(kFadeMs));
         bar.StartAnimation(L"Scale.Y", anim);
     }
+}
+
+void IndicatorWindow::OnActualThemeChanged(winrt::Microsoft::UI::Xaml::FrameworkElement const& /*sender*/,
+                                           winrt::Windows::Foundation::IInspectable const& /*args*/)
+{
+    ResolveThemeBrushes();
+}
+
+void IndicatorWindow::ResolveThemeBrushes()
+{
+    if (!m_compositor) return;
+
+    // Reusing the brush objects rather than recreating them means every visual
+    // already holding one repaints on a theme flip without being touched.
+    const auto apply = [this](mucomp::CompositionColorBrush& brush, wchar_t const* key) {
+        const auto color = ::yip::theme::Color(key, kMissingToken);
+        if (brush) {
+            brush.Color(color);
+        } else {
+            brush = m_compositor.CreateColorBrush(color);
+        }
+    };
+
+    apply(m_barIdleBrush, L"YipIndicatorMeterBarIdleBrush");
+    apply(m_barLiveBrush, L"YipIndicatorMeterBarLiveBrush");
+    apply(m_dotNeutralBrush, L"YipIndicatorDotIdleBrush");
+    apply(m_dotRecordBrush, L"YipIndicatorDotLiveBrush");
 }
 
 // =========================================================== State machine

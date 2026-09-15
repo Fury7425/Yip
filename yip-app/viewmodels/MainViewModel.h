@@ -114,6 +114,7 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     }
     uint32_t SampleRate() const noexcept { return m_settings.sample_rate; }
     uint16_t Channels() const noexcept { return m_settings.channels; }
+    winrt::hstring FormatLabel() const;
 
     uint32_t HotkeyMods() const noexcept { return m_settings.hotkey_mods; }
     uint32_t HotkeyVk() const noexcept { return m_settings.hotkey_vk; }
@@ -136,6 +137,7 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     void CopyRecordingPath(winrt::yip::viewmodels::RecordingEntry const& entry);
     void SyncRecordingState(bool recording);
     void ReportHotkeyConflict();
+    void InvalidateThemeBrushes();
     void DismissError();
     void AcknowledgeClip();
 
@@ -192,10 +194,11 @@ private:
     winrt::hstring m_recordingsSummary{L""};
     std::vector<Row> m_rows;
 
-    // Two brushes, built once. The old shape allocated a SolidColorBrush on
-    // every property read, and the meter tick reads it often.
-    mutable winrt::Microsoft::UI::Xaml::Media::SolidColorBrush m_idleBrush{nullptr};
-    mutable winrt::Microsoft::UI::Xaml::Media::SolidColorBrush m_recordBrush{nullptr};
+    // Resolved from App.xaml on first read and cached, because the button's
+    // visual states ask for it often. Dropped on a theme change so the next
+    // read picks up the other dictionary.
+    mutable winrt::Microsoft::UI::Xaml::Media::Brush m_idleBrush{nullptr};
+    mutable winrt::Microsoft::UI::Xaml::Media::Brush m_recordBrush{nullptr};
 
     std::optional<std::filesystem::path> m_activeRecordingPath;
     ::yip::Settings m_settings{::yip::Settings::Load()};

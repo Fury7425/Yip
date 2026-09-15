@@ -49,6 +49,31 @@ Both Rust → C++ and C++ → C++ go through plain C headers. No C++ types, no e
 - **`vst_host.h`** — hand-written. `YipVstStatus` enum, currently only `yip_vst_dummy()` smoke symbol. Full surface (`yip_vst_load / unload / render`) lands at M5.
 - All Rust `extern "C"` lives in `ffi.rs`. Every entry wraps `catch_unwind` + null-check + UTF-8 validation. No other module exposes `pub extern "C"`.
 
+## Design tokens
+
+Every colour lives in [yip-app/App.xaml](yip-app/App.xaml)'s `Light` / `Dark`
+theme dictionaries. **No colour is written in C++.**
+
+- XAML reads them with `{ThemeResource ...}`.
+- Code reads them through [yip-app/ThemeColors.h](yip-app/ThemeColors.h):
+  `yip::theme::Brush(key)` for a XAML brush, `yip::theme::Color(key, fallback)`
+  when Composition needs a `Color` rather than a `Brush`, and
+  `yip::theme::SampleMeterRamp(n)` to sample `YipMeterGradientBrush` so the
+  waveform and the XAML meter cannot drift apart.
+- Composition holds copies, not bindings, so anything built from
+  `yip::theme::Color` re-resolves on `ActualThemeChanged` (see
+  `MainWindow::ResolveThemeBrushes` and `IndicatorWindow::ResolveThemeBrushes`).
+  Brush objects are mutated in place rather than replaced, so every visual
+  already holding one repaints untouched.
+- The fallback colour in each file is a flat grey on purpose: if it ever
+  appears on screen, a token key is wrong.
+- Surfaces are a **tint over the window backdrop**, never an opaque fill. If a
+  surface needs a solid colour to look right, Mica/acrylic has stopped working.
+- Geometry and motion constants that only code consumes are **not** mirrored in
+  App.xaml — the pill's state sizes and timings are `constexpr` in
+  [yip-app/IndicatorWindow.xaml.cpp](yip-app/IndicatorWindow.xaml.cpp). Only
+  what XAML binds to lives in the dictionary.
+
 ## Coding Conventions
 
 ### Rust
@@ -78,6 +103,7 @@ Both Rust → C++ and C++ → C++ go through plain C headers. No C++ types, no e
 - ❌ `Mutex`/`RwLock` on the audio→writer hot path (the only `parking_lot::Mutex` allowed is the FFI singleton guard, never touched from the capture thread)
 - ❌ `println!`/`OutputDebugString` from audio thread
 - ❌ Hardcoded paths/rates/devices
+- ❌ A colour literal in C++ — resolve it from App.xaml via `yip::theme`
 - ❌ TODO/FIXME without matching milestone box
 - ❌ Suppressed warnings to ship (`-D warnings` in clippy, `/W4` in MSVC)
 - ❌ Mixing `Result` + exceptions across FFI
