@@ -16,7 +16,7 @@
             <SolidColorBrush x:Key="YipMeterTrackBrush"  Color="#2A2A2A" />
             <SolidColorBrush x:Key="YipMeterFillBrush"   Color="#5BD167" />
 
-            <x:Double x:Key="YipCardCornerRadius">8</x:Double>
+            <CornerRadius x:Key="YipCardCornerRadius">8</CornerRadius>
             <Thickness x:Key="YipCardPadding">16</Thickness>
 
             <!-- ============================ Motion tokens ============================ -->
@@ -59,7 +59,7 @@
 
             <x:Double x:Key="YipIndicatorSavingOpacity">0.85</x:Double>
 
-            <x:Double x:Key="YipIndicatorCornerRadius">22</x:Double>
+            <CornerRadius x:Key="YipIndicatorCornerRadius">22</CornerRadius>
             <Thickness x:Key="YipIndicatorPadding">10,4,10,4</Thickness>
 
             <!-- Level meter (compositor-side bars) -->
