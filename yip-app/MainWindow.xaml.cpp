@@ -60,7 +60,6 @@ namespace winrt::yip::implementation {
 MainWindow::MainWindow()
 {
     InitializeComponent();
-    Title(L"Yip");
 
     m_viewModel = winrt::make<winrt::yip::viewmodels::implementation::MainViewModel>();
     m_viewModel.RefreshDevices();

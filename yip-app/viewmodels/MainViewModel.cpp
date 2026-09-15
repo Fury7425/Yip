@@ -264,13 +264,18 @@ void MainViewModel::RefreshDevices()
     }
     m_devices.ReplaceAll(entries);
 
-    const int32_t wanted = restoredIdx >= 0 ? restoredIdx : (m_selectedDeviceIndex < 0 ? defaultIdx : -1);
-    if (wanted >= 0 && wanted != m_selectedDeviceIndex) {
+    // ReplaceAll makes the ComboBox write -1 back through the two-way binding,
+    // so decide from `previousId`, captured before the swap, not from the
+    // index. Falling back to the default matters: keeping a stale index would
+    // silently point the next take at whichever endpoint slid into that slot.
+    int32_t wanted = -1;
+    if (restoredIdx >= 0) {
+        wanted = restoredIdx;
+    } else if (!previousId.empty() || m_selectedDeviceIndex < 0) {
+        wanted = defaultIdx;
+    }
+    if (wanted != m_selectedDeviceIndex) {
         m_selectedDeviceIndex = wanted;
-        Raise(L"SelectedDeviceIndex");
-    } else if (restoredIdx < 0 && m_selectedDeviceIndex >= static_cast<int32_t>(m_devices.Size())) {
-        // The selected endpoint went away.
-        m_selectedDeviceIndex = defaultIdx;
         Raise(L"SelectedDeviceIndex");
     }
     Raise(L"CanRecord");
@@ -381,9 +386,12 @@ void MainViewModel::Tick()
     const float rms = MeterNorm(snapshot.rms);
 
     // Peak hold: jump to a new peak at once, fall back linearly. Without it a
-    // transient is a single frame nobody sees.
-    float hold = m_meterHold;
-    hold = (peak >= hold) ? peak : std::max(peak, hold - kHoldFallPerTick);
+    // transient is a single frame nobody sees. Once capture ends the timer
+    // stops, so the marker has to be cleared here or it hangs on screen.
+    float hold = 0.0f;
+    if (snapshot.recording != 0) {
+        hold = (peak >= m_meterHold) ? peak : std::max(peak, m_meterHold - kHoldFallPerTick);
+    }
 
     if (std::abs(peak - m_meterPeak) >= kMeterEpsilon) {
         m_meterPeak = peak;

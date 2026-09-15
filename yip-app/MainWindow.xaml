@@ -8,13 +8,10 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
 
-    <!-- Mica puts the desktop tint behind the app, which is what makes an
-         unpackaged WinUI window read as part of Windows rather than a box
-         floating on top of it. Nothing below paints an opaque background. -->
-    <Window.SystemBackdrop>
-        <MicaBackdrop />
-    </Window.SystemBackdrop>
-
+    <!-- The backdrop is set in App::OnLaunched (Mica, falling back to acrylic
+         where Mica is unsupported), so nothing here paints an opaque
+         background: the desktop tint has to reach all the way up through the
+         extended title bar. -->
     <Grid x:Name="Root">
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="R" Modifiers="Control" Invoked="OnRecordAccelerator" />
