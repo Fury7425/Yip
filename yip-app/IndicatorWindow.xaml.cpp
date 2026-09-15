@@ -258,6 +258,16 @@ void IndicatorWindow::ApplyToolWindowStyle()
 void IndicatorWindow::ApplyFrameless()
 {
     if (!m_hwnd) return;
+
+    // SetBorderAndTitleBar(false, false) still leaves WS_DLGFRAME and
+    // WS_SYSMENU on the window, and with per-pixel alpha on that frame shows
+    // as a 1px white rectangle around the capsule. Strip every frame bit.
+    LONG_PTR style = ::GetWindowLongPtrW(m_hwnd, GWL_STYLE);
+    style &= ~static_cast<LONG_PTR>(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU);
+    ::SetWindowLongPtrW(m_hwnd, GWL_STYLE, style);
+    ::SetWindowPos(m_hwnd, nullptr, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
     // Windows 11 rounds top-level windows to 8px and strokes a 1px frame along
     // the rectangle; around a capsule both read as stray corners. Neither
     // attribute exists before Windows 11, where the calls simply fail.
@@ -285,6 +295,18 @@ void IndicatorWindow::ApplyTransparentBackdrop()
     }
     if (!m_backdropCompositor) m_backdropCompositor = winrt::Windows::UI::Composition::Compositor{};
     target.SystemBackdrop(m_backdropCompositor.CreateColorBrush(winrt::Microsoft::UI::Colors::Transparent()));
+
+    // A transparent brush alone still composites onto black. Blur-behind with
+    // a region entirely off the window is what turns on per-pixel alpha for
+    // the window's content; nothing is actually blurred.
+    if (m_hwnd) {
+        DWM_BLURBEHIND blur{};
+        blur.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
+        blur.fEnable = TRUE;
+        blur.hRgnBlur = ::CreateRectRgn(-2, -2, -1, -1);
+        (void)::DwmEnableBlurBehindWindow(m_hwnd, &blur);
+        if (blur.hRgnBlur) ::DeleteObject(blur.hRgnBlur);
+    }
 }
 
 void IndicatorWindow::ApplyAlwaysOnTop()
@@ -937,6 +959,9 @@ void IndicatorWindow::ShowWindow()
     auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
     if (appWindow) appWindow.Show();
+    // The presenter can put frame bits back while showing; strip them again
+    // or the white 1px rectangle returns around the capsule.
+    ApplyFrameless();
     // Re-assert TOPMOST + NoActivate after show, in case the Win32
     // show path clobbered them.
     ::SetWindowPos(m_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
