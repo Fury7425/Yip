@@ -40,6 +40,9 @@ VersionInfoOriginalFileName=yip-setup-{#YipVersion}-{#YipArch}.exe
 DefaultDirName={autopf}\Yip
 DefaultGroupName=Yip
 UninstallDisplayIcon={app}\yip-app.exe
+; The setup .exe carries the app icon as well, so the download in the browser
+; and the file in Explorer are recognisably Yip before anything is installed.
+SetupIconFile=..\yip-app\Assets\yip.ico
 OutputDir=.\out
 OutputBaseFilename=yip-setup-{#YipVersion}-{#YipArch}
 Compression=lzma2/max
