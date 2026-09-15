@@ -31,8 +31,6 @@ struct IndicatorWindow : IndicatorWindowT<IndicatorWindow> {
 
     void OnStopClicked(winrt::Windows::Foundation::IInspectable const& sender,
                        winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
-    void OnMarkClicked(winrt::Windows::Foundation::IInspectable const& sender,
-                       winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     void OnOpenLastClicked(winrt::Windows::Foundation::IInspectable const& sender,
                            winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
 
@@ -64,21 +62,36 @@ private:
     // Driven by RecordingStateBus, not a timer: an idle pill costs nothing.
     void OnRecordingStateChanged(bool recording);
     void TransitionTo(::yip::IndicatorState s, bool animate = true);
-    // Resize the HWND and the Border to match the state.
-    // The window *is* the pill; nothing clips it.
+    // Land every layout property on `s` at once: actions, window, Border,
+    // readout translation and clip. Every motion path ends by calling this.
+    void ApplyLayoutFor(::yip::IndicatorState s);
+    // Resize the HWND and the Border to match the state, around m_anchor.
+    // The window *is* the pill.
     void SyncWindowToState(::yip::IndicatorState s);
-    void AnimatePillToState(::yip::IndicatorState s, bool animate);
+
+    // ----- Motion -----
+    void ShowPill(bool animate);
+    void HidePill(bool animate);
+    // Size change between two visible states: a clip draws the capsule from
+    // the old size to the new while the readout glides to its new spot.
+    void MorphPill(::yip::IndicatorState from, ::yip::IndicatorState to);
+    void SetClip(float w, float h, float x, float y);
+    void AnimateClip(float w, float h, float x, float y);
+    void ClearClip();
+    // Centre of the readout group in PillFrame coordinates (layout only; the
+    // composition translation is not included).
+    winrt::Windows::Foundation::Point ReadoutCentre();
 
     // ----- Edge dock / monitor restore -----
     void RestoreFromPersistence();
     double DpiScale() const noexcept;
     void SnapToNearestEdgeIfClose();
     void RememberPosition();
+    void UpdateAnchorFromWindow();
 
     // ----- Visibility -----
     void ShowWindow();
     void HideWindow();
-    void SyncVisibilityForState(::yip::IndicatorState s);
 
     // ----- Auto-collapse -----
     void ResetAutoCollapseTimer();
@@ -94,9 +107,21 @@ private:
     ::yip::RecordingStateBus::Token m_stateToken{0};
     winrt::event_token m_themeToken{};
 
+    // The physical-pixel point the pill is sized around: its top centre while
+    // floating or docked top, the docked edge's midpoint otherwise. Resizing
+    // around it is what keeps a centred pill centred when it expands.
+    POINT m_anchor{};
+
+    // Bumped on every transition. A motion's completion handler only acts if
+    // nothing has happened since it started.
+    uint32_t m_motionGen{0};
+    // m_shown is the state machine's intent; m_windowVisible is the HWND. They
+    // differ while the pill is fading out.
+    bool m_shown{false};
+    bool m_windowVisible{false};
+
     // Composition
     winrt::Microsoft::UI::Composition::Compositor m_compositor{nullptr};
-    winrt::Microsoft::UI::Composition::ContainerVisual m_pillRoot{nullptr};
     winrt::Microsoft::UI::Composition::SpriteVisual m_dotVisual{nullptr};
     std::array<winrt::Microsoft::UI::Composition::SpriteVisual, 4> m_barVisuals{nullptr, nullptr, nullptr,
                                                                                 nullptr};
@@ -108,6 +133,12 @@ private:
     // uses, so a level looks the same in both places.
     std::vector<winrt::Microsoft::UI::Composition::CompositionColorBrush> m_barPalette;
     winrt::Microsoft::UI::Composition::CompositionEasingFunction m_ease{nullptr};
+    winrt::Microsoft::UI::Composition::CompositionEasingFunction m_easeOut{nullptr};
+    winrt::Microsoft::UI::Composition::CompositionEasingFunction m_easeMorph{nullptr};
+    // Attached to PillFrame only while a morph runs; at rest the Border's own
+    // antialiased edge is the outline.
+    winrt::Microsoft::UI::Composition::CompositionRoundedRectangleGeometry m_clipGeometry{nullptr};
+    winrt::Microsoft::UI::Composition::CompositionGeometricClip m_clip{nullptr};
 
     // Timers. m_savingTimer is one-shot: it only exists to hold the Saving
     // frame on screen briefly after capture ends.

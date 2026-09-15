@@ -7,6 +7,9 @@
 #include <memory>
 #include <vector>
 
+#include <winrt/Microsoft.UI.Composition.SystemBackdrops.h>
+#include <winrt/Windows.System.h>
+
 namespace yip::interop {
 class DeviceWatcher;
 }
@@ -76,6 +79,14 @@ private:
     HWND m_hwnd{nullptr};
     bool m_focused{true};
 
+    // ----- backdrop -----
+    // Driven through the controller rather than Window::SystemBackdrop so the
+    // configuration can report the window as always active: the stock
+    // DesktopAcrylicBackdrop drops to a flat fill whenever focus leaves.
+    winrt::Microsoft::UI::Composition::SystemBackdrops::DesktopAcrylicController m_backdrop{nullptr};
+    winrt::Microsoft::UI::Composition::SystemBackdrops::SystemBackdropConfiguration m_backdropConfig{nullptr};
+    winrt::Windows::System::DispatcherQueueController m_backdropQueue{nullptr};
+
     // ----- waveform -----
     // A scrolling history of the peak envelope, drawn entirely in the
     // compositor. Every bar exists twice, half a strip apart, so advancing the
@@ -112,15 +123,21 @@ private:
                               winrt::Windows::Foundation::IInspectable const& args);
 
     void SetupTitleBar();
+    void SetupBackdrop();
+    void TeardownBackdrop();
     void UpdateTitleBarInset();
     double DpiScale() const noexcept;
     void UpdateRecordButtonShape();
     void UpdateEmptyState();
+    // Press feedback on the record button, driven by ButtonBase::IsPressed.
+    void WireRecordButtonPress();
+    void PressRecordButton(bool down);
 
     void ResolveThemeBrushes();
     void BuildWaveVisuals(double width, double height);
     void PushWaveSample(float level, float hold);
     void ClearWave();
+    void FadeWave(float opacity);
 };
 } // namespace winrt::yip::implementation
 

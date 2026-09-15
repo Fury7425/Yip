@@ -51,24 +51,26 @@
       background: var(--surface);
       box-shadow: inset 0 0 0 1px var(--line), 0 8px 22px rgba(0,0,0,.30);
     }
-    .pill.rec { width: 210px; height: 44px; border-radius: 22px; }
-    .pill.exp { width: 320px; height: 56px; border-radius: 28px; }
-    .pill.save { width: 210px; height: 44px; border-radius: 22px; opacity: .85; }
+    .pill.rec { width: 156px; height: 44px; border-radius: 22px; }
+    .pill.exp { width: 232px; height: 56px; border-radius: 28px; }
+    .pill.save { width: 156px; height: 44px; border-radius: 22px; opacity: .85; }
+
+    /* Dot, meter and clock travel as one centred group. */
+    .readout { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; }
 
     .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot-live);
-           flex: none; margin: 0 8px 0 2px; }
+           flex: none; margin: 0 10px 0 2px; }
     .dot.quiet { background: var(--dot-idle); }
 
     /* 4 bars, 3px wide, 4px apart, 18px travel — the shipped geometry. */
-    .meter { width: 36px; height: 22px; flex: none; display: flex; align-items: center;
+    .meter { width: 24px; height: 22px; flex: none; display: flex; align-items: center;
              gap: 4px; }
     .meter i { width: 3px; border-radius: 1.5px; }
 
     .t { font-family: var(--mono); font-size: 13px; color: var(--ink);
-         font-variant-numeric: tabular-nums; margin: 0 8px 0 10px; }
-    .grow { flex: 1 1 auto; }
+         font-variant-numeric: tabular-nums; margin: 0 0 0 10px; }
 
-    .acts { display: flex; align-items: center; gap: 6px; flex: none; }
+    .acts { display: flex; align-items: center; gap: 6px; flex: none; margin-left: 8px; }
     .act { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
            color: var(--ink-2); background: rgba(255,255,255,0.07);
            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07); }
@@ -78,56 +80,56 @@
 <div class="stage">
   <div class="slot">
     <div class="pill rec">
-      <div class="dot"></div>
-      <div class="meter">
-        <i style="height:9px;background:#3FC868"></i>
-        <i style="height:15px;background:#4DCC68"></i>
-        <i style="height:13px;background:#47CA69"></i>
-        <i style="height:7px;background:#3AC66A"></i>
+      <div class="readout">
+        <div class="dot"></div>
+        <div class="meter">
+          <i style="height:9px;background:#3FC868"></i>
+          <i style="height:15px;background:#4DCC68"></i>
+          <i style="height:13px;background:#47CA69"></i>
+          <i style="height:7px;background:#3AC66A"></i>
+        </div>
+        <div class="t">00:08</div>
       </div>
-      <div class="t">00:08</div>
-      <div class="grow"></div>
     </div>
-    <div class="cap">Recording &#183; window is 210 &#215; 44</div>
+    <div class="cap">Recording &#183; window is 156 &#215; 44</div>
   </div>
 
   <div class="slot">
     <div class="pill exp">
-      <div class="dot"></div>
-      <div class="meter">
-        <i style="height:11px;background:#43C969"></i>
-        <i style="height:18px;background:#59D067"></i>
-        <i style="height:14px;background:#4ACB68"></i>
-        <i style="height:8px;background:#3CC669"></i>
+      <div class="readout">
+        <div class="dot"></div>
+        <div class="meter">
+          <i style="height:11px;background:#43C969"></i>
+          <i style="height:18px;background:#59D067"></i>
+          <i style="height:14px;background:#4ACB68"></i>
+          <i style="height:8px;background:#3CC669"></i>
+        </div>
+        <div class="t">00:08</div>
       </div>
-      <div class="t">00:08</div>
-      <div class="grow"></div>
       <div class="acts">
         <div class="act">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"></rect></svg>
-        </div>
-        <div class="act">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4v16M6 9v6M18 9v6"></path></svg>
         </div>
         <div class="act">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5h7l2 2.5h7M4 7.5V18a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 18v-8"></path></svg>
         </div>
       </div>
     </div>
-    <div class="cap">Expanded on tap &#183; window is 320 &#215; 56</div>
+    <div class="cap">Expanded on tap &#183; window is 232 &#215; 56</div>
   </div>
 
   <div class="slot">
     <div class="pill save">
-      <div class="dot quiet"></div>
-      <div class="meter">
-        <i style="height:2px;background:#35C46A"></i>
-        <i style="height:2px;background:#35C46A"></i>
-        <i style="height:2px;background:#35C46A"></i>
-        <i style="height:2px;background:#35C46A"></i>
+      <div class="readout">
+        <div class="dot quiet"></div>
+        <div class="meter">
+          <i style="height:2px;background:#35C46A"></i>
+          <i style="height:2px;background:#35C46A"></i>
+          <i style="height:2px;background:#35C46A"></i>
+          <i style="height:2px;background:#35C46A"></i>
+        </div>
+        <div class="t" style="opacity:.75">00:08</div>
       </div>
-      <div class="t" style="opacity:.75">00:08</div>
-      <div class="grow"></div>
     </div>
     <div class="cap">Saving &#183; holds 350 ms, then hides</div>
   </div>

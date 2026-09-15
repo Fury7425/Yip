@@ -31,13 +31,8 @@ void App::OnLaunched(winrt::Microsoft::UI::Xaml::LaunchActivatedEventArgs const&
     m_window = winrt::make<winrt::yip::implementation::MainWindow>();
     m_window.Title(L"Yip");
 
-    // Acrylic, not Mica. Mica is deliberately a faint static tint, and with the
-    // cards covering nearly the whole window it read as a flat opaque box —
-    // the window is supposed to look like glass. Acrylic blurs what is actually
-    // behind the window, which is the effect being asked for. Supported
-    // everywhere down to the 10.0.19041 floor, so there is no fallback branch.
-    m_window.SystemBackdrop(winrt::Microsoft::UI::Xaml::Media::DesktopAcrylicBackdrop{});
-
+    // The acrylic backdrop is owned by MainWindow (SetupBackdrop), which keeps
+    // it lit while the window is inactive.
     m_window.Activate();
 
     // Floating indicator pill — always-on-top tool window. Owns its own

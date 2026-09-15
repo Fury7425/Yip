@@ -12,9 +12,11 @@
 #include "Settings.h"
 #include "ThemeColors.h"
 
+#include <DispatcherQueue.h>
 #include <microsoft.ui.xaml.window.h>
 
 #include <winrt/Microsoft.UI.Composition.h>
+#include <winrt/Microsoft.UI.Composition.SystemBackdrops.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
 #include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
@@ -22,6 +24,7 @@
 #include <winrt/Microsoft.UI.Xaml.Input.h>
 #include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
+#include <winrt/Windows.Foundation.Numerics.h>
 #include <winrt/Windows.System.h>
 
 #include <algorithm>
@@ -37,7 +40,9 @@ using namespace winrt::Windows::Foundation;
 } // namespace winrt
 
 namespace mucomp = winrt::Microsoft::UI::Composition;
+namespace musb = winrt::Microsoft::UI::Composition::SystemBackdrops;
 namespace muxh = winrt::Microsoft::UI::Xaml::Hosting;
+using winrt::Windows::Foundation::Numerics::float3;
 
 namespace {
 
@@ -73,6 +78,34 @@ constexpr double kIdleClockOpacity = 0.55;
 // running. Dimmed, it reads as what it is: the last take.
 constexpr float kWaveIdleOpacity = 0.32f;
 
+// Motion. The strip lights up fast when a take starts (the user is watching
+// for it) and settles slower when it ends (nothing is waiting on it).
+constexpr int kWaveLightMs = 180;
+constexpr int kWaveDimMs = 320;
+// Record button press: subtle enough to feel like a key, not a bounce.
+constexpr float kRecordPressScale = 0.94f;
+// Resting scale of whichever record glyph is hidden. Never zero: a shape that
+// grows out of nothing reads as appearing from nowhere.
+constexpr float kGlyphHiddenScale = 0.5f;
+
+// Strong ease-out: starts moving on the frame it is asked to.
+mucomp::CompositionEasingFunction EaseOut(mucomp::Compositor const& c)
+{
+    return c.CreateCubicBezierEasingFunction({0.23f, 1.0f}, {0.32f, 1.0f});
+}
+
+musb::SystemBackdropTheme BackdropThemeFor(winrt::Microsoft::UI::Xaml::ElementTheme theme) noexcept
+{
+    switch (theme) {
+        case winrt::Microsoft::UI::Xaml::ElementTheme::Dark:
+            return musb::SystemBackdropTheme::Dark;
+        case winrt::Microsoft::UI::Xaml::ElementTheme::Light:
+            return musb::SystemBackdropTheme::Light;
+        default:
+            return musb::SystemBackdropTheme::Default;
+    }
+}
+
 /// Pull the recording an item-scoped event belongs to out of its DataContext.
 winrt::yip::viewmodels::RecordingEntry EntryFrom(winrt::Windows::Foundation::IInspectable const& sender)
 {
@@ -105,6 +138,11 @@ MainWindow::MainWindow()
     }
 
     SetupTitleBar();
+    SetupBackdrop();
+    Closed([weak = get_weak()](auto&&, auto&&) {
+        if (auto self = weak.get()) self->TeardownBackdrop();
+    });
+    WireRecordButtonPress();
     if (auto appWindow = AppWindow()) {
         // AppWindow::Resize takes physical pixels. The layout is designed in
         // DIPs, so at 200% scale an unscaled 470x660 opened a window half the
@@ -161,6 +199,7 @@ MainWindow::~MainWindow()
         m_themeToken = {};
     }
     StopMeterPolling();
+    TeardownBackdrop();
     m_hotkey.reset();
     m_deviceWatcher.reset();
     if (rec_is_recording()) {
@@ -183,6 +222,51 @@ void MainWindow::SetupTitleBar()
     ExtendsContentIntoTitleBar(true);
     SetTitleBar(AppTitleBar());
     UpdateTitleBarInset();
+}
+
+void MainWindow::SetupBackdrop()
+{
+    // Acrylic, not Mica: Mica is a faint static tint, and with the cards
+    // covering nearly the whole window it read as a flat opaque box.
+    //
+    // And acrylic that stays acrylic. Window::SystemBackdrop's
+    // DesktopAcrylicBackdrop swaps to its fallback fill the moment the window
+    // loses focus — which for a recorder is most of the time, since you click
+    // into whatever you are recording — and Yip turned into a grey slab.
+    // Driving the controller directly lets the configuration report the
+    // window as always active.
+    if (!musb::DesktopAcrylicController::IsSupported()) return;
+    auto target = try_as<mucomp::ICompositionSupportsSystemBackdrop>();
+    if (!target) return;
+
+    // The controller lives in the system compositor, which needs a
+    // Windows.System dispatcher queue on this thread; WinUI only guarantees the
+    // Microsoft.UI one.
+    if (!winrt::Windows::System::DispatcherQueue::GetForCurrentThread()) {
+        DispatcherQueueOptions options{sizeof(DispatcherQueueOptions), DQTYPE_THREAD_CURRENT, DQTAT_COM_NONE};
+        if (FAILED(::CreateDispatcherQueueController(
+                options, reinterpret_cast<ABI::Windows::System::IDispatcherQueueController**>(
+                             winrt::put_abi(m_backdropQueue))))) {
+            return;
+        }
+    }
+
+    m_backdropConfig = musb::SystemBackdropConfiguration{};
+    m_backdropConfig.IsInputActive(true);
+    m_backdropConfig.Theme(BackdropThemeFor(Root().ActualTheme()));
+
+    m_backdrop = musb::DesktopAcrylicController{};
+    m_backdrop.SetSystemBackdropConfiguration(m_backdropConfig);
+    m_backdrop.AddSystemBackdropTarget(target);
+}
+
+void MainWindow::TeardownBackdrop()
+{
+    if (m_backdrop) {
+        m_backdrop.Close();
+        m_backdrop = nullptr;
+    }
+    m_backdropConfig = nullptr;
 }
 
 double MainWindow::DpiScale() const noexcept
@@ -251,6 +335,7 @@ void MainWindow::OnActualThemeChanged(winrt::Microsoft::UI::Xaml::FrameworkEleme
                                       winrt::Windows::Foundation::IInspectable const& /*args*/)
 {
     if (m_viewModel) m_viewModel.InvalidateThemeBrushes();
+    if (m_backdropConfig) m_backdropConfig.Theme(BackdropThemeFor(Root().ActualTheme()));
     ResolveThemeBrushes();
     UpdateRecordButtonShape();
 }
@@ -374,6 +459,16 @@ void MainWindow::ClearWave()
     if (m_waveHold) m_waveHold.Opacity(0.0f);
 }
 
+void MainWindow::FadeWave(float opacity)
+{
+    if (!m_waveRoot) return;
+    auto compositor = m_waveRoot.Compositor();
+    auto anim = compositor.CreateScalarKeyFrameAnimation();
+    anim.InsertKeyFrame(1.0f, opacity, EaseOut(compositor));
+    anim.Duration(std::chrono::milliseconds(opacity >= 1.0f ? kWaveLightMs : kWaveDimMs));
+    m_waveRoot.StartAnimation(L"Opacity", anim);
+}
+
 // ============================================================ Activation
 
 void MainWindow::OnActivated(winrt::Windows::Foundation::IInspectable const& /*sender*/,
@@ -419,12 +514,36 @@ void MainWindow::OnViewModelPropertyChanged(
 void MainWindow::UpdateRecordButtonShape()
 {
     const bool recording = m_viewModel && m_viewModel.IsRecording();
-    RecordDot().Visibility(recording ? winrt::Microsoft::UI::Xaml::Visibility::Collapsed
-                                     : winrt::Microsoft::UI::Xaml::Visibility::Visible);
-    StopSquare().Visibility(recording ? winrt::Microsoft::UI::Xaml::Visibility::Visible
-                                      : winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+    // Both glyphs stay in the tree; their Opacity/Scale transitions in XAML
+    // turn this into a crossfade where the dot shrinks out as the square grows in.
+    const float3 shown{1.0f, 1.0f, 1.0f};
+    const float3 hidden{kGlyphHiddenScale, kGlyphHiddenScale, 1.0f};
+    RecordDot().Opacity(recording ? 0.0 : 1.0);
+    RecordDot().Scale(recording ? hidden : shown);
+    StopSquare().Opacity(recording ? 1.0 : 0.0);
+    StopSquare().Scale(recording ? shown : hidden);
     TitleLamp().Fill(recording ? m_lampLiveBrush : m_lampIdleBrush);
     ElapsedLabel().Opacity(recording ? 1.0 : kIdleClockOpacity);
+}
+
+void MainWindow::WireRecordButtonPress()
+{
+    // IsPressed tracks the pointer going down and coming back up (or leaving),
+    // which is exactly the span press feedback should cover. Ctrl+R and the
+    // global hotkey never set it, so the shortcuts stay unanimated.
+    RecordButton().RegisterPropertyChangedCallback(
+        winrt::Microsoft::UI::Xaml::Controls::Primitives::ButtonBase::IsPressedProperty(),
+        [weak = get_weak()](winrt::Microsoft::UI::Xaml::DependencyObject const&,
+                            winrt::Microsoft::UI::Xaml::DependencyProperty const&) {
+            if (auto self = weak.get()) self->PressRecordButton(self->RecordButton().IsPressed());
+        });
+}
+
+void MainWindow::PressRecordButton(bool down)
+{
+    // The ScaleTransition in XAML animates both directions.
+    const float s = (down && RecordButton().IsEnabled()) ? kRecordPressScale : 1.0f;
+    RecordButton().Scale({s, s, 1.0f});
 }
 
 void MainWindow::UpdateEmptyState()
@@ -462,12 +581,12 @@ void MainWindow::OnRecordingStateChanged(bool recording)
         // A new take starts from an empty strip; the previous one is history
         // nobody wants scrolling underneath it.
         ClearWave();
-        if (m_waveRoot) m_waveRoot.Opacity(1.0f);
+        FadeWave(1.0f);
         StartMeterPolling();
         return;
     }
     StopMeterPolling();
-    if (m_waveRoot) m_waveRoot.Opacity(kWaveIdleOpacity);
+    FadeWave(kWaveIdleOpacity);
     if (m_viewModel) {
         // One last pull so the readouts land on the post-stop zero instead of
         // freezing at whatever the final tick read. The strip itself is left

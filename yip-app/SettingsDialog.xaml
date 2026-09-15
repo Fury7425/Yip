@@ -6,70 +6,167 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     mc:Ignorable="d"
-    Title="Yip settings"
+    Title="Settings"
     PrimaryButtonText="Save"
-    SecondaryButtonText="Cancel"
-    DefaultButton="Primary">
+    CloseButtonText="Cancel"
+    DefaultButton="Primary"
+    CornerRadius="{StaticResource YipDialogCornerRadius}">
 
-    <StackPanel Spacing="16" MinWidth="420">
-        <StackPanel Spacing="6">
-            <TextBlock Text="Output folder" FontWeight="SemiBold" Opacity="0.8" />
-            <Grid ColumnSpacing="8">
+    <!-- Grouped the way the main window is: quiet section labels over tinted
+         groups, pill-radius-free controls at the shared 8px control radius.
+         The dialog opens inside a 470 DIP window, so the content caps its own
+         width and every explanatory line wraps — a single unwrapped hint used
+         to push the content past the dialog edge and clip Browse and Reset. -->
+    <ContentDialog.Resources>
+        <Style x:Key="SettingsSection" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="CharacterSpacing" Value="80" />
+            <Setter Property="Margin" Value="2,6,0,0" />
+            <Setter Property="Foreground" Value="{ThemeResource YipTextTertiaryBrush}" />
+        </Style>
+        <Style x:Key="SettingsGroup" TargetType="Border">
+            <Setter Property="Background" Value="{ThemeResource YipGroupBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource YipCardStrokeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="14,12,14,12" />
+        </Style>
+        <Style x:Key="SettingsLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{ThemeResource YipTextPrimaryBrush}" />
+        </Style>
+        <Style x:Key="SettingsHint" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Foreground" Value="{ThemeResource YipTextTertiaryBrush}" />
+        </Style>
+        <Style x:Key="SettingsDivider" TargetType="Rectangle">
+            <Setter Property="Height" Value="1" />
+            <Setter Property="Fill" Value="{ThemeResource YipCardStrokeBrush}" />
+        </Style>
+    </ContentDialog.Resources>
+
+    <StackPanel Spacing="8" MaxWidth="376">
+        <!-- ===================== Recording ===================== -->
+        <TextBlock Text="RECORDING" Style="{StaticResource SettingsSection}" />
+
+        <Border Style="{StaticResource SettingsGroup}">
+            <StackPanel Spacing="8">
+                <TextBlock Text="Save recordings to" Style="{StaticResource SettingsLabel}" />
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="FolderBox"
+                             CornerRadius="{StaticResource YipControlCornerRadius}"
+                             PlaceholderText="C:\Users\You\Music\Yip"
+                             AutomationProperties.Name="Output folder" />
+                    <Button Grid.Column="1"
+                            Click="OnPickFolder"
+                            Content="Browse…"
+                            CornerRadius="{StaticResource YipControlCornerRadius}" />
+                </Grid>
+                <TextBlock x:Name="FolderHint"
+                           Style="{StaticResource SettingsHint}"
+                           Text="Created automatically if it does not exist." />
+            </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource SettingsGroup}">
+            <Grid RowSpacing="10" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBox x:Name="FolderBox" PlaceholderText="C:\Users\You\Music\Yip" />
-                <Button Grid.Column="1" Click="OnPickFolder" Content="Browse…" />
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="Sample rate" Style="{StaticResource SettingsLabel}" />
+                    <TextBlock Style="{StaticResource SettingsHint}"
+                               Text="Uses the device rate if the input refuses this one." />
+                </StackPanel>
+                <ComboBox x:Name="SampleRateCombo"
+                          Grid.Column="1"
+                          Width="128"
+                          VerticalAlignment="Center"
+                          SelectedIndex="1"
+                          CornerRadius="{StaticResource YipControlCornerRadius}"
+                          AutomationProperties.Name="Sample rate">
+                    <ComboBoxItem Content="44.1 kHz" Tag="44100" />
+                    <ComboBoxItem Content="48 kHz" Tag="48000" />
+                    <ComboBoxItem Content="88.2 kHz" Tag="88200" />
+                    <ComboBoxItem Content="96 kHz" Tag="96000" />
+                </ComboBox>
+
+                <Rectangle Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
+
+                <TextBlock Grid.Row="2" Text="Channels" Style="{StaticResource SettingsLabel}" />
+                <ComboBox x:Name="ChannelsCombo"
+                          Grid.Row="2"
+                          Grid.Column="1"
+                          Width="128"
+                          VerticalAlignment="Center"
+                          SelectedIndex="1"
+                          CornerRadius="{StaticResource YipControlCornerRadius}"
+                          AutomationProperties.Name="Channels">
+                    <ComboBoxItem Content="Mono" Tag="1" />
+                    <ComboBoxItem Content="Stereo" Tag="2" />
+                </ComboBox>
+
+                <Rectangle Grid.Row="3" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
+
+                <StackPanel Grid.Row="4" Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="Format" Style="{StaticResource SettingsLabel}" />
+                    <TextBlock Style="{StaticResource SettingsHint}"
+                               Text="Other formats are reserved for a future release." />
+                </StackPanel>
+                <TextBlock Grid.Row="4"
+                           Grid.Column="1"
+                           Text="32-bit float"
+                           FontFamily="Cascadia Mono,Consolas,Courier New"
+                           FontSize="12"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Right"
+                           Foreground="{ThemeResource YipTextSecondaryBrush}" />
             </Grid>
-            <TextBlock x:Name="FolderHint" FontSize="11" Opacity="0.55"
-                       Text="Recordings save into this folder. Created automatically if missing." />
-        </StackPanel>
+        </Border>
 
-        <StackPanel Spacing="6">
-            <TextBlock Text="Sample rate" FontWeight="SemiBold" Opacity="0.8" />
-            <ComboBox x:Name="SampleRateCombo" MinWidth="180" SelectedIndex="1">
-                <ComboBoxItem Content="44100 Hz" Tag="44100" />
-                <ComboBoxItem Content="48000 Hz" Tag="48000" />
-                <ComboBoxItem Content="88200 Hz" Tag="88200" />
-                <ComboBoxItem Content="96000 Hz" Tag="96000" />
-            </ComboBox>
-            <TextBlock FontSize="11" Opacity="0.55"
-                       Text="WASAPI resamples from the device mix format when this differs. Falls back to the device rate if the endpoint refuses it." />
-        </StackPanel>
+        <!-- ===================== Shortcut ===================== -->
+        <TextBlock Text="SHORTCUT" Style="{StaticResource SettingsSection}" />
 
-        <StackPanel Spacing="6">
-            <TextBlock Text="Channels" FontWeight="SemiBold" Opacity="0.8" />
-            <ComboBox x:Name="ChannelsCombo" MinWidth="180" SelectedIndex="1">
-                <ComboBoxItem Content="Mono"   Tag="1" />
-                <ComboBoxItem Content="Stereo" Tag="2" />
-            </ComboBox>
-        </StackPanel>
-
-        <StackPanel Spacing="6">
-            <TextBlock Text="Global record hotkey" FontWeight="SemiBold" Opacity="0.8" />
-            <Grid ColumnSpacing="8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <TextBox x:Name="HotkeyBox"
-                         IsReadOnly="True"
-                         IsSpellCheckEnabled="False"
-                         PreviewKeyDown="OnHotkeyKeyDown"
-                         PlaceholderText="Click here, then press the combo"
-                         AutomationProperties.Name="Global record hotkey" />
-                <Button Grid.Column="1" Click="OnResetHotkey" Content="Reset" />
-            </Grid>
-            <TextBlock x:Name="HotkeyHint" FontSize="11" Opacity="0.55"
-                       Text="Needs at least one of Ctrl, Alt, Shift or Win. Starts and stops recording while Yip is in the background." />
-        </StackPanel>
-
-        <StackPanel Spacing="6">
-            <TextBlock Text="Format" FontWeight="SemiBold" Opacity="0.8" />
-            <TextBlock Text="PCM float32 (32-bit IEEE)" Opacity="0.7" />
-            <TextBlock FontSize="11" Opacity="0.45"
-                       Text="Other formats are reserved for a future release." />
-        </StackPanel>
+        <Border Style="{StaticResource SettingsGroup}">
+            <StackPanel Spacing="8">
+                <TextBlock Text="Start and stop recording" Style="{StaticResource SettingsLabel}" />
+                <Grid ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBox x:Name="HotkeyBox"
+                             IsReadOnly="True"
+                             IsSpellCheckEnabled="False"
+                             FontFamily="Cascadia Mono,Consolas,Courier New"
+                             CornerRadius="{StaticResource YipControlCornerRadius}"
+                             PreviewKeyDown="OnHotkeyKeyDown"
+                             PlaceholderText="Click, then press the keys"
+                             AutomationProperties.Name="Global record hotkey" />
+                    <Button Grid.Column="1"
+                            Click="OnResetHotkey"
+                            Content="Reset"
+                            CornerRadius="{StaticResource YipControlCornerRadius}" />
+                </Grid>
+                <TextBlock x:Name="HotkeyHint"
+                           Style="{StaticResource SettingsHint}"
+                           Text="Works while Yip is in the background. Needs Ctrl, Alt, Shift or Win." />
+            </StackPanel>
+        </Border>
     </StackPanel>
 </ContentDialog>
