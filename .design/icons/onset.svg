@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Yip - Onset</title>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="16" x2="0" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2A2C34"/>
+      <stop offset="1" stop-color="#111216"/>
+    </linearGradient>
+    <!-- The app's own meter ramp, run backwards: loudest at the attack. -->
+    <linearGradient id="ramp" x1="70" y1="0" x2="202" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF6B70"/>
+      <stop offset="0.42" stop-color="#F0BE52"/>
+      <stop offset="1" stop-color="#5BD167"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="224" height="224" rx="56" fill="url(#tile)"/>
+  <rect x="17" y="17" width="222" height="222" rx="55" fill="none" stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="2"/>
+  <line x1="40" y1="128" x2="216" y2="128" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="4" stroke-linecap="round"/>
+  <!-- One short sound: instant attack, exponential decay, mirrored about the baseline. -->
+  <path transform="translate(-8 0)"
+        d="M76 58C92.67 85.83 109.33 98.36 126 106.8C149.33 118.62 172.67 121.78 196 124L196 132C172.67 134.22 149.33 137.38 126 149.2C109.33 157.64 92.67 170.17 76 198Z"
+        fill="url(#ramp)" stroke="url(#ramp)" stroke-width="12" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Yip - Pip</title>
+  <defs>
+    <linearGradient id="pipFill" x1="40" y1="40" x2="200" y2="226" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF7F83"/>
+      <stop offset="0.5" stop-color="#E5484D"/>
+      <stop offset="1" stop-color="#B8252B"/>
+    </linearGradient>
+  </defs>
+  <!-- The record dot budding a pip: two circles (r76, r34) joined by r40 tangent arcs. -->
+  <path d="M115.63 74.9A76 76 0 1 0 179.1 138.37A40 40 0 0 1 203.15 95.37A34 34 0 1 0 158.63 50.85A40 40 0 0 1 115.63 74.9Z"
+        fill="url(#pipFill)"/>
+  <ellipse cx="80" cy="120" rx="28" ry="15" transform="rotate(-45 80 120)" fill="#FFFFFF" opacity="0.16"/>
+</svg>
