@@ -1,27 +1,49 @@
 # Yip app icon
 
-The floating recording pill turned into an app tile: a dark translucent
-rounded square holding the red recording dot and the 4-bar level meter,
-read left to right.
+The floating recording pill turned into an app tile: a red recording dot
+followed by a 4-bar level meter, read left to right, on a dark rounded square.
 
-| 160 | 64 | 32 | 24 | 16 |
-| :---: | :---: | :---: | :---: | :---: |
-| <img src="yip.svg" width="160" alt="Yip icon, 160 px"> | <img src="yip.svg" width="64" alt="Yip icon, 64 px"> | <img src="yip.svg" width="32" alt="Yip icon, 32 px"> | <img src="yip-small.svg" width="24" alt="Yip icon, 24 px"> | <img src="yip-small.svg" width="16" alt="Yip icon, 16 px"> |
+| 256 | 256 light | 48 | 32 | 24 | 16 | Tray idle | Tray recording |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| <img src="yip-256.svg" width="128" alt="Yip, dark"> | <img src="yip-light-256.svg" width="128" alt="Yip, light"> | <img src="yip-48.svg" width="48" alt="Yip 48"> | <img src="yip-32.svg" width="32" alt="Yip 32"> | <img src="yip-24.svg" width="24" alt="Yip 24"> | <img src="yip-16.svg" width="16" alt="Yip 16"> | <img src="tray-idle-16.svg" width="16" alt="Tray idle"> | <img src="tray-recording-16.svg" width="16" alt="Tray recording"> |
 
-| File | Use at |
-| --- | --- |
-| [yip.svg](yip.svg) | 32 px and up |
-| [yip-small.svg](yip-small.svg) | 16 and 24 px (drawn on a 24 px grid, no glow, heavier bars) |
+Each size is drawn separately on its own pixel grid, not scaled from the master.
 
-## Where it comes from
+| File | Size | Content |
+| --- | --- | --- |
+| `yip-256.svg` | 256 and up, master | Dot with radial falloff and rim, 4 bars, tile lift, inner edge |
+| `yip-light-256.svg` | 256, light surfaces | Same geometry, flat colours |
+| `yip-48.svg` | 48 (also 40, 64) | Flat, 4 bars 3 px wide |
+| `yip-32.svg` | 32 | Flat, 4 bars 2 px wide |
+| `yip-24.svg` | 24 | Flat, 3 bars, no inner edge |
+| `yip-16.svg` | 16 | Flat, 2 bars, radius 4 |
+| `tray-idle-16.svg` / `tray-recording-16.svg` | 16, dark taskbar | Glyph only; grey dot when idle, red when recording |
 
-- **Tile:** `YipIndicatorSurfaceBrush` (`#141518`) with the pill's quiet white
-  stroke. The tile is a little denser than the pill so it still reads on a
-  light taskbar.
-- **Dot:** `YipIndicatorDotLiveBrush` (`#E5484D`).
-- **Bars:** the green end of `YipMeterGradientBrush`, which is where a healthy
-  level sits. Their heights follow `kBarWeights` (0.62, 1.00, 0.86, 0.50) in
-  [IndicatorWindow.xaml.cpp](../../yip-app/IndicatorWindow.xaml.cpp), so the
-  icon shows the same meter shape as the pill.
+## Master geometry (256)
 
-Colours are lifted from [App.xaml](../../yip-app/App.xaml).
+- Tile 240 × 240 at an 8 px margin, radius 56, 1 px inner edge.
+- Dot 38 px. Bars 14 px wide with 11 px gaps, 18 px from the dot.
+- Bar heights 46 / 80 / 58 / 32 (1.21 / 2.1 / 1.53 / 0.84 × dot), centred on y = 128.
+- The group spans x 53–198: 145 px, 60% of the tile, 2.5 px left of centre.
+- Every edge sits on a whole pixel.
+
+## Where this departs from the brief, and why
+
+- **Dot size.** A 22% dot with bars 38% of it and the specified gaps makes the
+  group 86% of the tile, which cannot also be 55–60%. The ratios between dot,
+  bars and gaps are kept and the group is scaled to 60%, so the dot is 16%.
+- **Tile lift** runs lighter at the top (`#1C1D21`) to darker at the bottom
+  (`#141518`), lit from above as Fluent icons are.
+- **48:** the 1.5 px margin rounds to 2 px so the tile edge lands on a pixel.
+  The group sits 1 px left of centre, matching the master's offset.
+- **32:** added so edges also snap at 32. A whole-pixel left shift left
+  3 / 5 px margins and looked lopsided, so the group is centred.
+- **24:** bars are 2 px with 1 px gaps and a 3 px gap after the dot, so the dot
+  reads as separate from the meter.
+- **16:** the tile is full-bleed (0.5 px margin rounds to 0). Bars are 9 and
+  5 px on a y = 7.5 centre line, so odd heights keep whole-pixel edges and the
+  content sits half a pixel above centre.
+- **Bar opacity:** the tallest bar is 100% and the rest 85% down to 32 px. At
+  24 and 16 px every bar is 100%, because lower contrast costs legibility there.
+- **Tray:** without a tile there is room for a larger 6 px dot and 2 px gaps.
+  The `#B7BCC8` bars are for a dark taskbar; on a light one they are faint.

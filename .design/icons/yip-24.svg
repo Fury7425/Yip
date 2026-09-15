@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <title>Yip (24 px)</title>
+  <rect x="1" y="1" width="22" height="22" rx="5" fill="#141518"/>
+  <circle cx="6" cy="12" r="3" fill="#E5484D"/>
+  <g fill="#B7BCC8">
+    <rect x="12" y="8" width="2" height="8" rx="1"/>
+    <rect x="15" y="6" width="2" height="12" rx="1"/>
+    <rect x="18" y="7" width="2" height="10" rx="1"/>
+  </g>
+</svg>
