@@ -17,6 +17,8 @@ namespace yip.viewmodels
         String FileName;
         String Duration;
         String ModifiedAt;
+        // "48 kHz · stereo · 32-bit float · 6.2 MB", read from the WAV header.
+        String Subtitle;
     }
 
     [default_interface]
@@ -29,14 +31,27 @@ namespace yip.viewmodels
 
         Int32 SelectedDeviceIndex;
 
-        Single PeakLevel{ get; };
+        // Meter readings, already mapped onto the logarithmic meter scale
+        // (0 = YipMeterFloorDb, 1 = full scale) so the view just draws them.
+        Single MeterRms{ get; };
+        Single MeterPeak{ get; };
+        Single MeterHold{ get; };
         String PeakLabel{ get; };
+        String RmsLabel{ get; };
+        Boolean HasClipped{ get; };
+        UInt32 DropoutCount{ get; };
+        Boolean HasDropouts{ get; };
+
+        // "00:00.0" while short, "1:02:03.4" past an hour.
+        String ElapsedText{ get; };
 
         String StatusText{ get; };
+        String ErrorText{ get; };
+        Boolean HasError{ get; };
+
         String RecordButtonText{ get; };
         Microsoft.UI.Xaml.Media.Brush RecordButtonBrush{ get; };
         Boolean CanRecord{ get; };
-
         Boolean IsRecording{ get; };
 
         String OutputFolder{ get; };
@@ -48,17 +63,33 @@ namespace yip.viewmodels
         UInt32 HotkeyVk{ get; };
         String HotkeyLabel{ get; };
 
+        // Free-text filter over the recordings list. Setting it re-projects the
+        // cached scan rather than re-reading the folder.
+        String FilterText;
+        Boolean IsEmpty{ get; };
+        String RecordingsSummary{ get; };
+
         void RefreshDevices();
         void RefreshRecordings();
-        void PollPeak();
+
+        // One poll of audio-core's meter snapshot. Replaces the old per-value
+        // getters; costs a single FFI call.
+        void Tick();
+
         void ToggleRecording();
         void ApplySettings(String folder, UInt32 sampleRate, UInt16 channels,
                            UInt32 hotkeyMods, UInt32 hotkeyVk);
+
         void RevealRecording(RecordingEntry entry);
+        void OpenRecording(RecordingEntry entry);
+        Boolean DeleteRecording(RecordingEntry entry);
+        void CopyRecordingPath(RecordingEntry entry);
 
         // Reconcile the view model with audio-core's own state, for the paths
         // that end a session without going through ToggleRecording.
         void SyncRecordingState(Boolean recording);
         void ReportHotkeyConflict();
+        void DismissError();
+        void AcknowledgeClip();
     }
 }

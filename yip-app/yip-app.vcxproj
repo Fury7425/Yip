@@ -97,6 +97,11 @@
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
       <DisableSpecificWarnings>4100;4458</DisableSpecificWarnings>
+      <!-- Sources are UTF-8 with no BOM (.gitattributes keeps them LF+UTF-8).
+           Without this MSVC decodes them as the machine's ANSI codepage, which
+           mangles the Segoe Fluent Icons glyphs and the typographic separators
+           in string literals. -->
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ClCompile Condition="'$(Configuration)'=='Debug'">
       <Optimization>Disabled</Optimization>

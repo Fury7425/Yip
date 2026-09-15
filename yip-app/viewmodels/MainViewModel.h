@@ -6,8 +6,10 @@
 
 #include "Settings.h"
 
+#include <chrono>
 #include <filesystem>
 #include <optional>
+#include <vector>
 
 namespace winrt::yip::viewmodels::implementation {
 // ----- DeviceEntry -----
@@ -33,7 +35,7 @@ struct DeviceEntry : DeviceEntryT<DeviceEntry> {
 private:
     winrt::hstring m_id;
     winrt::hstring m_name;
-    winrt::hstring m_glyph{L""};
+    winrt::hstring m_glyph{L""};
     bool m_isCapture{true};
     bool m_isDefault{false};
 };
@@ -43,9 +45,9 @@ private:
 struct RecordingEntry : RecordingEntryT<RecordingEntry> {
     RecordingEntry() = default;
     RecordingEntry(winrt::hstring fullPath, winrt::hstring fileName, winrt::hstring duration,
-                   winrt::hstring modifiedAt)
+                   winrt::hstring modifiedAt, winrt::hstring subtitle)
         : m_fullPath(std::move(fullPath)), m_fileName(std::move(fileName)), m_duration(std::move(duration)),
-          m_modifiedAt(std::move(modifiedAt))
+          m_modifiedAt(std::move(modifiedAt)), m_subtitle(std::move(subtitle))
     {}
 
     winrt::hstring FullPath() const noexcept { return m_fullPath; }
@@ -56,12 +58,15 @@ struct RecordingEntry : RecordingEntryT<RecordingEntry> {
     void Duration(winrt::hstring const& v) { m_duration = v; }
     winrt::hstring ModifiedAt() const noexcept { return m_modifiedAt; }
     void ModifiedAt(winrt::hstring const& v) { m_modifiedAt = v; }
+    winrt::hstring Subtitle() const noexcept { return m_subtitle; }
+    void Subtitle(winrt::hstring const& v) { m_subtitle = v; }
 
 private:
     winrt::hstring m_fullPath;
     winrt::hstring m_fileName;
     winrt::hstring m_duration;
     winrt::hstring m_modifiedAt;
+    winrt::hstring m_subtitle;
 };
 
 // ----- MainViewModel -----
@@ -83,10 +88,21 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     int32_t SelectedDeviceIndex() const noexcept { return m_selectedDeviceIndex; }
     void SelectedDeviceIndex(int32_t v);
 
-    float PeakLevel() const noexcept { return m_peakLevel; }
+    float MeterRms() const noexcept { return m_meterRms; }
+    float MeterPeak() const noexcept { return m_meterPeak; }
+    float MeterHold() const noexcept { return m_meterHold; }
     winrt::hstring PeakLabel() const noexcept { return m_peakLabel; }
+    winrt::hstring RmsLabel() const noexcept { return m_rmsLabel; }
+    bool HasClipped() const noexcept { return m_clipCount > 0; }
+    uint32_t DropoutCount() const noexcept { return m_dropoutCount; }
+    bool HasDropouts() const noexcept { return m_dropoutCount > 0; }
+
+    winrt::hstring ElapsedText() const noexcept { return m_elapsedText; }
 
     winrt::hstring StatusText() const noexcept { return m_statusText; }
+    winrt::hstring ErrorText() const noexcept { return m_errorText; }
+    bool HasError() const noexcept { return !m_errorText.empty(); }
+
     winrt::hstring RecordButtonText() const noexcept { return m_isRecording ? L"Stop" : L"Record"; }
     winrt::Microsoft::UI::Xaml::Media::Brush RecordButtonBrush() const;
     bool CanRecord() const noexcept { return m_selectedDeviceIndex >= 0 || m_isRecording; }
@@ -103,24 +119,51 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     uint32_t HotkeyVk() const noexcept { return m_settings.hotkey_vk; }
     winrt::hstring HotkeyLabel() const;
 
+    winrt::hstring FilterText() const noexcept { return m_filterText; }
+    void FilterText(winrt::hstring const& v);
+    bool IsEmpty() const noexcept { return m_recordings.Size() == 0; }
+    winrt::hstring RecordingsSummary() const noexcept { return m_recordingsSummary; }
+
     void RefreshDevices();
     void RefreshRecordings();
-    void PollPeak();
+    void Tick();
     void ToggleRecording();
     void ApplySettings(winrt::hstring const& folder, uint32_t sampleRate, uint16_t channels,
                        uint32_t hotkeyMods, uint32_t hotkeyVk);
     void RevealRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
+    void OpenRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
+    bool DeleteRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
+    void CopyRecordingPath(winrt::yip::viewmodels::RecordingEntry const& entry);
     void SyncRecordingState(bool recording);
     void ReportHotkeyConflict();
+    void DismissError();
+    void AcknowledgeClip();
 
     winrt::event_token PropertyChanged(
         winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler);
     void PropertyChanged(winrt::event_token const& token) noexcept;
 
 private:
+    // One scanned WAV. Cached so filtering never re-reads the folder.
+    struct Row {
+        std::filesystem::path path;
+        std::wstring fileName;
+        std::wstring lowerName; // pre-folded for the filter compare
+        std::wstring duration;
+        std::wstring modifiedAt;
+        std::wstring subtitle;
+        uint64_t sizeBytes{0};
+        std::filesystem::file_time_type modified{};
+    };
+
     void Raise(winrt::hstring const& name);
     std::filesystem::path NextRecordingPath() const;
     void SetStatus(winrt::hstring const& s);
+    void SetError(winrt::hstring const& s);
+    // Read the last audio-core error, or `fallback` when there is none.
+    static winrt::hstring LastCoreError(wchar_t const* fallback);
+    // Rebuild the observable list from m_rows + m_filterText.
+    void ProjectRecordings();
 
     winrt::Windows::Foundation::Collections::IObservableVector<winrt::yip::viewmodels::DeviceEntry> m_devices{
         winrt::single_threaded_observable_vector<winrt::yip::viewmodels::DeviceEntry>()};
@@ -130,10 +173,30 @@ private:
     winrt::event<winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler> m_propertyChanged;
 
     int32_t m_selectedDeviceIndex{-1};
-    float m_peakLevel{0.0f};
-    winrt::hstring m_peakLabel{L"-inf dB"};
+
+    // Meter state, all in meter-scale units (0..1) except the labels.
+    float m_meterRms{0.0f};
+    float m_meterPeak{0.0f};
+    float m_meterHold{0.0f};
+    uint32_t m_clipCount{0};
+    uint32_t m_dropoutCount{0};
+    winrt::hstring m_peakLabel{L"—"};
+    winrt::hstring m_rmsLabel{L"—"};
+    winrt::hstring m_elapsedText{L"00:00.0"};
+
     winrt::hstring m_statusText{L"Ready"};
+    winrt::hstring m_errorText{L""};
     bool m_isRecording{false};
+
+    winrt::hstring m_filterText{L""};
+    winrt::hstring m_recordingsSummary{L""};
+    std::vector<Row> m_rows;
+
+    // Two brushes, built once. The old shape allocated a SolidColorBrush on
+    // every property read, and the meter tick reads it often.
+    mutable winrt::Microsoft::UI::Xaml::Media::SolidColorBrush m_idleBrush{nullptr};
+    mutable winrt::Microsoft::UI::Xaml::Media::SolidColorBrush m_recordBrush{nullptr};
+
     std::optional<std::filesystem::path> m_activeRecordingPath;
     ::yip::Settings m_settings{::yip::Settings::Load()};
 };

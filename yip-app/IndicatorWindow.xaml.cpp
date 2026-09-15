@@ -51,6 +51,47 @@ constexpr float kBarGap = 4.0f;
 constexpr float kBarMaxHeight = 18.0f;
 constexpr int kSavingHoldMs = 350; // how long the Saving frame stays up
 
+// Bottom of the bar meter, in dBFS. Same curve as the main window: on a linear
+// amplitude scale these bars barely leave the floor.
+constexpr double kMeterFloorDb = -60.0;
+constexpr float kSilenceFloor = 1e-7f;
+
+// Resting scale of a bar. Small enough to read as a dash, not a zero-height
+// glitch.
+constexpr float kBarRestScale = 0.06f;
+
+// Per-bar weighting. The pair in the middle run tallest, which reads as a
+// level meter rather than four identical sticks.
+constexpr float kBarWeights[kBarCount] = {0.62f, 1.00f, 0.86f, 0.50f};
+
+// Above this much of the travel the bars take the hot colour — roughly the
+// last 6 dB, which is the headroom worth worrying about.
+constexpr float kBarHotThreshold = 0.86f;
+
+/// Map an amplitude onto the meter's 0..1 travel, logarithmically.
+float MeterNorm(float amplitude) noexcept
+{
+    if (!(amplitude > kSilenceFloor)) return 0.0f;
+    const double db = 20.0 * std::log10(static_cast<double>(amplitude));
+    const double n = (db - kMeterFloorDb) / (0.0 - kMeterFloorDb);
+    return static_cast<float>(std::clamp(n, 0.0, 1.0));
+}
+
+/// "MM:SS", or "H:MM:SS" once a take passes the hour. No tenths: a digit
+/// flickering ten times a second in a floating pill is a distraction.
+std::wstring FormatPillElapsed(uint64_t ms) noexcept
+{
+    const uint64_t total = ms / 1000;
+    const uint64_t hours = total / 3600;
+    wchar_t buf[24];
+    if (hours > 0) {
+        swprintf_s(buf, L"%llu:%02llu:%02llu", hours, (total / 60) % 60, total % 60);
+    } else {
+        swprintf_s(buf, L"%02llu:%02llu", total / 60, total % 60);
+    }
+    return buf;
+}
+
 struct StateGeom {
     float w;
     float h;
@@ -66,9 +107,9 @@ StateGeom GeometryFor(::yip::IndicatorState s) noexcept
         case S::Armed:
             return {132.0f, 36.0f, 1.00f};
         case S::Recording:
-            return {188.0f, 44.0f, 1.00f};
+            return {210.0f, 44.0f, 1.00f};
         case S::Saving:
-            return {188.0f, 44.0f, 0.85f};
+            return {210.0f, 44.0f, 0.85f};
         case S::Expanded:
             return {320.0f, 56.0f, 1.00f};
     }
@@ -150,7 +191,7 @@ IndicatorWindow::IndicatorWindow()
     m_meterTimer.Interval(std::chrono::milliseconds(kMeterMs));
     m_meterTimer.IsRepeating(true);
     m_meterTimer.Tick([weak = get_weak()](auto&&, auto&&) {
-        if (auto self = weak.get()) self->UpdateMeterBars(::rec_peak_level());
+        if (auto self = weak.get()) self->UpdateFromMeter();
     });
 
     m_collapseTimer = dq.CreateTimer();
@@ -266,7 +307,7 @@ void IndicatorWindow::BuildCompositionLayer()
             (kBarMaxHeight + 4) * 0.5f,
             0.0f,
         });
-        bar.Scale({1.0f, 0.06f, 1.0f});
+        bar.Scale({1.0f, kBarRestScale, 1.0f});
         bar.Brush(m_barIdleBrush);
         meterContainer.Children().InsertAtTop(bar);
         m_barVisuals[static_cast<size_t>(i)] = bar;
@@ -294,20 +335,43 @@ void IndicatorWindow::BuildCompositionLayer()
     dotContainer.Children().InsertAtTop(m_dotVisual);
 }
 
-void IndicatorWindow::UpdateMeterBars(float peak)
+void IndicatorWindow::UpdateFromMeter()
 {
-    const float clamped = std::clamp(peak, 0.0f, 1.0f);
+    // One lock-free snapshot per tick: the pill used to call rec_peak_level()
+    // while the main window called it too, and each read drained the other's.
+    RecMeter snapshot{};
+    if (::rec_meter(&snapshot) != REC_STATUS_OK) return;
+
+    UpdateMeterBars(MeterNorm(snapshot.peak), snapshot.clip_count > 0);
+
+    auto text = winrt::hstring{FormatPillElapsed(snapshot.elapsed_ms)};
+    if (text != m_elapsedText) {
+        m_elapsedText = text;
+        ElapsedText().Text(text);
+    }
+}
+
+void IndicatorWindow::UpdateMeterBars(float level, bool hot)
+{
+    const float clamped = std::clamp(level, 0.0f, 1.0f);
     const auto dur = std::chrono::milliseconds(kMeterMs);
 
-    for (int i = 0; i < kBarCount; ++i) {
-        // Mild attenuation per bar position for VU-meter character.
-        const float falloff = 1.0f - 0.12f * static_cast<float>(i);
-        const float target = std::max(0.06f, clamped * falloff);
+    const bool wantHot = hot || clamped >= kBarHotThreshold;
+    const bool flipColour = (wantHot != m_barsHot);
+    m_barsHot = wantHot;
 
+    for (int i = 0; i < kBarCount; ++i) {
+        auto& bar = m_barVisuals[static_cast<size_t>(i)];
+        if (!bar) continue;
+        if (flipColour) {
+            bar.Brush(wantHot ? m_barLiveBrush : m_barIdleBrush);
+        }
+
+        const float target = std::max(kBarRestScale, clamped * kBarWeights[i]);
         auto anim = m_compositor.CreateScalarKeyFrameAnimation();
         anim.InsertKeyFrame(1.0f, target, m_ease);
         anim.Duration(dur);
-        m_barVisuals[static_cast<size_t>(i)].StartAnimation(L"Scale.Y", anim);
+        bar.StartAnimation(L"Scale.Y", anim);
     }
 }
 
@@ -334,12 +398,15 @@ void IndicatorWindow::UpdateDotForState(::yip::IndicatorState s)
 
 void IndicatorWindow::StopMeterAnimations()
 {
+    // Leave the last elapsed time on screen through the Saving frame; only the
+    // bars fall back, so the pill does not blank out mid-fade.
+    m_barsHot = false;
     for (auto& bar : m_barVisuals) {
         if (!bar) continue;
         bar.StopAnimation(L"Scale.Y");
         // Snap back to idle resting scale.
         auto anim = m_compositor.CreateScalarKeyFrameAnimation();
-        anim.InsertKeyFrame(1.0f, 0.06f, m_ease);
+        anim.InsertKeyFrame(1.0f, kBarRestScale, m_ease);
         anim.Duration(std::chrono::milliseconds(kFadeMs));
         bar.StartAnimation(L"Scale.Y", anim);
     }
@@ -399,6 +466,7 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
     ExpandedActions().IsHitTestVisible(wantActions);
 
     MeterHost().Opacity(wantMeter ? 1.0 : 0.0);
+    ElapsedText().Opacity(wantMeter ? 1.0 : 0.0);
 
     AnimatePillToState(s, animate);
     UpdateDotForState(s);

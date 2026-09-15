@@ -41,7 +41,9 @@ private:
 
     // ----- Composition layer -----
     void BuildCompositionLayer();
-    void UpdateMeterBars(float peak);
+    // One rec_meter() snapshot per tick, fanned out to the bars and the timer.
+    void UpdateFromMeter();
+    void UpdateMeterBars(float level, bool hot);
     void UpdateDotForState(::yip::IndicatorState s);
     void StopMeterAnimations();
 
@@ -100,6 +102,11 @@ private:
     // Last state delivered by the bus. Cheaper than asking audio-core again
     // from inside a transition.
     bool m_recording{false};
+
+    // Cached so a tick only touches the TextBlock when the second rolls over.
+    winrt::hstring m_elapsedText{L"00:00"};
+    // Whether the bars are currently painted with the hot brush.
+    bool m_barsHot{false};
 };
 } // namespace winrt::yip::implementation
 
