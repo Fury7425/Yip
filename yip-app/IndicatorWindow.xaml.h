@@ -9,6 +9,9 @@
 #include <chrono>
 #include <vector>
 
+#include <winrt/Windows.System.h>
+#include <winrt/Windows.UI.Composition.h>
+
 namespace winrt::yip::implementation {
 struct IndicatorWindow : IndicatorWindowT<IndicatorWindow> {
     IndicatorWindow();
@@ -39,6 +42,10 @@ private:
     void ApplyToolWindowStyle();
     void ApplyAlwaysOnTop();
     void ApplyClickThrough(bool enable);
+    // No DWM corner or frame, and a transparent system backdrop: the Border is
+    // the only thing drawn.
+    void ApplyFrameless();
+    void ApplyTransparentBackdrop();
 
     // ----- Composition layer -----
     void BuildCompositionLayer();
@@ -57,7 +64,7 @@ private:
     // Driven by RecordingStateBus, not a timer: an idle pill costs nothing.
     void OnRecordingStateChanged(bool recording);
     void TransitionTo(::yip::IndicatorState s, bool animate = true);
-    // Resize the HWND, its rounded region and the Border to match the state.
+    // Resize the HWND and the Border to match the state.
     // The window *is* the pill; nothing clips it.
     void SyncWindowToState(::yip::IndicatorState s);
     void AnimatePillToState(::yip::IndicatorState s, bool animate);
@@ -79,6 +86,8 @@ private:
 
     // Field state
     HWND m_hwnd{nullptr};
+    winrt::Windows::System::DispatcherQueueController m_backdropQueue{nullptr};
+    winrt::Windows::UI::Composition::Compositor m_backdropCompositor{nullptr};
     ::yip::IndicatorState m_state{::yip::IndicatorState::Idle};
     ::yip::IndicatorState m_baseState{::yip::IndicatorState::Idle}; // state before expansion
     ::yip::IndicatorPersistence m_persisted{};

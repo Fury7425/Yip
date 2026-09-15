@@ -99,7 +99,10 @@
                     <SolidColorBrush x:Key="YipLampLiveBrush"        Color="#E5484D" />
 
                     <!-- Indicator pill -->
-                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"      Color="#FAFAFB" Opacity="0.72" />
+                    <!-- The pill has no backdrop to blur what is behind it (see
+                         IndicatorWindow::ApplyTransparentBackdrop), so its tint
+                         is denser than the cards' to stay legible. -->
+                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"      Color="#FAFAFB" Opacity="0.88" />
                     <SolidColorBrush x:Key="YipIndicatorStrokeQuietBrush"  Color="#000000" Opacity="0.07" />
                     <SolidColorBrush x:Key="YipIndicatorMeterBarIdleBrush" Color="#525866" />
                     <SolidColorBrush x:Key="YipIndicatorMeterBarLiveBrush" Color="#E5484D" />
@@ -142,7 +145,7 @@
                     <SolidColorBrush x:Key="YipLampIdleBrush"        Color="#767C8C" />
                     <SolidColorBrush x:Key="YipLampLiveBrush"        Color="#E5484D" />
 
-                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"      Color="#141518" Opacity="0.62" />
+                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"      Color="#141518" Opacity="0.84" />
                     <SolidColorBrush x:Key="YipIndicatorStrokeQuietBrush"  Color="#FFFFFF" Opacity="0.075" />
                     <SolidColorBrush x:Key="YipIndicatorMeterBarIdleBrush" Color="#B7BCC8" />
                     <SolidColorBrush x:Key="YipIndicatorMeterBarLiveBrush" Color="#FF6B70" />

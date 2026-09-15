@@ -69,6 +69,10 @@ theme dictionaries. **No colour is written in C++.**
   appears on screen, a token key is wrong.
 - Surfaces are a **tint over the window backdrop**, never an opaque fill. If a
   surface needs a solid colour to look right, Mica/acrylic has stopped working.
+  The pill is the one exception: DWM draws a system backdrop over the whole
+  window rectangle and ignores the window region, so behind a capsule acrylic
+  leaked out as light corners. The pill uses a transparent backdrop and a
+  denser `YipIndicatorSurfaceBrush` tint instead.
 - Geometry and motion constants that only code consumes are **not** mirrored in
   App.xaml — the pill's state sizes and timings are `constexpr` in
   [yip-app/IndicatorWindow.xaml.cpp](yip-app/IndicatorWindow.xaml.cpp). Only

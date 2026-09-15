@@ -132,6 +132,7 @@
         user32.lib;
         gdi32.lib;
         dwmapi.lib;
+        CoreMessaging.lib;
         runtimeobject.lib;
         windowsapp.lib;
         %(AdditionalDependencies)

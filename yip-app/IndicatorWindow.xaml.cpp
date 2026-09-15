@@ -9,6 +9,7 @@
 #include "Settings.h"
 #include "ThemeColors.h"
 
+#include <DispatcherQueue.h>
 #include <dwmapi.h>
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Microsoft.UI.h>
@@ -20,6 +21,7 @@
 #include <winrt/Microsoft.UI.Xaml.Input.h>
 #include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.h>
+#include <winrt/Windows.UI.Composition.h>
 #include <winrt/Windows.UI.Core.h>
 
 #include <algorithm>
@@ -151,11 +153,15 @@ IndicatorWindow::IndicatorWindow()
 
     ApplyToolWindowStyle();
     ApplyAlwaysOnTop();
+    // After the presenter change: SetBorderAndTitleBar re-applies the frame,
+    // and the default corner preference with it.
+    ApplyFrameless();
 
-    // Real translucency: the pill is its own window, so the system gives it a
-    // blurred backdrop for free. The Border's tint then sits on top of that
-    // instead of on top of black.
-    SystemBackdrop(mux::Media::DesktopAcrylicBackdrop{});
+    // No acrylic. DWM draws a system backdrop across the whole window
+    // rectangle, rounded only by its own 8px corner and ignoring the window
+    // region, so behind a capsule it showed as light corners and a light rim.
+    // A transparent backdrop leaves the Border as the only thing drawn.
+    ApplyTransparentBackdrop();
 
     BuildCompositionLayer();
     ApplyClickThrough(m_persisted.click_through);
@@ -247,15 +253,38 @@ void IndicatorWindow::ApplyToolWindowStyle()
     ex |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     ex &= ~(WS_EX_APPWINDOW | WS_EX_LAYERED);
     ::SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, ex);
+}
 
-    // Windows 11 rounds top-level windows to 8px and draws a 1px frame along
-    // the rectangle. The region already makes the pill a capsule, so that
-    // frame showed as square-ish corners outside it. Neither attribute exists
-    // before Windows 11; the calls just fail there, which is fine.
+void IndicatorWindow::ApplyFrameless()
+{
+    if (!m_hwnd) return;
+    // Windows 11 rounds top-level windows to 8px and strokes a 1px frame along
+    // the rectangle; around a capsule both read as stray corners. Neither
+    // attribute exists before Windows 11, where the calls simply fail.
     const DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_DONOTROUND;
     (void)::DwmSetWindowAttribute(m_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
     const COLORREF noBorder = DWMWA_COLOR_NONE;
     (void)::DwmSetWindowAttribute(m_hwnd, DWMWA_BORDER_COLOR, &noBorder, sizeof(noBorder));
+}
+
+void IndicatorWindow::ApplyTransparentBackdrop()
+{
+    auto target = try_as<mucomp::ICompositionSupportsSystemBackdrop>();
+    if (!target) return;
+
+    // The backdrop brush comes from the system compositor
+    // (Windows.UI.Composition), which needs a Windows.System dispatcher queue
+    // on this thread; WinUI only guarantees the Microsoft.UI one.
+    if (!winrt::Windows::System::DispatcherQueue::GetForCurrentThread()) {
+        DispatcherQueueOptions options{sizeof(DispatcherQueueOptions), DQTYPE_THREAD_CURRENT, DQTAT_COM_NONE};
+        if (FAILED(::CreateDispatcherQueueController(
+                options, reinterpret_cast<ABI::Windows::System::IDispatcherQueueController**>(
+                             winrt::put_abi(m_backdropQueue))))) {
+            return;
+        }
+    }
+    if (!m_backdropCompositor) m_backdropCompositor = winrt::Windows::UI::Composition::Compositor{};
+    target.SystemBackdrop(m_backdropCompositor.CreateColorBrush(winrt::Microsoft::UI::Colors::Transparent()));
 }
 
 void IndicatorWindow::ApplyAlwaysOnTop()
@@ -565,7 +594,7 @@ void IndicatorWindow::SyncWindowToState(::yip::IndicatorState s)
     // edge and the timer lost its first digit. Sizing the window to the state
     // cannot drift out of step with the content.
     //
-    // The HWND and its region are physical pixels while the geometry is DIPs:
+    // The HWND is sized in physical pixels while the geometry is DIPs:
     // unscaled, a 210x44 pill at 200% got a 105x22 window and lost half its
     // content off the right and bottom edges.
     const int pw = static_cast<int>(std::lround(g.w * DpiScale()));
@@ -573,8 +602,9 @@ void IndicatorWindow::SyncWindowToState(::yip::IndicatorState s)
     auto appWindow = muw::AppWindow::GetFromWindowId(AppWindow().Id());
     if (appWindow) appWindow.Resize({pw, ph});
 
-    // Windows takes ownership of the region.
-    ::SetWindowRgn(m_hwnd, ::CreateRoundRectRgn(0, 0, pw + 1, ph + 1, ph, ph), TRUE);
+    // No window region: it is aliased, so it chewed the Border's antialiased
+    // edge into a stepped rim, and with a transparent backdrop there is
+    // nothing outside the capsule for it to hide.
 
     const double radius = g.h * 0.5;
     PillFrame().Width(g.w);

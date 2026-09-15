@@ -9,11 +9,11 @@
 <helmet>
   <style>
     /* The floating pill as it currently ships: its own always-on-top window,
-       sized to the state it is in, with DesktopAcrylicBackdrop behind it. */
+       sized to the state it is in, over a transparent backdrop (no blur). */
     :root {
       --ink:       #F2F3F5;                 /* YipIndicatorTimerBrush */
       --ink-2:     #C9CED8;
-      --surface:   rgba(20,21,24,0.62);     /* YipIndicatorSurfaceBrush */
+      --surface:   rgba(20,21,24,0.84);     /* YipIndicatorSurfaceBrush */
       --line:      rgba(255,255,255,0.075); /* YipIndicatorStrokeQuietBrush */
       --dot-live:  #E5484D;                 /* YipIndicatorDotLiveBrush */
       --dot-idle:  #767C8C;                 /* YipIndicatorDotIdleBrush */
@@ -49,8 +49,6 @@
       display: flex; align-items: center; position: relative;
       padding: 4px 10px;
       background: var(--surface);
-      backdrop-filter: blur(40px) saturate(130%);
-      -webkit-backdrop-filter: blur(40px) saturate(130%);
       box-shadow: inset 0 0 0 1px var(--line), 0 8px 22px rgba(0,0,0,.30);
     }
     .pill.rec { width: 210px; height: 44px; border-radius: 22px; }
