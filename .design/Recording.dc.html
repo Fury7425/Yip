@@ -1,0 +1,371 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    /* Yip — Aurora Glass. Palette, type ramp and window size are lifted from
+       yip-app/App.xaml and MainWindow.xaml.cpp; the material is new. */
+    :root {
+      --ink:        #F2F3F5;
+      --ink-2:      #B7BCC8;
+      --ink-3:      #767C8C;
+      --accent:     #3D7AFF;
+      --record:     #E5484D;
+      --ok:         #35C46A;
+
+      /* Glass recipe. One tint, one stroke, two speculars — every surface in
+         the app is this recipe at one of three depths. */
+      --g-tint:     rgba(255,255,255,0.055);
+      --g-tint-2:   rgba(255,255,255,0.085);
+      --g-stroke:   rgba(255,255,255,0.09);
+      --g-spec-t:   rgba(255,255,255,0.22);
+      --g-spec-b:   rgba(0,0,0,0.30);
+      --g-blur:     blur(28px) saturate(150%);
+
+      --r-card:     22px;
+      --r-ctrl:     14px;
+      --r-pill:     999px;
+
+      --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      --mono: "Cascadia Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--font); }
+    a { color: var(--accent); } a:hover { color: #6B99FF; }
+
+    /* The desktop the window sits on. Glass is only legible over something
+       with structure, so the artboard carries a wallpaper. */
+    .desk {
+      width: 470px; height: 640px; overflow: hidden; position: relative;
+      background:
+        radial-gradient(120% 80% at 12% 4%,  #2C3C7A 0%, rgba(44,60,122,0) 58%),
+        radial-gradient(90%  70% at 92% 14%, #6B3F86 0%, rgba(107,63,134,0) 55%),
+        radial-gradient(110% 90% at 70% 98%, #0F5C63 0%, rgba(15,92,99,0) 60%),
+        linear-gradient(168deg, #14161D 0%, #0B0C11 100%);
+    }
+    .grain {
+      position: absolute; inset: 0; pointer-events: none; opacity: 0.30;
+      background-image:
+        repeating-linear-gradient(0deg,   rgba(255,255,255,0.016) 0 1px, transparent 1px 3px),
+        repeating-linear-gradient(90deg,  rgba(255,255,255,0.012) 0 1px, transparent 1px 3px);
+    }
+
+    .win { position: relative; display: flex; flex-direction: column; height: 100%; }
+
+    /* ---------------- title bar ---------------- */
+    .bar {
+      height: 48px; flex: none; display: flex; align-items: center;
+      gap: 10px; padding: 0 12px 0 18px;
+    }
+    .lamp { width: 9px; height: 9px; border-radius: 50%; flex: none;
+            background: var(--record); box-shadow: 0 0 12px rgba(229,72,77,0.85); }
+    .wordmark { font-size: 14px; font-weight: 600; color: var(--ink); letter-spacing: 0.1px; }
+    .spacer { flex: 1 1 auto; }
+    .iconbtn {
+      width: 32px; height: 32px; flex: none; display: grid; place-items: center;
+      border-radius: 10px; color: var(--ink-2);
+      background: var(--g-tint); backdrop-filter: var(--g-blur);
+      -webkit-backdrop-filter: var(--g-blur);
+      box-shadow: inset 0 0 0 1px var(--g-stroke), inset 0 1px 0 var(--g-spec-t);
+    }
+    .caption { display: flex; gap: 2px; margin-left: 4px; color: var(--ink-3); }
+    .caption span { width: 30px; height: 30px; display: grid; place-items: center; font-size: 11px; }
+
+    /* ---------------- glass card ---------------- */
+    .card {
+      position: relative; border-radius: var(--r-card);
+      background: var(--g-tint);
+      backdrop-filter: var(--g-blur); -webkit-backdrop-filter: var(--g-blur);
+      box-shadow:
+        inset 0 0 0 1px var(--g-stroke),
+        inset 0 1px 0 var(--g-spec-t),
+        inset 0 -1px 0 var(--g-spec-b),
+        0 14px 34px rgba(0,0,0,0.38);
+    }
+    /* The "liquid" read: a soft off-axis sheen, as if the panel were bending
+       the light behind it. One gradient, no per-frame cost. */
+    .card::after {
+      content: ""; position: absolute; inset: 0; border-radius: inherit;
+      pointer-events: none;
+      background: radial-gradient(130% 90% at 6% -10%, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0) 52%);
+    }
+
+    .hero { flex: none; margin: 0 16px; padding: 16px 18px 18px; }
+
+    /* device + format row */
+    .toprow { display: flex; align-items: center; gap: 10px; height: 30px; }
+    .devpill {
+      display: flex; align-items: center; gap: 8px; height: 30px;
+      padding: 0 12px 0 10px; border-radius: var(--r-pill);
+      background: var(--g-tint-2);
+      box-shadow: inset 0 0 0 1px var(--g-stroke), inset 0 1px 0 rgba(255,255,255,0.16);
+      color: var(--ink); font-size: 12.5px; max-width: 250px;
+    }
+    .devname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .fmt { margin-left: auto; font-size: 10.5px; color: var(--ink-3); letter-spacing: 0.2px;
+           white-space: nowrap; }
+
+    /* timer */
+    .timer {
+      font-family: var(--mono); font-size: 46px; line-height: 1; font-weight: 300;
+      letter-spacing: -1.5px; color: var(--ink); text-align: center;
+      margin: 14px 0 0; font-variant-numeric: tabular-nums;
+      opacity: 1;
+    }
+
+    /* waveform */
+    .wave { position: relative; height: 76px; margin-top: 12px; border-radius: 10px; overflow: hidden;
+            background: rgba(0,0,0,0.22);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05); }
+    .grid { position: absolute; inset: 0; }
+    .grid i { position: absolute; left: 0; right: 0; height: 1px; background: rgba(255,255,255,0.055); }
+    .grid b { position: absolute; right: 6px; font-size: 9px; font-style: normal; font-family: var(--mono);
+              color: var(--ink-3); opacity: 0.75; transform: translateY(-50%); }
+    .bars { position: absolute; inset: 0; display: flex; align-items: center; gap: 2px;
+            padding: 0 8px; }
+    .bars i { flex: 1 1 0; border-radius: 1.5px; background: rgba(255,255,255,0.13); height: 2px; }
+    .idlehint { position: absolute; inset: 0; display: grid; place-items: center;
+                font-size: 11.5px; color: var(--ink-3); letter-spacing: 0.3px; }
+
+    /* readouts */
+    .readout { display: flex; align-items: center; gap: 18px; height: 24px; margin-top: 14px; }
+    .ro { display: flex; align-items: baseline; gap: 6px; }
+    .ro em { font-style: normal; font-size: 9.5px; letter-spacing: 1.1px; color: var(--ink-3); }
+    .ro span { font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+               font-variant-numeric: tabular-nums; }
+    .clip { margin-left: auto; display: flex; align-items: center; gap: 6px; opacity: 0.22; }
+    .clip i { width: 22px; height: 4px; border-radius: 2px; background: #FF6B70; }
+    .clip em { font-style: normal; font-size: 9.5px; letter-spacing: 1.1px; color: #FF6B70; }
+
+    /* record control */
+    .transport { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 16px; }
+    .rec {
+      width: 62px; height: 62px; border-radius: 50%; display: grid; place-items: center;
+      position: relative;
+      background: radial-gradient(120% 120% at 32% 22%, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.02) 46%),
+                  rgba(229,72,77,0.20);
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,0.14),
+        inset 0 1px 0 rgba(255,255,255,0.30),
+        0 8px 22px rgba(229,72,77,0.28);
+      backdrop-filter: var(--g-blur); -webkit-backdrop-filter: var(--g-blur);
+    }
+    .rec b { width: 22px; height: 22px; border-radius: 50%; background: var(--record);
+             box-shadow: 0 0 14px rgba(229,72,77,0.55); }
+    .rec.live {
+      background: radial-gradient(120% 120% at 32% 22%, rgba(255,255,255,0.26) 0%, rgba(255,255,255,0.03) 46%),
+                  rgba(229,72,77,0.38);
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,0.20),
+        inset 0 1px 0 rgba(255,255,255,0.38),
+        0 0 0 6px rgba(229,72,77,0.10),
+        0 10px 26px rgba(229,72,77,0.40);
+    }
+    .rec b.sq { width: 20px; height: 20px; border-radius: 6px; }
+    .ghostbtn {
+      display: flex; flex-direction: column; align-items: center; gap: 4px;
+      width: 58px; color: var(--ink-2);
+    }
+    .ghostbtn span { font-size: 10px; letter-spacing: 0.2px; }
+    .ghostbtn.dim { color: var(--ink-3); }
+    .hint { position: absolute; bottom: -2px; left: 50%; transform: translate(-50%, 100%);
+            font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); white-space: nowrap; }
+
+    /* ---------------- list ---------------- */
+    .list { flex: 1 1 auto; margin: 12px 16px 0; padding: 0; display: flex; flex-direction: column;
+            overflow: hidden; }
+    .lhead { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; }
+    .lhead h2 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+    .lhead small { font-size: 10.5px; color: var(--ink-3); }
+    .search {
+      margin-left: auto; display: flex; align-items: center; gap: 6px;
+      height: 26px; padding: 0 10px; border-radius: var(--r-pill);
+      background: rgba(0,0,0,0.20);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.06);
+      font-size: 11px; color: var(--ink-3);
+    }
+    .rows { flex: 1 1 auto; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 2px; }
+    .row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 12px; }
+    .row.sel { background: rgba(255,255,255,0.07);
+               box-shadow: inset 0 0 0 1px rgba(255,255,255,0.07); }
+    .rowmain { min-width: 0; flex: 1 1 auto; }
+    .rowmain b { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink);
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rowmain small { display: block; margin-top: 2px; font-size: 10px; color: var(--ink-3); }
+    .rowmeta { text-align: right; flex: none; }
+    .rowmeta b { display: block; font-family: var(--mono); font-size: 11.5px; font-weight: 400;
+                 color: var(--ink-2); font-variant-numeric: tabular-nums; }
+    .rowmeta small { display: block; margin-top: 2px; font-size: 10px; color: var(--ink-3); }
+
+    /* ---------------- status ---------------- */
+    .status { flex: none; height: 30px; display: flex; align-items: center; gap: 10px;
+              padding: 0 22px; }
+    .status p { margin: 0; font-size: 11px; color: var(--ink-2); }
+    .status code { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+  </style>
+</helmet>
+
+<div class="desk">
+  <div class="grain"></div>
+  <div class="win">
+
+    <div class="bar">
+      <div class="lamp"></div>
+      <div class="wordmark">Yip</div>
+      <div class="spacer"></div>
+      <div class="iconbtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <path d="M4 8h10M18 8h2M4 16h4M12 16h8"></path>
+          <circle cx="16" cy="8" r="2.2"></circle><circle cx="10" cy="16" r="2.2"></circle>
+        </svg>
+      </div>
+      <div class="iconbtn">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+          <circle cx="12" cy="12" r="3.2"></circle>
+          <path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M18 6l-1.6 1.6M7.6 16.4 6 18M18 18l-1.6-1.6M7.6 7.6 6 6" stroke-linecap="round"></path>
+        </svg>
+      </div>
+      <div class="caption"><span>&#8722;</span><span>&#9633;</span><span>&#10005;</span></div>
+    </div>
+
+    <div class="card hero">
+      <div class="toprow">
+        <div class="devpill">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <rect x="9" y="3" width="6" height="11" rx="3"></rect>
+            <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"></path>
+          </svg>
+          <span class="devname">Shure MV7</span>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" style="opacity:.55">
+            <path d="m6 9 6 6 6-6"></path>
+          </svg>
+        </div>
+        <div class="fmt">48 kHz &#183; STEREO &#183; 32-BIT FLOAT</div>
+      </div>
+
+      <div class="timer">02:47.3</div>
+
+      <div class="wave">
+        <div class="grid">
+          <i style="top:14px"></i><b style="top:14px">-6</b>
+          <i style="top:28px"></i><b style="top:28px">-12</b>
+          <i style="top:48px"></i><b style="top:48px">-24</b>
+        </div>
+        <div class="bars">
+          <i style="height:8px;background:#39C56A"></i>
+          <i style="height:8px;background:#39C56A"></i>
+          <i style="height:10px;background:#3CC669"></i>
+          <i style="height:14px;background:#41C869"></i>
+          <i style="height:19px;background:#46CA69"></i>
+          <i style="height:23px;background:#4ACB68"></i>
+          <i style="height:25px;background:#4CCC68"></i>
+          <i style="height:35px;background:#57D067"></i>
+          <i style="height:47px;background:#AAC75C"></i>
+          <i style="height:57px;background:#F4A95A"></i>
+          <i style="height:61px;background:#FC796B"></i>
+          <i style="height:58px;background:#F79760"></i>
+          <i style="height:50px;background:#C2C458"></i>
+          <i style="height:38px;background:#5BD167"></i>
+          <i style="height:26px;background:#4ECC68"></i>
+          <i style="height:24px;background:#4CCC68"></i>
+          <i style="height:21px;background:#48CB68"></i>
+          <i style="height:18px;background:#45C969"></i>
+          <i style="height:15px;background:#42C869"></i>
+          <i style="height:14px;background:#41C869"></i>
+          <i style="height:15px;background:#41C869"></i>
+          <i style="height:16px;background:#42C969"></i>
+          <i style="height:17px;background:#44C969"></i>
+          <i style="height:26px;background:#4DCC68"></i>
+          <i style="height:36px;background:#59D067"></i>
+          <i style="height:47px;background:#A7C75C"></i>
+          <i style="height:55px;background:#F1BA53"></i>
+          <i style="height:59px;background:#F98E63"></i>
+          <i style="height:57px;background:#F5A25C"></i>
+          <i style="height:50px;background:#C8C358"></i>
+          <i style="height:43px;background:#83CC61"></i>
+          <i style="height:48px;background:#B1C65B"></i>
+          <i style="height:49px;background:#B8C55A"></i>
+          <i style="height:45px;background:#95CA5F"></i>
+          <i style="height:37px;background:#5AD167"></i>
+          <i style="height:29px;background:#50CD68"></i>
+          <i style="height:20px;background:#47CA69"></i>
+          <i style="height:14px;background:#40C869"></i>
+          <i style="height:10px;background:#3BC669"></i>
+          <i style="height:8px;background:#3AC66A;box-shadow:0 0 10px rgba(255,255,255,.35)"></i>
+        </div>
+      </div>
+
+      <div class="readout">
+        <div class="ro"><em>PEAK</em><span>&#8722;6.1 dB</span></div>
+        <div class="ro"><em>RMS</em><span>&#8722;14.8 dB</span></div>
+        <div class="clip"><i></i><em>CLIP</em></div>
+      </div>
+
+      <div class="transport">
+        <div class="ghostbtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <path d="M12 4v16M6 9v6M18 9v6"></path>
+          </svg>
+          <span>Mark</span>
+        </div>
+        <div class="rec live"><b class="sq"></b><div class="hint">Ctrl+Alt+R to stop</div></div>
+        <div class="ghostbtn dim">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+            <path d="M4 7.5h7l2 2.5h7M4 7.5V18a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 18v-8"></path>
+          </svg>
+          <span>Folder</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card list">
+      <div class="lhead">
+        <h2>Recordings</h2>
+        <small>12 &#183; 486 MB</small>
+        <div class="search">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.5 4.5" stroke-linecap="round"></path>
+          </svg>
+          Filter
+        </div>
+      </div>
+      <div class="rows">
+        <div class="row sel">
+          <div class="rowmain">
+            <b>yip-20260915-142233.wav</b>
+            <small>48 kHz &#183; stereo &#183; 32-bit float &#183; 6.2 MB</small>
+          </div>
+          <div class="rowmeta"><b>00:34</b><small>2 min ago</small></div>
+        </div>
+        <div class="row">
+          <div class="rowmain">
+            <b>yip-20260915-135901.wav</b>
+            <small>48 kHz &#183; stereo &#183; 32-bit float &#183; 41 MB</small>
+          </div>
+          <div class="rowmeta"><b>03:44</b><small>26 min ago</small></div>
+        </div>
+        <div class="row">
+          <div class="rowmain">
+            <b>yip-20260914-201115-processed.wav</b>
+            <small>48 kHz &#183; stereo &#183; 32-bit float &#183; 128 MB</small>
+          </div>
+          <div class="rowmeta"><b>11:38</b><small>Yesterday</small></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="status">
+      <p>Recording to yip-20260915-144012.wav</p>
+      <code>Ctrl+Alt+R</code>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

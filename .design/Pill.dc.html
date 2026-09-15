@@ -1,0 +1,166 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    :root {
+      --ink:      #F2F3F5;
+      --ink-2:    #B7BCC8;
+      --ink-3:    #767C8C;
+      --record:   #E5484D;
+      --g-stroke: rgba(255,255,255,0.11);
+      --g-spec-t: rgba(255,255,255,0.30);
+      --g-spec-b: rgba(0,0,0,0.34);
+      --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+      --mono: "Cascadia Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--font); }
+    a { color: #3D7AFF; } a:hover { color: #6B99FF; }
+
+    .stage {
+      width: 720px; height: 420px; position: relative; overflow: hidden;
+      background:
+        radial-gradient(90% 70% at 18% 8%,  #33407E 0%, rgba(51,64,126,0) 55%),
+        radial-gradient(80% 70% at 88% 82%, #1C6470 0%, rgba(28,100,112,0) 58%),
+        linear-gradient(160deg, #171A22 0%, #0A0B0F 100%);
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 30px;
+    }
+
+    /* Something with structure behind the glass — without it, translucency
+       reads as "slightly grey rectangle". */
+    .behind { position: absolute; inset: 0; opacity: 0.5; }
+    .behind .lines { position: absolute; left: 48px; top: 40px; width: 300px; }
+    .behind .lines i { display: block; height: 7px; border-radius: 4px; margin-bottom: 11px;
+                       background: rgba(255,255,255,0.15); }
+    .behind .thumb { position: absolute; right: 54px; top: 62px; width: 214px; height: 128px;
+                     border-radius: 14px;
+                     background: linear-gradient(135deg, #E0A33A 0%, #E5484D 52%, #6B3F86 100%); }
+    .behind .thumb2 { position: absolute; right: 96px; bottom: 44px; width: 150px; height: 92px;
+                      border-radius: 12px;
+                      background: linear-gradient(200deg, #35C46A 0%, #0F5C63 100%); }
+    .behind .code { position: absolute; left: 54px; bottom: 44px; width: 260px; }
+    .behind .code i { display: block; height: 6px; border-radius: 3px; margin-bottom: 9px;
+                      background: rgba(255,255,255,0.12); }
+
+    .slot { position: relative; display: flex; flex-direction: column; align-items: center; gap: 9px; }
+    .cap { font-size: 10px; letter-spacing: 1.3px; color: var(--ink-3); text-transform: uppercase; }
+
+    /* ---- the pill ---- */
+    .pill {
+      position: relative; display: flex; align-items: center;
+      border-radius: 999px;
+      background: rgba(20,21,24,0.44);
+      backdrop-filter: blur(34px) saturate(170%);
+      -webkit-backdrop-filter: blur(34px) saturate(170%);
+      box-shadow:
+        inset 0 0 0 1px var(--g-stroke),
+        inset 0 1.2px 0 var(--g-spec-t),
+        inset 0 -1.2px 0 var(--g-spec-b),
+        0 12px 30px rgba(0,0,0,0.46),
+        0 2px 6px rgba(0,0,0,0.30);
+    }
+    /* Liquid Glass edge: light gathers on the upper-left arc and falls off. */
+    .pill::after {
+      content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+      background: radial-gradient(120% 160% at 10% -30%, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0) 46%);
+    }
+
+    .pill.rec  { width: 210px; height: 44px; padding: 0 16px 0 14px; gap: 10px; }
+    .pill.exp  { width: 320px; height: 56px; padding: 0 8px 0 18px; gap: 12px; }
+    .pill.save { width: 210px; height: 44px; padding: 0 16px 0 14px; gap: 10px; opacity: 0.85; }
+
+    .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--record);
+           box-shadow: 0 0 12px rgba(229,72,77,0.9); }
+    .dot.quiet { background: var(--ink-3); box-shadow: none; }
+
+    .mini { display: flex; align-items: flex-end; gap: 3px; height: 20px; flex: none; }
+    .mini i { width: 3px; border-radius: 2px; background: #B7BCC8; }
+    .mini.hot i { background: var(--record); }
+
+    .t { font-family: var(--mono); font-size: 13.5px; color: var(--ink);
+         font-variant-numeric: tabular-nums; letter-spacing: 0.2px; }
+    .t.dim { color: var(--ink-2); }
+    .grow { flex: 1 1 auto; }
+
+    .acts { display: flex; align-items: center; gap: 4px; flex: none; }
+    .act {
+      width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+      color: var(--ink-2); background: rgba(255,255,255,0.07);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08), inset 0 1px 0 rgba(255,255,255,0.14);
+    }
+    .act.stop { color: #FFD9DA; background: rgba(229,72,77,0.26);
+                box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14), inset 0 1px 0 rgba(255,255,255,0.26); }
+
+    .spin { width: 15px; height: 15px; border-radius: 50%; flex: none;
+            border: 2px solid rgba(255,255,255,0.18); border-top-color: var(--ink-2); }
+  </style>
+</helmet>
+
+<div class="stage">
+  <div class="behind">
+    <div class="lines">
+      <i style="width:88%"></i><i style="width:96%"></i><i style="width:72%"></i>
+      <i style="width:91%"></i><i style="width:56%"></i>
+    </div>
+    <div class="thumb"></div>
+    <div class="thumb2"></div>
+    <div class="code">
+      <i style="width:64%"></i><i style="width:80%"></i><i style="width:44%"></i>
+    </div>
+  </div>
+
+  <div class="slot">
+    <div class="pill rec">
+      <div class="dot"></div>
+      <div class="mini hot">
+        <i style="height:7px"></i><i style="height:14px"></i><i style="height:19px"></i><i style="height:11px"></i>
+      </div>
+      <div class="t">02:47</div>
+      <div class="grow"></div>
+    </div>
+    <div class="cap">Recording &#183; 210 &#215; 44</div>
+  </div>
+
+  <div class="slot">
+    <div class="pill exp">
+      <div class="dot"></div>
+      <div class="mini hot">
+        <i style="height:9px"></i><i style="height:17px"></i><i style="height:13px"></i><i style="height:6px"></i>
+      </div>
+      <div class="t">02:47</div>
+      <div class="grow"></div>
+      <div class="acts">
+        <div class="act stop">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"></rect></svg>
+        </div>
+        <div class="act">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4v16M6 9v6M18 9v6"></path></svg>
+        </div>
+        <div class="act">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5h7l2 2.5h7M4 7.5V18a1.5 1.5 0 0 0 1.5 1.5h13A1.5 1.5 0 0 0 20 18v-8"></path></svg>
+        </div>
+      </div>
+    </div>
+    <div class="cap">Expanded on tap &#183; 320 &#215; 56</div>
+  </div>
+
+  <div class="slot">
+    <div class="pill save">
+      <div class="dot quiet"></div>
+      <div class="spin"></div>
+      <div class="t dim">02:47</div>
+      <div class="grow"></div>
+    </div>
+    <div class="cap">Saving &#183; holds 350 ms, then fades out</div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
