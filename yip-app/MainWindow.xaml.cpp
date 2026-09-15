@@ -54,7 +54,9 @@ constexpr double kFallbackCaptionInset = 140.0;
 constexpr float kWaveBarWidth = 3.0f;
 constexpr float kWaveBarGap = 2.0f;
 constexpr float kWavePitch = kWaveBarWidth + kWaveBarGap;
-constexpr float kWaveRestPx = 2.0f; // hairline at silence, so the strip reads as alive
+// Silence draws nothing: a row of 3px stubs read as a dotted-line artefact.
+// The static baseline behind the strip carries the "alive" signal instead.
+constexpr float kWaveRestPx = 0.0f;
 constexpr int kWaveMinBars = 8;
 constexpr int kWaveMaxBars = 480;
 constexpr uint32_t kWavePaletteSteps = 16;
@@ -64,7 +66,7 @@ constexpr uint32_t kWavePaletteSteps = 16;
 constexpr winrt::Windows::UI::Color kMissingToken{0xFF, 0x80, 0x80, 0x80};
 
 // The elapsed clock is dimmed until there is something to count.
-constexpr double kIdleClockOpacity = 0.38;
+constexpr double kIdleClockOpacity = 0.55;
 
 /// Pull the recording an item-scoped event belongs to out of its DataContext.
 winrt::yip::viewmodels::RecordingEntry EntryFrom(winrt::Windows::Foundation::IInspectable const& sender)

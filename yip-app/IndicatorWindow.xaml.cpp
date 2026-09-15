@@ -40,9 +40,10 @@ namespace {
 // two sizes the pill's XAML actually binds to live there. Colours are the
 // other way round — every one of them is resolved from the theme dictionaries
 // by ResolveThemeBrushes().
+// The widest state. Only used to place the pill on restore, before any state
+// has sized the window; every live size comes from GeometryFor().
 constexpr int kWindowW = 320;
 constexpr int kWindowH = 56;
-constexpr float kCorner = 22.0f;
 constexpr int kFadeMs = 180;
 constexpr int kResizeMs = 220;
 constexpr int kMeterMs = 33;
@@ -147,14 +148,10 @@ IndicatorWindow::IndicatorWindow()
     ApplyToolWindowStyle();
     ApplyAlwaysOnTop();
 
-    // Round HWND silhouette to the maximal pill outline. The Composition
-    // clip below animates the *visible* shape within this silhouette
-    // without further region updates.
-    if (m_hwnd) {
-        HRGN rgn = ::CreateRoundRectRgn(0, 0, kWindowW + 1, kWindowH + 1, static_cast<int>(kCorner * 2),
-                                        static_cast<int>(kCorner * 2));
-        ::SetWindowRgn(m_hwnd, rgn, TRUE); // Windows takes ownership of rgn.
-    }
+    // Real translucency: the pill is its own window, so the system gives it a
+    // blurred backdrop for free. The Border's tint then sits on top of that
+    // instead of on top of black.
+    SystemBackdrop(mux::Media::DesktopAcrylicBackdrop{});
 
     BuildCompositionLayer();
     ApplyClickThrough(m_persisted.click_through);
@@ -237,14 +234,15 @@ void IndicatorWindow::ApplyToolWindowStyle()
 {
     if (!m_hwnd) return;
 
+    // Deliberately NOT WS_EX_LAYERED: a layered window with LWA_ALPHA is
+    // opaque to the compositor, so the acrylic backdrop set in the constructor
+    // never reached the screen and the pill's 62%-alpha tint composited onto
+    // black. WS_EX_TRANSPARENT still routes WM_NCHITTEST through on its own,
+    // which is all click-through needs.
     LONG_PTR ex = ::GetWindowLongPtrW(m_hwnd, GWL_EXSTYLE);
-    ex |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED;
-    ex &= ~WS_EX_APPWINDOW;
+    ex |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+    ex &= ~(WS_EX_APPWINDOW | WS_EX_LAYERED);
     ::SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, ex);
-
-    // WS_EX_LAYERED with no LWA_COLORKEY/LWA_ALPHA = fully opaque inside
-    // window region, fully clipped outside it.
-    ::SetLayeredWindowAttributes(m_hwnd, 0, 255, LWA_ALPHA);
 }
 
 void IndicatorWindow::ApplyAlwaysOnTop()
@@ -259,7 +257,6 @@ void IndicatorWindow::ApplyAlwaysOnTop()
         presenter.IsMinimizable(false);
         presenter.IsAlwaysOnTop(true);
     }
-    appWindow.Resize({kWindowW, kWindowH});
 }
 
 void IndicatorWindow::ApplyClickThrough(bool enable)
@@ -285,16 +282,6 @@ void IndicatorWindow::BuildCompositionLayer()
     // Brushes first: the bars and the dot below are handed one as they are
     // created.
     ResolveThemeBrushes();
-
-    // Composition geometric clip on the Border's visual. Animating this
-    // geometry's Size + Offset is what conveys state changes — no XAML
-    // layout passes, no UI-thread wakes during the tween.
-    m_clipGeo = m_compositor.CreateRoundedRectangleGeometry();
-    m_clipGeo.CornerRadius({kCorner, kCorner});
-    m_clipGeo.Size({kWindowW, kWindowH});
-    m_clipGeo.Offset({0.0f, 0.0f});
-    auto clip = m_compositor.CreateGeometricClip(m_clipGeo);
-    pillVisual.Clip(clip);
 
     // Child visual tree for dot + meter bars. Parented to the meter host
     // (anchored within the pill grid by XAML layout so it stays inside
@@ -476,8 +463,12 @@ void IndicatorWindow::OnRecordingStateChanged(bool recording)
 
 void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
 {
-    // Visibility gate first — runs even when s == m_state on the very
-    // first call from the constructor (m_state initialised to Idle).
+    // Size before show, or the first frame after Show() lands at the previous
+    // state's size.
+    SyncWindowToState(s);
+
+    // Visibility gate — runs even when s == m_state on the very first call
+    // from the constructor (m_state initialised to Idle).
     SyncVisibilityForState(s);
 
     if (s == m_state) return;
@@ -494,7 +485,10 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
     const bool wantMeter = (s == ::yip::IndicatorState::Recording || s == ::yip::IndicatorState::Expanded ||
                             s == ::yip::IndicatorState::Saving);
 
-    ExpandedActions().Opacity(wantActions ? 1.0 : 0.0);
+    // Collapsed, not transparent: at Opacity 0 the three buttons still took
+    // their ~114px of the row, which left the timer a sliver of the 210px
+    // recording pill and clipped it.
+    ExpandedActions().Visibility(wantActions ? mux::Visibility::Visible : mux::Visibility::Collapsed);
     ExpandedActions().IsHitTestVisible(wantActions);
 
     MeterHost().Opacity(wantMeter ? 1.0 : 0.0);
@@ -520,31 +514,42 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
         StopAutoCollapseTimer();
 }
 
+void IndicatorWindow::SyncWindowToState(::yip::IndicatorState s)
+{
+    if (!m_hwnd) return;
+    const auto g = GeometryFor(s);
+    const int w = static_cast<int>(std::lround(g.w));
+    const int h = static_cast<int>(std::lround(g.h));
+    if (w <= 0 || h <= 0) return;
+
+    // The window is the pill. It used to be a fixed 320x56 with a Composition
+    // clip picking out the visible part — but the clip was centred while the
+    // content is left-anchored, so the dot and the meter were cut off the left
+    // edge and the timer lost its first digit. Sizing the window to the state
+    // cannot drift out of step with the content.
+    auto appWindow = muw::AppWindow::GetFromWindowId(AppWindow().Id());
+    if (appWindow) appWindow.Resize({w, h});
+
+    // Windows takes ownership of the region.
+    const int diameter = h;
+    ::SetWindowRgn(m_hwnd, ::CreateRoundRectRgn(0, 0, w + 1, h + 1, diameter, diameter), TRUE);
+
+    const double radius = g.h * 0.5;
+    PillFrame().Width(g.w);
+    PillFrame().Height(g.h);
+    PillFrame().CornerRadius({radius, radius, radius, radius});
+}
+
 void IndicatorWindow::AnimatePillToState(::yip::IndicatorState s, bool animate)
 {
-    if (!m_clipGeo) return;
+    if (!m_compositor) return;
     const auto g = GeometryFor(s);
 
     // `animate == false` means "land on the resting values now" — used for the
-    // initial state, which must not visibly slide in on launch.
-    const auto resizeMs = std::chrono::milliseconds(animate ? kResizeMs : 0);
+    // initial state, which must not visibly fade in on launch. The size change
+    // is instant: an HWND resize is not something to tween.
     const auto fadeMs = std::chrono::milliseconds(animate ? kFadeMs : 0);
 
-    // Center the clip rect inside the window.
-    const float offX = (static_cast<float>(kWindowW) - g.w) * 0.5f;
-    const float offY = (static_cast<float>(kWindowH) - g.h) * 0.5f;
-
-    auto sizeAnim = m_compositor.CreateVector2KeyFrameAnimation();
-    sizeAnim.InsertKeyFrame(1.0f, {g.w, g.h}, m_ease);
-    sizeAnim.Duration(resizeMs);
-    m_clipGeo.StartAnimation(L"Size", sizeAnim);
-
-    auto offAnim = m_compositor.CreateVector2KeyFrameAnimation();
-    offAnim.InsertKeyFrame(1.0f, {offX, offY}, m_ease);
-    offAnim.Duration(resizeMs);
-    m_clipGeo.StartAnimation(L"Offset", offAnim);
-
-    // Pill opacity via the Border's Visual.
     auto pillVisual = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
     auto fade = m_compositor.CreateScalarKeyFrameAnimation();
     fade.InsertKeyFrame(1.0f, g.opacity, m_ease);
@@ -774,6 +779,9 @@ void IndicatorWindow::SnapToNearestEdgeIfClose()
     if (!host) return;
     const auto work = host.WorkArea();
 
+    const int winW = rc.right - rc.left;
+    const int winH = rc.bottom - rc.top;
+
     const int distTop = std::abs(rc.top - work.Y);
     const int distBottom = std::abs((work.Y + work.Height) - rc.bottom);
     const int distLeft = std::abs(rc.left - work.X);
@@ -786,11 +794,11 @@ void IndicatorWindow::SnapToNearestEdgeIfClose()
     if (minDist == distTop)
         y = work.Y + 12;
     else if (minDist == distBottom)
-        y = work.Y + work.Height - kWindowH - 12;
+        y = work.Y + work.Height - winH - 12;
     else if (minDist == distLeft)
         x = work.X + 12;
     else if (minDist == distRight)
-        x = work.X + work.Width - kWindowW - 12;
+        x = work.X + work.Width - winW - 12;
     appWindow.Move({x, y});
 }
 
@@ -807,6 +815,8 @@ void IndicatorWindow::RememberPosition()
     RECT rc{};
     ::GetWindowRect(m_hwnd, &rc);
     const auto work = host.WorkArea();
+    const int winW = rc.right - rc.left;
+    const int winH = rc.bottom - rc.top;
 
     const int distTop = std::abs(rc.top - work.Y);
     const int distBottom = std::abs((work.Y + work.Height) - rc.bottom);
@@ -818,19 +828,19 @@ void IndicatorWindow::RememberPosition()
         m_persisted.dock_edge = ::yip::DockEdge::None;
     } else if (minDist == distTop) {
         m_persisted.dock_edge = ::yip::DockEdge::Top;
-        const int span = std::max(1, work.Width - kWindowW);
+        const int span = std::max(1, work.Width - winW);
         m_persisted.edge_offset = std::clamp(double(rc.left - work.X) / span, 0.0, 1.0);
     } else if (minDist == distBottom) {
         m_persisted.dock_edge = ::yip::DockEdge::Bottom;
-        const int span = std::max(1, work.Width - kWindowW);
+        const int span = std::max(1, work.Width - winW);
         m_persisted.edge_offset = std::clamp(double(rc.left - work.X) / span, 0.0, 1.0);
     } else if (minDist == distLeft) {
         m_persisted.dock_edge = ::yip::DockEdge::Left;
-        const int span = std::max(1, work.Height - kWindowH);
+        const int span = std::max(1, work.Height - winH);
         m_persisted.edge_offset = std::clamp(double(rc.top - work.Y) / span, 0.0, 1.0);
     } else {
         m_persisted.dock_edge = ::yip::DockEdge::Right;
-        const int span = std::max(1, work.Height - kWindowH);
+        const int span = std::max(1, work.Height - winH);
         m_persisted.edge_offset = std::clamp(double(rc.top - work.Y) / span, 0.0, 1.0);
     }
     (void)m_persisted.Save();

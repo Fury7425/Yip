@@ -182,8 +182,10 @@ private:
     float m_meterHold{0.0f};
     uint32_t m_clipCount{0};
     uint32_t m_dropoutCount{0};
-    winrt::hstring m_peakLabel{L"—"};
-    winrt::hstring m_rmsLabel{L"—"};
+    // Silence, spelled the same way the live readout spells it — Tick() only
+    // writes these when the level moves, so a bare dash would survive startup.
+    winrt::hstring m_peakLabel{L"-\u221E dB"};
+    winrt::hstring m_rmsLabel{L"-\u221E dB"};
     winrt::hstring m_elapsedText{L"00:00.0"};
 
     winrt::hstring m_statusText{L"Ready"};

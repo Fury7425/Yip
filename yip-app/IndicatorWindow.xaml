@@ -75,7 +75,7 @@
                             Orientation="Horizontal"
                             Spacing="6"
                             VerticalAlignment="Center"
-                            Opacity="0"
+                            Visibility="Collapsed"
                             IsHitTestVisible="False">
                     <Button x:Name="StopButton"
                             Click="OnStopClicked"

@@ -532,9 +532,9 @@ winrt::hstring MainViewModel::FormatLabel() const
                                                          : L"multi";
     wchar_t buf[96];
     if (m_settings.sample_rate % 1000 == 0) {
-        swprintf_s(buf, L"%u kHz\u00B7%s\u00B732-BIT FLOAT", m_settings.sample_rate / 1000, channels);
+        swprintf_s(buf, L"%u kHz \u00B7 %s \u00B7 32-bit float", m_settings.sample_rate / 1000, channels);
     } else {
-        swprintf_s(buf, L"%.1f kHz\u00B7%s\u00B732-BIT FLOAT",
+        swprintf_s(buf, L"%.1f kHz \u00B7 %s \u00B7 32-bit float",
                    static_cast<double>(m_settings.sample_rate) / 1000.0, channels);
     }
     return winrt::hstring{buf};

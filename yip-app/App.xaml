@@ -74,9 +74,9 @@
 
                     <!-- Meter + waveform -->
                     <SolidColorBrush x:Key="YipMeterTrackQuietBrush" Color="#000000" Opacity="0.05" />
-                    <SolidColorBrush x:Key="YipMeterTickBrush"       Color="#000000" Opacity="0.13" />
                     <SolidColorBrush x:Key="YipMeterHoldBrush"       Color="#0A0A0B" Opacity="0.50" />
                     <SolidColorBrush x:Key="YipWaveRestBrush"        Color="#000000" Opacity="0.16" />
+                    <SolidColorBrush x:Key="YipWaveBaselineBrush"    Color="#000000" Opacity="0.14" />
                     <SolidColorBrush x:Key="YipClipLitBrush"         Color="#E5484D" />
 
                     <!-- Meter gradient. Green until it matters, amber where
@@ -91,10 +91,10 @@
                     </LinearGradientBrush>
 
                     <!-- Transport -->
-                    <SolidColorBrush x:Key="YipRecordFillIdleBrush"  Color="#E5484D" Opacity="0.14" />
-                    <SolidColorBrush x:Key="YipRecordFillLiveBrush"  Color="#E5484D" Opacity="0.30" />
+                    <SolidColorBrush x:Key="YipRecordFillIdleBrush"  Color="#E5484D" Opacity="0.22" />
+                    <SolidColorBrush x:Key="YipRecordFillLiveBrush"  Color="#E5484D" Opacity="0.55" />
                     <SolidColorBrush x:Key="YipRecordStrokeBrush"    Color="#000000" Opacity="0.08" />
-                    <SolidColorBrush x:Key="YipRecordCoreBrush"      Color="#E5484D" />
+                    <SolidColorBrush x:Key="YipRecordCoreBrush"      Color="#D8353B" />
                     <SolidColorBrush x:Key="YipLampIdleBrush"        Color="#8A90A0" />
                     <SolidColorBrush x:Key="YipLampLiveBrush"        Color="#E5484D" />
 
@@ -119,9 +119,9 @@
                     <SolidColorBrush x:Key="YipTextTertiaryBrush"    Color="#767C8C" />
 
                     <SolidColorBrush x:Key="YipMeterTrackQuietBrush" Color="#000000" Opacity="0.22" />
-                    <SolidColorBrush x:Key="YipMeterTickBrush"       Color="#FFFFFF" Opacity="0.055" />
                     <SolidColorBrush x:Key="YipMeterHoldBrush"       Color="#FFFFFF" Opacity="0.55" />
                     <SolidColorBrush x:Key="YipWaveRestBrush"        Color="#FFFFFF" Opacity="0.13" />
+                    <SolidColorBrush x:Key="YipWaveBaselineBrush"    Color="#FFFFFF" Opacity="0.11" />
                     <SolidColorBrush x:Key="YipClipLitBrush"         Color="#FF6B70" />
 
                     <LinearGradientBrush x:Key="YipMeterGradientBrush" StartPoint="0,0" EndPoint="1,0">
@@ -132,10 +132,10 @@
                         <GradientStop Color="#FF6B70" Offset="1.00" />
                     </LinearGradientBrush>
 
-                    <SolidColorBrush x:Key="YipRecordFillIdleBrush"  Color="#E5484D" Opacity="0.18" />
-                    <SolidColorBrush x:Key="YipRecordFillLiveBrush"  Color="#E5484D" Opacity="0.34" />
+                    <SolidColorBrush x:Key="YipRecordFillIdleBrush"  Color="#E5484D" Opacity="0.28" />
+                    <SolidColorBrush x:Key="YipRecordFillLiveBrush"  Color="#E5484D" Opacity="0.60" />
                     <SolidColorBrush x:Key="YipRecordStrokeBrush"    Color="#FFFFFF" Opacity="0.10" />
-                    <SolidColorBrush x:Key="YipRecordCoreBrush"      Color="#FF6B70" />
+                    <SolidColorBrush x:Key="YipRecordCoreBrush"      Color="#FFF2F2" />
                     <SolidColorBrush x:Key="YipLampIdleBrush"        Color="#767C8C" />
                     <SolidColorBrush x:Key="YipLampLiveBrush"        Color="#E5484D" />
 

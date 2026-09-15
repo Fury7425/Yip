@@ -56,6 +56,9 @@ private:
     // Driven by RecordingStateBus, not a timer: an idle pill costs nothing.
     void OnRecordingStateChanged(bool recording);
     void TransitionTo(::yip::IndicatorState s, bool animate = true);
+    // Resize the HWND, its rounded region and the Border to match the state.
+    // The window *is* the pill; nothing clips it.
+    void SyncWindowToState(::yip::IndicatorState s);
     void AnimatePillToState(::yip::IndicatorState s, bool animate);
 
     // ----- Edge dock / monitor restore -----
@@ -83,7 +86,6 @@ private:
     // Composition
     winrt::Microsoft::UI::Composition::Compositor m_compositor{nullptr};
     winrt::Microsoft::UI::Composition::ContainerVisual m_pillRoot{nullptr};
-    winrt::Microsoft::UI::Composition::CompositionRoundedRectangleGeometry m_clipGeo{nullptr};
     winrt::Microsoft::UI::Composition::SpriteVisual m_dotVisual{nullptr};
     std::array<winrt::Microsoft::UI::Composition::SpriteVisual, 4> m_barVisuals{nullptr, nullptr, nullptr,
                                                                                 nullptr};

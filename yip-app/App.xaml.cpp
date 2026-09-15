@@ -31,13 +31,12 @@ void App::OnLaunched(winrt::Microsoft::UI::Xaml::LaunchActivatedEventArgs const&
     m_window = winrt::make<winrt::yip::implementation::MainWindow>();
     m_window.Title(L"Yip");
 
-    // Mica backdrop — Window owns the controller lifetime since 1.4.
-    if (winrt::Microsoft::UI::Composition::SystemBackdrops::MicaController::IsSupported()) {
-        m_window.SystemBackdrop(winrt::Microsoft::UI::Xaml::Media::MicaBackdrop{});
-    } else {
-        // Older hardware → acrylic fallback.
-        m_window.SystemBackdrop(winrt::Microsoft::UI::Xaml::Media::DesktopAcrylicBackdrop{});
-    }
+    // Acrylic, not Mica. Mica is deliberately a faint static tint, and with the
+    // cards covering nearly the whole window it read as a flat opaque box —
+    // the window is supposed to look like glass. Acrylic blurs what is actually
+    // behind the window, which is the effect being asked for. Supported
+    // everywhere down to the 10.0.19041 floor, so there is no fallback branch.
+    m_window.SystemBackdrop(winrt::Microsoft::UI::Xaml::Media::DesktopAcrylicBackdrop{});
 
     m_window.Activate();
 
