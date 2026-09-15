@@ -100,9 +100,18 @@ MainWindow::MainWindow()
     ResolveThemeBrushes();
     Activated({this, &MainWindow::OnActivated});
 
+    if (auto native = try_as<::IWindowNative>()) {
+        native->get_WindowHandle(&m_hwnd);
+    }
+
     SetupTitleBar();
     if (auto appWindow = AppWindow()) {
-        appWindow.Resize({kDefaultWindowW, kDefaultWindowH});
+        // AppWindow::Resize takes physical pixels. The layout is designed in
+        // DIPs, so at 200% scale an unscaled 470x660 opened a window half the
+        // intended size and clipped the clock, the meter and the list.
+        const double scale = DpiScale();
+        appWindow.Resize({static_cast<int32_t>(std::lround(kDefaultWindowW * scale)),
+                          static_cast<int32_t>(std::lround(kDefaultWindowH * scale))});
     }
 
     UpdateRecordButtonShape();
@@ -129,9 +138,6 @@ MainWindow::MainWindow()
 
     // Global start/stop hotkey. WM_HOTKEY is delivered to this window's UI
     // thread, so the callback can touch the view model directly.
-    if (auto native = try_as<::IWindowNative>()) {
-        native->get_WindowHandle(&m_hwnd);
-    }
     if (m_hwnd) {
         m_hotkey = std::make_unique<::yip::HotkeyManager>(m_hwnd, [weak = get_weak()]() {
             if (auto self = weak.get()) {
@@ -179,6 +185,14 @@ void MainWindow::SetupTitleBar()
     UpdateTitleBarInset();
 }
 
+double MainWindow::DpiScale() const noexcept
+{
+    // Readable from the HWND before XAML has a XamlRoot, which is when the
+    // initial size and the first caption inset are computed.
+    const UINT dpi = m_hwnd ? ::GetDpiForWindow(m_hwnd) : 0;
+    return dpi > 0 ? static_cast<double>(dpi) / 96.0 : 1.0;
+}
+
 void MainWindow::UpdateTitleBarInset()
 {
     double inset = kFallbackCaptionInset;
@@ -186,15 +200,8 @@ void MainWindow::UpdateTitleBarInset()
     auto appWindow = AppWindow();
     if (appWindow) {
         if (auto titleBar = appWindow.TitleBar()) {
-            double scale = 1.0;
-            if (auto content = Content()) {
-                if (auto root = content.XamlRoot()) {
-                    scale = root.RasterizationScale();
-                }
-            }
-            if (scale <= 0.0) scale = 1.0;
             // RightInset is in physical pixels; XAML margins are in DIPs.
-            const double captionWidth = static_cast<double>(titleBar.RightInset()) / scale;
+            const double captionWidth = static_cast<double>(titleBar.RightInset()) / DpiScale();
             if (captionWidth > 0.0) inset = captionWidth + 4.0;
         }
     }

@@ -113,6 +113,7 @@ private:
 
     void SetupTitleBar();
     void UpdateTitleBarInset();
+    double DpiScale() const noexcept;
     void UpdateRecordButtonShape();
     void UpdateEmptyState();
 
