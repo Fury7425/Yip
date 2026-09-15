@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>Yip</title>
+  <defs>
+    <!-- Dark translucent tile: YipIndicatorSurfaceBrush (#141518 @ 0.84), lifted to hold on light taskbars. -->
+    <linearGradient id="tile" x1="0" y1="16" x2="0" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22232A"/>
+      <stop offset="1" stop-color="#0F1013"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="16" x2="0" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <!-- Record dot: YipIndicatorDotLiveBrush. -->
+    <radialGradient id="dot" cx="0.4" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#FF6B70"/>
+      <stop offset="1" stop-color="#E5484D"/>
+    </radialGradient>
+    <!-- Bars: the green end of YipMeterGradientBrush, where a healthy level sits. -->
+    <linearGradient id="bar" x1="0" y1="86" x2="0" y2="170" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5BD167"/>
+      <stop offset="1" stop-color="#35C46A"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="url(#tile)" fill-opacity="0.94"/>
+  <rect x="16" y="16" width="224" height="224" rx="52" fill="url(#sheen)"/>
+  <rect x="17" y="17" width="222" height="222" rx="51" fill="none" stroke="#FFFFFF" stroke-opacity="0.08" stroke-width="2"/>
+
+  <!-- Read left to right: dot, then four bars weighted like kBarWeights {0.62, 1.00, 0.86, 0.50}. -->
+  <circle cx="71.5" cy="128" r="30" fill="#E5484D" opacity="0.16"/>
+  <circle cx="71.5" cy="128" r="19" fill="url(#dot)"/>
+  <g fill="url(#bar)">
+    <rect x="110.5" y="102" width="15" height="52" rx="7.5"/>
+    <rect x="136.5" y="86" width="15" height="84" rx="7.5"/>
+    <rect x="162.5" y="92" width="15" height="72" rx="7.5"/>
+    <rect x="188.5" y="107" width="15" height="42" rx="7.5"/>
+  </g>
+</svg>

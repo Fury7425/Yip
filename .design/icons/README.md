@@ -1,30 +1,27 @@
-# Yip app icon concepts
+# Yip app icon
 
-Three directions. Each is either a 1:1 tile or a single distinct silhouette,
-so it stays recognisable as a shape before any colour or detail reads.
+The floating recording pill turned into an app tile: a dark translucent
+rounded square holding the red recording dot and the 4-bar level meter,
+read left to right.
 
-| Fork | Onset | Pip |
-| :---: | :---: | :---: |
-| <img src="fork.svg" width="160" alt="Fork"> | <img src="onset.svg" width="160" alt="Onset"> | <img src="pip.svg" width="160" alt="Pip"> |
-| <img src="fork.svg" width="32" alt="Fork 32px"> <img src="fork.svg" width="16" alt="Fork 16px"> | <img src="onset.svg" width="32" alt="Onset 32px"> <img src="onset.svg" width="16" alt="Onset 16px"> | <img src="pip.svg" width="32" alt="Pip 32px"> <img src="pip.svg" width="16" alt="Pip 16px"> |
-| Distinct shape | 1:1 tile | Distinct shape |
+| 160 | 64 | 32 | 24 | 16 |
+| :---: | :---: | :---: | :---: | :---: |
+| <img src="yip.svg" width="160" alt="Yip icon, 160 px"> | <img src="yip.svg" width="64" alt="Yip icon, 64 px"> | <img src="yip.svg" width="32" alt="Yip icon, 32 px"> | <img src="yip-small.svg" width="24" alt="Yip icon, 24 px"> | <img src="yip-small.svg" width="16" alt="Yip icon, 16 px"> |
 
-## Fork
+| File | Use at |
+| --- | --- |
+| [yip.svg](yip.svg) | 32 px and up |
+| [yip-small.svg](yip-small.svg) | 16 and 24 px (drawn on a 24 px grid, no glow, heavier bars) |
 
-A tuning fork, which is also a **Y**. Strike one and it gives a single pure
-ping, which is what a yip is. The lit dot between the tines is the record
-light. The silhouette (two tines, round yoke, stem, knob) holds at 16 px.
+## Where it comes from
 
-## Onset
+- **Tile:** `YipIndicatorSurfaceBrush` (`#141518`) with the pill's quiet white
+  stroke. The tile is a little denser than the pill so it still reads on a
+  light taskbar.
+- **Dot:** `YipIndicatorDotLiveBrush` (`#E5484D`).
+- **Bars:** the green end of `YipMeterGradientBrush`, which is where a healthy
+  level sits. Their heights follow `kBarWeights` (0.62, 1.00, 0.86, 0.50) in
+  [IndicatorWindow.xaml.cpp](../../yip-app/IndicatorWindow.xaml.cpp), so the
+  icon shows the same meter shape as the pill.
 
-One short sound drawn as its envelope: an instant attack and an exponential
-decay, mirrored about the baseline, on a dark tile. The fill is the app's own
-meter ramp (`YipMeterGradientBrush`) run loudest-first, red to amber to green.
-
-## Pip
-
-The record dot budding a smaller dot, the way the floating pill grows out of
-the dot when a take starts. Two circles joined by tangent arcs give it an
-outline no plain record button has.
-
-Colours are lifted from [../../yip-app/App.xaml](../../yip-app/App.xaml).
+Colours are lifted from [App.xaml](../../yip-app/App.xaml).
