@@ -7,6 +7,7 @@
 
 #include <array>
 #include <chrono>
+#include <vector>
 
 namespace winrt::yip::implementation {
 struct IndicatorWindow : IndicatorWindowT<IndicatorWindow> {
@@ -93,6 +94,9 @@ private:
     winrt::Microsoft::UI::Composition::CompositionColorBrush m_dotRecordBrush{nullptr};
     winrt::Microsoft::UI::Composition::CompositionColorBrush m_barIdleBrush{nullptr};
     winrt::Microsoft::UI::Composition::CompositionColorBrush m_barLiveBrush{nullptr};
+    // Sampled from the same YipMeterGradientBrush the main window's waveform
+    // uses, so a level looks the same in both places.
+    std::vector<winrt::Microsoft::UI::Composition::CompositionColorBrush> m_barPalette;
     winrt::Microsoft::UI::Composition::CompositionEasingFunction m_ease{nullptr};
 
     // Timers. m_savingTimer is one-shot: it only exists to hold the Saving
@@ -113,8 +117,6 @@ private:
 
     // Cached so a tick only touches the TextBlock when the second rolls over.
     winrt::hstring m_elapsedText{L"00:00"};
-    // Whether the bars are currently painted with the hot brush.
-    bool m_barsHot{false};
 };
 } // namespace winrt::yip::implementation
 

@@ -68,6 +68,11 @@ constexpr winrt::Windows::UI::Color kMissingToken{0xFF, 0x80, 0x80, 0x80};
 // The elapsed clock is dimmed until there is something to count.
 constexpr double kIdleClockOpacity = 0.55;
 
+// The strip keeps the finished take's shape after a stop, but at full
+// brightness beside a 00:00.0 clock it reads as though capture is still
+// running. Dimmed, it reads as what it is: the last take.
+constexpr float kWaveIdleOpacity = 0.32f;
+
 /// Pull the recording an item-scoped event belongs to out of its DataContext.
 winrt::yip::viewmodels::RecordingEntry EntryFrom(winrt::Windows::Foundation::IInspectable const& sender)
 {
@@ -308,6 +313,7 @@ void MainWindow::BuildWaveVisuals(double width, double height)
     m_waveCount = bars;
     m_waveHead = 0;
     scroller.Offset({0.0f, 0.0f, 0.0f});
+    root.Opacity((m_viewModel && m_viewModel.IsRecording()) ? 1.0f : kWaveIdleOpacity);
 }
 
 void MainWindow::PushWaveSample(float level, float hold)
@@ -449,10 +455,12 @@ void MainWindow::OnRecordingStateChanged(bool recording)
         // A new take starts from an empty strip; the previous one is history
         // nobody wants scrolling underneath it.
         ClearWave();
+        if (m_waveRoot) m_waveRoot.Opacity(1.0f);
         StartMeterPolling();
         return;
     }
     StopMeterPolling();
+    if (m_waveRoot) m_waveRoot.Opacity(kWaveIdleOpacity);
     if (m_viewModel) {
         // One last pull so the readouts land on the post-stop zero instead of
         // freezing at whatever the final tick read. The strip itself is left

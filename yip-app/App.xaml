@@ -62,7 +62,7 @@
                     <!-- Surfaces. A tint over the window backdrop, never a fill:
                          if one of these ever needs to be opaque, Mica has
                          stopped doing its job. -->
-                    <SolidColorBrush x:Key="YipCardBrush"            Color="#FFFFFF" Opacity="0.55" />
+                    <SolidColorBrush x:Key="YipCardBrush"            Color="#FFFFFF" Opacity="0.78" />
                     <SolidColorBrush x:Key="YipCardStrokeBrush"      Color="#000000" Opacity="0.06" />
                     <SolidColorBrush x:Key="YipControlFillBrush"     Color="#FFFFFF" Opacity="0.70" />
                     <SolidColorBrush x:Key="YipControlStrokeBrush"   Color="#000000" Opacity="0.07" />
@@ -70,7 +70,7 @@
                     <!-- Text -->
                     <SolidColorBrush x:Key="YipTextPrimaryBrush"     Color="#0A0A0B" />
                     <SolidColorBrush x:Key="YipTextSecondaryBrush"   Color="#525866" />
-                    <SolidColorBrush x:Key="YipTextTertiaryBrush"    Color="#8A90A0" />
+                    <SolidColorBrush x:Key="YipTextTertiaryBrush"    Color="#6E7485" />
 
                     <!-- Meter + waveform -->
                     <SolidColorBrush x:Key="YipMeterTrackQuietBrush" Color="#000000" Opacity="0.05" />
@@ -109,16 +109,16 @@
                 </ResourceDictionary>
 
                 <ResourceDictionary x:Key="Dark">
-                    <SolidColorBrush x:Key="YipCardBrush"            Color="#FFFFFF" Opacity="0.045" />
-                    <SolidColorBrush x:Key="YipCardStrokeBrush"      Color="#FFFFFF" Opacity="0.055" />
-                    <SolidColorBrush x:Key="YipControlFillBrush"     Color="#FFFFFF" Opacity="0.075" />
+                    <SolidColorBrush x:Key="YipCardBrush"            Color="#0B0C11" Opacity="0.42" />
+                    <SolidColorBrush x:Key="YipCardStrokeBrush"      Color="#FFFFFF" Opacity="0.075" />
+                    <SolidColorBrush x:Key="YipControlFillBrush"     Color="#FFFFFF" Opacity="0.10" />
                     <SolidColorBrush x:Key="YipControlStrokeBrush"   Color="#FFFFFF" Opacity="0.055" />
 
                     <SolidColorBrush x:Key="YipTextPrimaryBrush"     Color="#F2F3F5" />
-                    <SolidColorBrush x:Key="YipTextSecondaryBrush"   Color="#B7BCC8" />
-                    <SolidColorBrush x:Key="YipTextTertiaryBrush"    Color="#767C8C" />
+                    <SolidColorBrush x:Key="YipTextSecondaryBrush"   Color="#C9CED8" />
+                    <SolidColorBrush x:Key="YipTextTertiaryBrush"    Color="#9BA2B2" />
 
-                    <SolidColorBrush x:Key="YipMeterTrackQuietBrush" Color="#000000" Opacity="0.22" />
+                    <SolidColorBrush x:Key="YipMeterTrackQuietBrush" Color="#000000" Opacity="0.34" />
                     <SolidColorBrush x:Key="YipMeterHoldBrush"       Color="#FFFFFF" Opacity="0.55" />
                     <SolidColorBrush x:Key="YipWaveRestBrush"        Color="#FFFFFF" Opacity="0.13" />
                     <SolidColorBrush x:Key="YipWaveBaselineBrush"    Color="#FFFFFF" Opacity="0.11" />

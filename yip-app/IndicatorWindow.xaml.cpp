@@ -72,6 +72,9 @@ constexpr float kBarWeights[kBarCount] = {0.62f, 1.00f, 0.86f, 0.50f};
 // last 6 dB, which is the headroom worth worrying about.
 constexpr float kBarHotThreshold = 0.86f;
 
+// Steps sampled out of the shared meter ramp for the bars.
+constexpr uint32_t kBarPaletteSteps = 12;
+
 /// Map an amplitude onto the meter's 0..1 travel, logarithmically.
 float MeterNorm(float amplitude) noexcept
 {
@@ -349,15 +352,23 @@ void IndicatorWindow::UpdateMeterBars(float level, bool hot)
     const auto dur = std::chrono::milliseconds(kMeterMs);
 
     const bool wantHot = hot || clamped >= kBarHotThreshold;
-    const bool flipColour = (wantHot != m_barsHot);
-    m_barsHot = wantHot;
+
+    // Clipping pins the bars to the top of the ramp; otherwise they follow the
+    // level through it.
+    auto brush = m_barIdleBrush;
+    if (!m_barPalette.empty()) {
+        const auto last = static_cast<float>(m_barPalette.size() - 1);
+        const auto index =
+            wantHot ? m_barPalette.size() - 1 : static_cast<size_t>(std::lround(clamped * last));
+        brush = m_barPalette[std::min(index, m_barPalette.size() - 1)];
+    } else if (wantHot) {
+        brush = m_barLiveBrush;
+    }
 
     for (int i = 0; i < kBarCount; ++i) {
         auto& bar = m_barVisuals[static_cast<size_t>(i)];
         if (!bar) continue;
-        if (flipColour) {
-            bar.Brush(wantHot ? m_barLiveBrush : m_barIdleBrush);
-        }
+        if (brush) bar.Brush(brush);
 
         const float target = std::max(kBarRestScale, clamped * kBarWeights[i]);
         auto anim = m_compositor.CreateScalarKeyFrameAnimation();
@@ -392,7 +403,6 @@ void IndicatorWindow::StopMeterAnimations()
 {
     // Leave the last elapsed time on screen through the Saving frame; only the
     // bars fall back, so the pill does not blank out mid-fade.
-    m_barsHot = false;
     for (auto& bar : m_barVisuals) {
         if (!bar) continue;
         bar.StopAnimation(L"Scale.Y");
@@ -429,6 +439,20 @@ void IndicatorWindow::ResolveThemeBrushes()
     apply(m_barLiveBrush, L"YipIndicatorMeterBarLiveBrush");
     apply(m_dotNeutralBrush, L"YipIndicatorDotIdleBrush");
     apply(m_dotRecordBrush, L"YipIndicatorDotLiveBrush");
+
+    // Four flat grey sticks beside a red dot read as a smudge at pill size.
+    // Colouring them off the shared ramp makes the pill say the same thing
+    // about a level that the main window's waveform does.
+    const auto ramp = ::yip::theme::SampleMeterRamp(kBarPaletteSteps);
+    if (ramp.size() == m_barPalette.size()) {
+        for (size_t i = 0; i < ramp.size(); ++i)
+            m_barPalette[i].Color(ramp[i]);
+    } else {
+        m_barPalette.clear();
+        m_barPalette.reserve(ramp.size());
+        for (auto const& color : ramp)
+            m_barPalette.push_back(m_compositor.CreateColorBrush(color));
+    }
 }
 
 // =========================================================== State machine
