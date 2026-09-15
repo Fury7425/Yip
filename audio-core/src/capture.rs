@@ -1,10 +1,10 @@
-//! Event-driven WASAPI capture. Owns the capture and writer threads, hands
-//! peak levels back to the FFI layer via [`SharedMeter`].
+//! Event-driven WASAPI capture. Owns the capture and writer threads; capture
+//! health lands in the process-wide [`crate::ring::METER`].
 //!
 //! Thread map:
-//!   * **capture thread** — Rust, MMCSS *Pro Audio*. Drives WASAPI, copies
-//!     into the SPSC ring, updates the peak atomic. **Zero allocs, zero
-//!     locks, zero logs** inside the buffer loop.
+//!   * **capture thread** — Rust, MMCSS *Pro Audio*. Drives WASAPI, bulk-copies
+//!     each packet into the SPSC ring and folds one pass of statistics into the
+//!     meter. **Zero allocs, zero locks, zero logs** inside the buffer loop.
 //!   * **writer thread** — Rust, normal priority. Drains the ring into
 //!     `hound`. Allowed to block on disk.
 //!   * **caller** — owns `Recorder`. `start()` and `stop()` only.
@@ -36,12 +36,11 @@ use windows::core::Interface;
 use crate::devices::find_device;
 use crate::error::YipError;
 use crate::ffi::RecConfig;
-use crate::ring::{RING_CAPACITY_SAMPLES, SharedMeter, split};
+use crate::ring::{METER, RING_CAPACITY_SAMPLES, analyse, split};
 use crate::writer::{WriterConfig, run_writer};
 
 /// Owns the running capture session.
 pub struct Recorder {
-    meter: Arc<SharedMeter>,
     stop: Arc<AtomicBool>,
     writer_stop: Arc<AtomicBool>,
     stop_event: SendHandle,
@@ -61,7 +60,6 @@ unsafe impl Sync for SendHandle {}
 
 impl Recorder {
     pub fn start(device_id: &str, path: &Path, cfg: RecConfig) -> Result<Self, YipError> {
-        let meter = SharedMeter::new();
         let stop = Arc::new(AtomicBool::new(false));
         let writer_stop = Arc::new(AtomicBool::new(false));
 
@@ -76,7 +74,6 @@ impl Recorder {
 
         let device_id_owned = device_id.to_string();
         let path_owned: PathBuf = path.to_path_buf();
-        let meter_for_capture = meter.clone();
         let stop_for_capture = stop.clone();
         let writer_stop_for_capture = writer_stop.clone();
 
@@ -88,7 +85,6 @@ impl Recorder {
                     &path_owned,
                     cfg,
                     &mut producer,
-                    &meter_for_capture,
                     &stop_for_capture,
                     &writer_stop_for_capture,
                     stop_event_for_thread,
@@ -109,7 +105,6 @@ impl Recorder {
             .map_err(|e| YipError::Io(format!("spawn writer: {e}")))?;
 
         Ok(Self {
-            meter,
             stop,
             writer_stop,
             stop_event,
@@ -118,10 +113,6 @@ impl Recorder {
             started_at: std::time::Instant::now(),
             path: path.to_path_buf(),
         })
-    }
-
-    pub fn peak_level(&self) -> f32 {
-        self.meter.take_peak()
     }
 
     /// Wall-clock ms since `start()` returned. Monotonic; unaffected by clock changes.
@@ -191,7 +182,6 @@ fn capture_loop(
     path: &Path,
     cfg: RecConfig,
     producer: &mut rtrb::Producer<f32>,
-    meter: &Arc<SharedMeter>,
     stop: &Arc<AtomicBool>,
     writer_stop: &Arc<AtomicBool>,
     stop_event: SendHandle,
@@ -333,10 +323,9 @@ fn capture_loop(
 
     // Signal the parent that everything is wired and we have a writer config.
     let _ = ready_tx.send(Ok(writer_cfg));
-    meter.started.store(true, Ordering::Release);
 
     let handles = [audio_event, stop_event.0];
-    let frames_per_sample = u64::from(channels);
+    let samples_per_frame = usize::from(channels).max(1);
 
     'outer: loop {
         // SAFETY: handles array is in scope for the duration of the call.
@@ -374,60 +363,70 @@ fn capture_loop(
                 unsafe { capture.ReleaseBuffer(packet_frames)? };
                 continue;
             }
-            let n_samples = (packet_frames as usize) * (channels as usize);
+            let n_samples = (packet_frames as usize) * samples_per_frame;
             let silent = packet_flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0;
 
-            // Copy into ring without allocating. Update peak in same pass.
-            let copied = if let Ok(mut chunk) = producer.write_chunk_uninit(n_samples) {
-                let (slot_a, slot_b) = chunk.as_mut_slices();
-                let total_a = slot_a.len();
-                let total_b = slot_b.len();
+            // A SILENT packet may point at a stale or unmapped buffer, so that
+            // case never dereferences `data_ptr`.
+            let src: &[f32] = if silent {
+                &[]
+            } else {
+                // SAFETY: between GetBuffer and ReleaseBuffer, data_ptr is
+                // valid for n_samples * 4 bytes, and the stream format was
+                // negotiated to f32 above.
+                unsafe { std::slice::from_raw_parts(data_ptr.cast::<f32>(), n_samples) }
+            };
 
+            // Analyse before touching the ring: the meter reports what the
+            // device delivered, whether or not there was room for all of it.
+            let stats = analyse(src);
+
+            // Take whatever the ring can hold, rounded down to whole frames —
+            // a partial frame would rotate the channel interleave for the rest
+            // of the file. A short write loses the tail of one packet instead
+            // of the packet entirely.
+            let room = producer.slots().min(n_samples);
+            let writable = room - (room % samples_per_frame);
+
+            if let Ok(mut chunk) = producer.write_chunk_uninit(writable) {
+                let (slot_a, slot_b) = chunk.as_mut_slices();
+                let len_a = slot_a.len();
+                let len_b = slot_b.len();
                 if silent {
-                    for s in slot_a.iter_mut() {
-                        s.write(0.0);
-                    }
-                    for s in slot_b.iter_mut() {
-                        s.write(0.0);
+                    // SAFETY: the all-zero bit pattern is the valid f32 0.0,
+                    // and the slots are ours to initialise until commit_all.
+                    unsafe {
+                        std::ptr::write_bytes(slot_a.as_mut_ptr(), 0, len_a);
+                        std::ptr::write_bytes(slot_b.as_mut_ptr(), 0, len_b);
                     }
                 } else {
-                    // SAFETY: data_ptr valid for n_samples*4 bytes; sample
-                    // format negotiated to f32 above.
-                    let src =
-                        unsafe { std::slice::from_raw_parts(data_ptr.cast::<f32>(), n_samples) };
-                    let mut peak = 0.0_f32;
-                    for (dst, &s) in slot_a.iter_mut().zip(src.iter()) {
-                        dst.write(s);
-                        let a = s.abs();
-                        if a > peak {
-                            peak = a;
-                        }
-                    }
-                    for (dst, &s) in slot_b.iter_mut().zip(src[total_a..].iter()) {
-                        dst.write(s);
-                        let a = s.abs();
-                        if a > peak {
-                            peak = a;
-                        }
-                    }
-                    if peak > 0.0 {
-                        meter.fold_peak(peak);
+                    // SAFETY: MaybeUninit<f32> shares f32's layout, the WASAPI
+                    // buffer and the ring slots never overlap, and
+                    // len_a + len_b == writable <= src.len().
+                    unsafe {
+                        std::ptr::copy_nonoverlapping(
+                            src.as_ptr(),
+                            slot_a.as_mut_ptr().cast::<f32>(),
+                            len_a,
+                        );
+                        std::ptr::copy_nonoverlapping(
+                            src.as_ptr().add(len_a),
+                            slot_b.as_mut_ptr().cast::<f32>(),
+                            len_b,
+                        );
                     }
                 }
-                // SAFETY: every slot in slot_a and slot_b was initialised
-                // in the branches above before this call.
+                // SAFETY: every slot was initialised by the branch above.
                 unsafe { chunk.commit_all() };
-                total_a + total_b
-            } else {
-                // Ring full → writer can't keep up. Mark overrun and
-                // drop this packet (the only realtime-safe choice).
-                meter.fold_peak(1.0);
-                0
-            };
-            meter.frames_captured.fetch_add(
-                (copied as u64) / frames_per_sample.max(1),
-                Ordering::Relaxed,
-            );
+            }
+
+            let dropped = (n_samples - writable) / samples_per_frame;
+            if dropped > 0 {
+                // Writer can't keep up. Report it as lost frames, never as a
+                // full-scale peak — that used to light the UI up as a clip.
+                METER.note_overrun(dropped as u64);
+            }
+            METER.push_block(stats, (writable / samples_per_frame) as u64, sample_rate);
 
             // SAFETY: paired with GetBuffer above.
             unsafe { capture.ReleaseBuffer(packet_frames)? };
