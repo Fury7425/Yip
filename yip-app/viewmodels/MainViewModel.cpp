@@ -333,9 +333,10 @@ void MainViewModel::ProjectRecordings()
     for (const auto& r : m_rows) {
         if (!needle.empty() && r.lowerName.find(needle) == std::wstring::npos) continue;
         shownBytes += r.sizeBytes;
-        items.push_back(winrt::make<RecordingEntry>(
-            winrt::hstring{r.path.wstring()}, winrt::hstring{r.fileName}, winrt::hstring{r.duration},
-            winrt::hstring{r.modifiedAt}, winrt::hstring{r.subtitle}));
+        items.push_back(winrt::make<RecordingEntry>(winrt::hstring{r.path.wstring()},
+                                                    winrt::hstring{r.fileName}, winrt::hstring{r.duration},
+                                                    winrt::hstring{r.modifiedAt},
+                                                    winrt::hstring{r.subtitle}));
     }
 
     // One Reset instead of a VectorChanged per row: the ListView rebuilds once

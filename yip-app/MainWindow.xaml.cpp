@@ -235,8 +235,7 @@ void MainWindow::UpdateEmptyState()
     // problems and want different sentences.
     const bool filtered = !m_viewModel.FilterText().empty();
     EmptyStateText().Text(filtered ? L"No matches" : L"No recordings yet");
-    EmptyStateHint().Text(filtered ? L"Try a different filter."
-                                   : L"Press Record, or use the global hotkey.");
+    EmptyStateHint().Text(filtered ? L"Try a different filter." : L"Press Record, or use the global hotkey.");
 }
 
 // ============================================================ Meter
@@ -262,8 +261,8 @@ void MainWindow::UpdateMeterVisuals()
     RmsClip().Rect({0.0f, 0.0f, static_cast<float>(m_meterWidth * rms), h});
 
     const double markWidth = HoldMark().Width();
-    const double x = std::clamp(m_meterWidth * hold - markWidth * 0.5, 0.0,
-                                std::max(0.0, m_meterWidth - markWidth));
+    const double x =
+        std::clamp(m_meterWidth * hold - markWidth * 0.5, 0.0, std::max(0.0, m_meterWidth - markWidth));
     HoldTranslate().X(x);
     HoldMark().Opacity(hold > 0.002 ? 1.0 : 0.0);
 }

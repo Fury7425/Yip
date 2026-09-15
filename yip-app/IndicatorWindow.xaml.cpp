@@ -486,7 +486,6 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
         ResetAutoCollapseTimer();
     else
         StopAutoCollapseTimer();
-
 }
 
 void IndicatorWindow::AnimatePillToState(::yip::IndicatorState s, bool animate)
