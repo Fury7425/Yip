@@ -21,8 +21,22 @@
 AppId={{B7E4A5C1-2D93-4A6E-9F31-7C0A5E8D2B44}
 AppName=Yip
 AppVersion={#YipVersion}
-AppPublisher=Yip
+AppPublisher=Yip contributors
 AppCopyright=Copyright (C) Yip contributors
+AppPublisherURL=https://github.com/Fury7425/Yip
+AppSupportURL=https://github.com/Fury7425/Yip/issues
+AppUpdatesURL=https://github.com/Fury7425/Yip/releases
+
+; Version metadata for the generated setup .exe itself. Without this the
+; installer ships with a near-blank Properties > Details page, which is one of
+; the signals Defender's heuristics weigh against an unsigned binary.
+VersionInfoVersion={#YipVersion}
+VersionInfoProductVersion={#YipVersion}
+VersionInfoProductName=Yip
+VersionInfoDescription=Yip audio recorder setup
+VersionInfoCompany=Yip contributors
+VersionInfoCopyright=Copyright (C) Yip contributors
+VersionInfoOriginalFileName=yip-setup-{#YipVersion}-{#YipArch}.exe
 DefaultDirName={autopf}\Yip
 DefaultGroupName=Yip
 UninstallDisplayIcon={app}\yip-app.exe
@@ -43,6 +57,15 @@ ArchitecturesInstallIn64BitMode=arm64
 #else
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+#endif
+
+; Authenticode signing. Metadata alone will not clear SmartScreen — only a
+; signature plus reputation does. Pass /DYipSignTool=<name> together with
+; /S<name>="<signtool command>" to have ISCC sign both the installer and the
+; uninstaller; without it the build is unsigned, exactly as before.
+#ifdef YipSignTool
+SignTool={#YipSignTool}
+SignedUninstaller=yes
 #endif
 
 [Languages]
