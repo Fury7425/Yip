@@ -7,6 +7,7 @@
 
 #include "Markers.h"
 #include "Settings.h"
+#include "ThemeColors.h"
 
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Microsoft.UI.h>
@@ -35,11 +36,14 @@ namespace muw = winrt::Microsoft::UI::Windowing;
 namespace muxd = winrt::Microsoft::UI::Dispatching;
 
 namespace {
-// Token defaults — duplicated as fallback for code that runs before
-// Application resources are queryable. App.xaml is the source of truth.
+// Geometry and motion for the pill are owned here, not in App.xaml: only the
+// two sizes the pill's XAML actually binds to live there. Colours are the
+// other way round — every one of them is resolved from the theme dictionaries
+// by ResolveThemeBrushes().
+// The widest state. Only used to place the pill on restore, before any state
+// has sized the window; every live size comes from GeometryFor().
 constexpr int kWindowW = 320;
 constexpr int kWindowH = 56;
-constexpr float kCorner = 22.0f;
 constexpr int kFadeMs = 180;
 constexpr int kResizeMs = 220;
 constexpr int kMeterMs = 33;
@@ -50,6 +54,50 @@ constexpr float kBarWidth = 3.0f;
 constexpr float kBarGap = 4.0f;
 constexpr float kBarMaxHeight = 18.0f;
 constexpr int kSavingHoldMs = 350; // how long the Saving frame stays up
+
+// Bottom of the bar meter, in dBFS. Same curve as the main window: on a linear
+// amplitude scale these bars barely leave the floor.
+constexpr double kMeterFloorDb = -60.0;
+constexpr float kSilenceFloor = 1e-7f;
+
+// Resting scale of a bar. Small enough to read as a dash, not a zero-height
+// glitch.
+constexpr float kBarRestScale = 0.06f;
+
+// Per-bar weighting. The pair in the middle run tallest, which reads as a
+// level meter rather than four identical sticks.
+constexpr float kBarWeights[kBarCount] = {0.62f, 1.00f, 0.86f, 0.50f};
+
+// Above this much of the travel the bars take the hot colour — roughly the
+// last 6 dB, which is the headroom worth worrying about.
+constexpr float kBarHotThreshold = 0.86f;
+
+// Steps sampled out of the shared meter ramp for the bars.
+constexpr uint32_t kBarPaletteSteps = 12;
+
+/// Map an amplitude onto the meter's 0..1 travel, logarithmically.
+float MeterNorm(float amplitude) noexcept
+{
+    if (!(amplitude > kSilenceFloor)) return 0.0f;
+    const double db = 20.0 * std::log10(static_cast<double>(amplitude));
+    const double n = (db - kMeterFloorDb) / (0.0 - kMeterFloorDb);
+    return static_cast<float>(std::clamp(n, 0.0, 1.0));
+}
+
+/// "MM:SS", or "H:MM:SS" once a take passes the hour. No tenths: a digit
+/// flickering ten times a second in a floating pill is a distraction.
+std::wstring FormatPillElapsed(uint64_t ms) noexcept
+{
+    const uint64_t total = ms / 1000;
+    const uint64_t hours = total / 3600;
+    wchar_t buf[24];
+    if (hours > 0) {
+        swprintf_s(buf, L"%llu:%02llu:%02llu", hours, (total / 60) % 60, total % 60);
+    } else {
+        swprintf_s(buf, L"%02llu:%02llu", total / 60, total % 60);
+    }
+    return buf;
+}
 
 struct StateGeom {
     float w;
@@ -66,9 +114,9 @@ StateGeom GeometryFor(::yip::IndicatorState s) noexcept
         case S::Armed:
             return {132.0f, 36.0f, 1.00f};
         case S::Recording:
-            return {188.0f, 44.0f, 1.00f};
+            return {210.0f, 44.0f, 1.00f};
         case S::Saving:
-            return {188.0f, 44.0f, 0.85f};
+            return {210.0f, 44.0f, 0.85f};
         case S::Expanded:
             return {320.0f, 56.0f, 1.00f};
     }
@@ -83,15 +131,9 @@ mucomp::CompositionEasingFunction StandardEase(mucomp::Compositor const& c)
     return c.CreateCubicBezierEasingFunction(cp1, cp2);
 }
 
-winrt::Windows::UI::Color FromHex(uint32_t argb) noexcept
-{
-    return {
-        static_cast<uint8_t>((argb >> 24) & 0xff),
-        static_cast<uint8_t>((argb >> 16) & 0xff),
-        static_cast<uint8_t>((argb >> 8) & 0xff),
-        static_cast<uint8_t>(argb & 0xff),
-    };
-}
+// Shown only if a token key is wrong. A deliberate flat grey rather than a
+// second copy of the palette, so a miss is visible instead of plausible.
+constexpr winrt::Windows::UI::Color kMissingToken{0xFF, 0x80, 0x80, 0x80};
 } // namespace
 
 namespace winrt::yip::implementation {
@@ -109,14 +151,10 @@ IndicatorWindow::IndicatorWindow()
     ApplyToolWindowStyle();
     ApplyAlwaysOnTop();
 
-    // Round HWND silhouette to the maximal pill outline. The Composition
-    // clip below animates the *visible* shape within this silhouette
-    // without further region updates.
-    if (m_hwnd) {
-        HRGN rgn = ::CreateRoundRectRgn(0, 0, kWindowW + 1, kWindowH + 1, static_cast<int>(kCorner * 2),
-                                        static_cast<int>(kCorner * 2));
-        ::SetWindowRgn(m_hwnd, rgn, TRUE); // Windows takes ownership of rgn.
-    }
+    // Real translucency: the pill is its own window, so the system gives it a
+    // blurred backdrop for free. The Border's tint then sits on top of that
+    // instead of on top of black.
+    SystemBackdrop(mux::Media::DesktopAcrylicBackdrop{});
 
     BuildCompositionLayer();
     ApplyClickThrough(m_persisted.click_through);
@@ -150,7 +188,7 @@ IndicatorWindow::IndicatorWindow()
     m_meterTimer.Interval(std::chrono::milliseconds(kMeterMs));
     m_meterTimer.IsRepeating(true);
     m_meterTimer.Tick([weak = get_weak()](auto&&, auto&&) {
-        if (auto self = weak.get()) self->UpdateMeterBars(::rec_peak_level());
+        if (auto self = weak.get()) self->UpdateFromMeter();
     });
 
     m_collapseTimer = dq.CreateTimer();
@@ -163,6 +201,10 @@ IndicatorWindow::IndicatorWindow()
             }
         }
     });
+
+    // A theme flip has to reach the composition brushes too — they are not
+    // {ThemeResource} bindings, they are colours copied at build time.
+    m_themeToken = Root().ActualThemeChanged({this, &IndicatorWindow::OnActualThemeChanged});
 
     // Subscribe last: the first callback can transition straight into
     // Recording, which touches every timer created above.
@@ -178,6 +220,10 @@ IndicatorWindow::~IndicatorWindow()
 {
     ::yip::RecordingStateBus::Unsubscribe(m_stateToken);
     m_stateToken = 0;
+    if (m_themeToken) {
+        Root().ActualThemeChanged(m_themeToken);
+        m_themeToken = {};
+    }
     if (m_savingTimer) m_savingTimer.Stop();
     if (m_meterTimer) m_meterTimer.Stop();
     if (m_collapseTimer) m_collapseTimer.Stop();
@@ -191,14 +237,15 @@ void IndicatorWindow::ApplyToolWindowStyle()
 {
     if (!m_hwnd) return;
 
+    // Deliberately NOT WS_EX_LAYERED: a layered window with LWA_ALPHA is
+    // opaque to the compositor, so the acrylic backdrop set in the constructor
+    // never reached the screen and the pill's 62%-alpha tint composited onto
+    // black. WS_EX_TRANSPARENT still routes WM_NCHITTEST through on its own,
+    // which is all click-through needs.
     LONG_PTR ex = ::GetWindowLongPtrW(m_hwnd, GWL_EXSTYLE);
-    ex |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED;
-    ex &= ~WS_EX_APPWINDOW;
+    ex |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+    ex &= ~(WS_EX_APPWINDOW | WS_EX_LAYERED);
     ::SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, ex);
-
-    // WS_EX_LAYERED with no LWA_COLORKEY/LWA_ALPHA = fully opaque inside
-    // window region, fully clipped outside it.
-    ::SetLayeredWindowAttributes(m_hwnd, 0, 255, LWA_ALPHA);
 }
 
 void IndicatorWindow::ApplyAlwaysOnTop()
@@ -213,7 +260,6 @@ void IndicatorWindow::ApplyAlwaysOnTop()
         presenter.IsMinimizable(false);
         presenter.IsAlwaysOnTop(true);
     }
-    appWindow.Resize({kWindowW, kWindowH});
 }
 
 void IndicatorWindow::ApplyClickThrough(bool enable)
@@ -236,15 +282,9 @@ void IndicatorWindow::BuildCompositionLayer()
     m_compositor = pillVisual.Compositor();
     m_ease = StandardEase(m_compositor);
 
-    // Composition geometric clip on the Border's visual. Animating this
-    // geometry's Size + Offset is what conveys state changes — no XAML
-    // layout passes, no UI-thread wakes during the tween.
-    m_clipGeo = m_compositor.CreateRoundedRectangleGeometry();
-    m_clipGeo.CornerRadius({kCorner, kCorner});
-    m_clipGeo.Size({kWindowW, kWindowH});
-    m_clipGeo.Offset({0.0f, 0.0f});
-    auto clip = m_compositor.CreateGeometricClip(m_clipGeo);
-    pillVisual.Clip(clip);
+    // Brushes first: the bars and the dot below are handed one as they are
+    // created.
+    ResolveThemeBrushes();
 
     // Child visual tree for dot + meter bars. Parented to the meter host
     // (anchored within the pill grid by XAML layout so it stays inside
@@ -255,8 +295,6 @@ void IndicatorWindow::BuildCompositionLayer()
 
     // 4 vertical bars, anchored center-Y, with idle scale ~ 0.06 (a thin
     // resting glyph). Live updates drive Scale.Y via composition anims.
-    m_barIdleBrush = m_compositor.CreateColorBrush(FromHex(0xFF525866));
-    m_barLiveBrush = m_compositor.CreateColorBrush(FromHex(0xFFE5484D));
     for (int i = 0; i < kBarCount; ++i) {
         auto bar = m_compositor.CreateSpriteVisual();
         bar.Size({kBarWidth, kBarMaxHeight});
@@ -266,7 +304,7 @@ void IndicatorWindow::BuildCompositionLayer()
             (kBarMaxHeight + 4) * 0.5f,
             0.0f,
         });
-        bar.Scale({1.0f, 0.06f, 1.0f});
+        bar.Scale({1.0f, kBarRestScale, 1.0f});
         bar.Brush(m_barIdleBrush);
         meterContainer.Children().InsertAtTop(bar);
         m_barVisuals[static_cast<size_t>(i)] = bar;
@@ -277,8 +315,6 @@ void IndicatorWindow::BuildCompositionLayer()
     dotContainer.Size({12.0f, 12.0f});
     muxh::ElementCompositionPreview::SetElementChildVisual(DotHost(), dotContainer);
 
-    m_dotNeutralBrush = m_compositor.CreateColorBrush(FromHex(0xFF525866));
-    m_dotRecordBrush = m_compositor.CreateColorBrush(FromHex(0xFFE5484D));
     m_dotVisual = m_compositor.CreateSpriteVisual();
     m_dotVisual.Size({8.0f, 8.0f});
     m_dotVisual.AnchorPoint({0.5f, 0.5f});
@@ -294,20 +330,51 @@ void IndicatorWindow::BuildCompositionLayer()
     dotContainer.Children().InsertAtTop(m_dotVisual);
 }
 
-void IndicatorWindow::UpdateMeterBars(float peak)
+void IndicatorWindow::UpdateFromMeter()
 {
-    const float clamped = std::clamp(peak, 0.0f, 1.0f);
+    // One lock-free snapshot per tick: the pill used to call rec_peak_level()
+    // while the main window called it too, and each read drained the other's.
+    RecMeter snapshot{};
+    if (::rec_meter(&snapshot) != REC_STATUS_OK) return;
+
+    UpdateMeterBars(MeterNorm(snapshot.peak), snapshot.clip_count > 0);
+
+    auto text = winrt::hstring{FormatPillElapsed(snapshot.elapsed_ms)};
+    if (text != m_elapsedText) {
+        m_elapsedText = text;
+        ElapsedText().Text(text);
+    }
+}
+
+void IndicatorWindow::UpdateMeterBars(float level, bool hot)
+{
+    const float clamped = std::clamp(level, 0.0f, 1.0f);
     const auto dur = std::chrono::milliseconds(kMeterMs);
 
-    for (int i = 0; i < kBarCount; ++i) {
-        // Mild attenuation per bar position for VU-meter character.
-        const float falloff = 1.0f - 0.12f * static_cast<float>(i);
-        const float target = std::max(0.06f, clamped * falloff);
+    const bool wantHot = hot || clamped >= kBarHotThreshold;
 
+    // Clipping pins the bars to the top of the ramp; otherwise they follow the
+    // level through it.
+    auto brush = m_barIdleBrush;
+    if (!m_barPalette.empty()) {
+        const auto last = static_cast<float>(m_barPalette.size() - 1);
+        const auto index =
+            wantHot ? m_barPalette.size() - 1 : static_cast<size_t>(std::lround(clamped * last));
+        brush = m_barPalette[std::min(index, m_barPalette.size() - 1)];
+    } else if (wantHot) {
+        brush = m_barLiveBrush;
+    }
+
+    for (int i = 0; i < kBarCount; ++i) {
+        auto& bar = m_barVisuals[static_cast<size_t>(i)];
+        if (!bar) continue;
+        if (brush) bar.Brush(brush);
+
+        const float target = std::max(kBarRestScale, clamped * kBarWeights[i]);
         auto anim = m_compositor.CreateScalarKeyFrameAnimation();
         anim.InsertKeyFrame(1.0f, target, m_ease);
         anim.Duration(dur);
-        m_barVisuals[static_cast<size_t>(i)].StartAnimation(L"Scale.Y", anim);
+        bar.StartAnimation(L"Scale.Y", anim);
     }
 }
 
@@ -334,14 +401,57 @@ void IndicatorWindow::UpdateDotForState(::yip::IndicatorState s)
 
 void IndicatorWindow::StopMeterAnimations()
 {
+    // Leave the last elapsed time on screen through the Saving frame; only the
+    // bars fall back, so the pill does not blank out mid-fade.
     for (auto& bar : m_barVisuals) {
         if (!bar) continue;
         bar.StopAnimation(L"Scale.Y");
         // Snap back to idle resting scale.
         auto anim = m_compositor.CreateScalarKeyFrameAnimation();
-        anim.InsertKeyFrame(1.0f, 0.06f, m_ease);
+        anim.InsertKeyFrame(1.0f, kBarRestScale, m_ease);
         anim.Duration(std::chrono::milliseconds(kFadeMs));
         bar.StartAnimation(L"Scale.Y", anim);
+    }
+}
+
+void IndicatorWindow::OnActualThemeChanged(winrt::Microsoft::UI::Xaml::FrameworkElement const& /*sender*/,
+                                           winrt::Windows::Foundation::IInspectable const& /*args*/)
+{
+    ResolveThemeBrushes();
+}
+
+void IndicatorWindow::ResolveThemeBrushes()
+{
+    if (!m_compositor) return;
+
+    // Reusing the brush objects rather than recreating them means every visual
+    // already holding one repaints on a theme flip without being touched.
+    const auto apply = [this](mucomp::CompositionColorBrush& brush, wchar_t const* key) {
+        const auto color = ::yip::theme::Color(key, kMissingToken);
+        if (brush) {
+            brush.Color(color);
+        } else {
+            brush = m_compositor.CreateColorBrush(color);
+        }
+    };
+
+    apply(m_barIdleBrush, L"YipIndicatorMeterBarIdleBrush");
+    apply(m_barLiveBrush, L"YipIndicatorMeterBarLiveBrush");
+    apply(m_dotNeutralBrush, L"YipIndicatorDotIdleBrush");
+    apply(m_dotRecordBrush, L"YipIndicatorDotLiveBrush");
+
+    // Four flat grey sticks beside a red dot read as a smudge at pill size.
+    // Colouring them off the shared ramp makes the pill say the same thing
+    // about a level that the main window's waveform does.
+    const auto ramp = ::yip::theme::SampleMeterRamp(kBarPaletteSteps);
+    if (ramp.size() == m_barPalette.size()) {
+        for (size_t i = 0; i < ramp.size(); ++i)
+            m_barPalette[i].Color(ramp[i]);
+    } else {
+        m_barPalette.clear();
+        m_barPalette.reserve(ramp.size());
+        for (auto const& color : ramp)
+            m_barPalette.push_back(m_compositor.CreateColorBrush(color));
     }
 }
 
@@ -377,8 +487,12 @@ void IndicatorWindow::OnRecordingStateChanged(bool recording)
 
 void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
 {
-    // Visibility gate first — runs even when s == m_state on the very
-    // first call from the constructor (m_state initialised to Idle).
+    // Size before show, or the first frame after Show() lands at the previous
+    // state's size.
+    SyncWindowToState(s);
+
+    // Visibility gate — runs even when s == m_state on the very first call
+    // from the constructor (m_state initialised to Idle).
     SyncVisibilityForState(s);
 
     if (s == m_state) return;
@@ -395,10 +509,14 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
     const bool wantMeter = (s == ::yip::IndicatorState::Recording || s == ::yip::IndicatorState::Expanded ||
                             s == ::yip::IndicatorState::Saving);
 
-    ExpandedActions().Opacity(wantActions ? 1.0 : 0.0);
+    // Collapsed, not transparent: at Opacity 0 the three buttons still took
+    // their ~114px of the row, which left the timer a sliver of the 210px
+    // recording pill and clipped it.
+    ExpandedActions().Visibility(wantActions ? mux::Visibility::Visible : mux::Visibility::Collapsed);
     ExpandedActions().IsHitTestVisible(wantActions);
 
     MeterHost().Opacity(wantMeter ? 1.0 : 0.0);
+    ElapsedText().Opacity(wantMeter ? 1.0 : 0.0);
 
     AnimatePillToState(s, animate);
     UpdateDotForState(s);
@@ -418,34 +536,44 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
         ResetAutoCollapseTimer();
     else
         StopAutoCollapseTimer();
+}
 
+void IndicatorWindow::SyncWindowToState(::yip::IndicatorState s)
+{
+    if (!m_hwnd) return;
+    const auto g = GeometryFor(s);
+    const int w = static_cast<int>(std::lround(g.w));
+    const int h = static_cast<int>(std::lround(g.h));
+    if (w <= 0 || h <= 0) return;
+
+    // The window is the pill. It used to be a fixed 320x56 with a Composition
+    // clip picking out the visible part — but the clip was centred while the
+    // content is left-anchored, so the dot and the meter were cut off the left
+    // edge and the timer lost its first digit. Sizing the window to the state
+    // cannot drift out of step with the content.
+    auto appWindow = muw::AppWindow::GetFromWindowId(AppWindow().Id());
+    if (appWindow) appWindow.Resize({w, h});
+
+    // Windows takes ownership of the region.
+    const int diameter = h;
+    ::SetWindowRgn(m_hwnd, ::CreateRoundRectRgn(0, 0, w + 1, h + 1, diameter, diameter), TRUE);
+
+    const double radius = g.h * 0.5;
+    PillFrame().Width(g.w);
+    PillFrame().Height(g.h);
+    PillFrame().CornerRadius({radius, radius, radius, radius});
 }
 
 void IndicatorWindow::AnimatePillToState(::yip::IndicatorState s, bool animate)
 {
-    if (!m_clipGeo) return;
+    if (!m_compositor) return;
     const auto g = GeometryFor(s);
 
     // `animate == false` means "land on the resting values now" — used for the
-    // initial state, which must not visibly slide in on launch.
-    const auto resizeMs = std::chrono::milliseconds(animate ? kResizeMs : 0);
+    // initial state, which must not visibly fade in on launch. The size change
+    // is instant: an HWND resize is not something to tween.
     const auto fadeMs = std::chrono::milliseconds(animate ? kFadeMs : 0);
 
-    // Center the clip rect inside the window.
-    const float offX = (static_cast<float>(kWindowW) - g.w) * 0.5f;
-    const float offY = (static_cast<float>(kWindowH) - g.h) * 0.5f;
-
-    auto sizeAnim = m_compositor.CreateVector2KeyFrameAnimation();
-    sizeAnim.InsertKeyFrame(1.0f, {g.w, g.h}, m_ease);
-    sizeAnim.Duration(resizeMs);
-    m_clipGeo.StartAnimation(L"Size", sizeAnim);
-
-    auto offAnim = m_compositor.CreateVector2KeyFrameAnimation();
-    offAnim.InsertKeyFrame(1.0f, {offX, offY}, m_ease);
-    offAnim.Duration(resizeMs);
-    m_clipGeo.StartAnimation(L"Offset", offAnim);
-
-    // Pill opacity via the Border's Visual.
     auto pillVisual = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
     auto fade = m_compositor.CreateScalarKeyFrameAnimation();
     fade.InsertKeyFrame(1.0f, g.opacity, m_ease);
@@ -675,6 +803,9 @@ void IndicatorWindow::SnapToNearestEdgeIfClose()
     if (!host) return;
     const auto work = host.WorkArea();
 
+    const int winW = rc.right - rc.left;
+    const int winH = rc.bottom - rc.top;
+
     const int distTop = std::abs(rc.top - work.Y);
     const int distBottom = std::abs((work.Y + work.Height) - rc.bottom);
     const int distLeft = std::abs(rc.left - work.X);
@@ -687,11 +818,11 @@ void IndicatorWindow::SnapToNearestEdgeIfClose()
     if (minDist == distTop)
         y = work.Y + 12;
     else if (minDist == distBottom)
-        y = work.Y + work.Height - kWindowH - 12;
+        y = work.Y + work.Height - winH - 12;
     else if (minDist == distLeft)
         x = work.X + 12;
     else if (minDist == distRight)
-        x = work.X + work.Width - kWindowW - 12;
+        x = work.X + work.Width - winW - 12;
     appWindow.Move({x, y});
 }
 
@@ -708,6 +839,8 @@ void IndicatorWindow::RememberPosition()
     RECT rc{};
     ::GetWindowRect(m_hwnd, &rc);
     const auto work = host.WorkArea();
+    const int winW = rc.right - rc.left;
+    const int winH = rc.bottom - rc.top;
 
     const int distTop = std::abs(rc.top - work.Y);
     const int distBottom = std::abs((work.Y + work.Height) - rc.bottom);
@@ -719,19 +852,19 @@ void IndicatorWindow::RememberPosition()
         m_persisted.dock_edge = ::yip::DockEdge::None;
     } else if (minDist == distTop) {
         m_persisted.dock_edge = ::yip::DockEdge::Top;
-        const int span = std::max(1, work.Width - kWindowW);
+        const int span = std::max(1, work.Width - winW);
         m_persisted.edge_offset = std::clamp(double(rc.left - work.X) / span, 0.0, 1.0);
     } else if (minDist == distBottom) {
         m_persisted.dock_edge = ::yip::DockEdge::Bottom;
-        const int span = std::max(1, work.Width - kWindowW);
+        const int span = std::max(1, work.Width - winW);
         m_persisted.edge_offset = std::clamp(double(rc.left - work.X) / span, 0.0, 1.0);
     } else if (minDist == distLeft) {
         m_persisted.dock_edge = ::yip::DockEdge::Left;
-        const int span = std::max(1, work.Height - kWindowH);
+        const int span = std::max(1, work.Height - winH);
         m_persisted.edge_offset = std::clamp(double(rc.top - work.Y) / span, 0.0, 1.0);
     } else {
         m_persisted.dock_edge = ::yip::DockEdge::Right;
-        const int span = std::max(1, work.Height - kWindowH);
+        const int span = std::max(1, work.Height - winH);
         m_persisted.edge_offset = std::clamp(double(rc.top - work.Y) / span, 0.0, 1.0);
     }
     (void)m_persisted.Save();

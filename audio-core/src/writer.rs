@@ -14,6 +14,21 @@ use rtrb::Consumer;
 
 use crate::error::YipError;
 
+/// Bytes buffered before the writer touches the filesystem. One second of
+/// 48 kHz stereo float is ~384 KiB, so this turns a recording into a handful of
+/// writes per second rather than one per ring drain.
+const FILE_BUFFER_BYTES: usize = 256 * 1024;
+
+/// Smallest batch the writer bothers to drain while capture is still running.
+/// A WASAPI packet is ~480 frames; waiting for a few of them amortises the
+/// chunk bookkeeping instead of paying it per packet. At 48 kHz stereo this is
+/// ~85 ms of audio, against a ring that holds 5 s.
+const MIN_DRAIN_SAMPLES: usize = 8192;
+
+/// How long to park when there is nothing worth writing. Comfortably under the
+/// 10 ms buffer period, so a healthy disk never lets the ring approach full.
+const PARK: Duration = Duration::from_millis(2);
+
 pub struct WriterConfig {
     pub path: PathBuf,
     pub sample_rate: u32,
@@ -32,43 +47,54 @@ impl WriterConfig {
 }
 
 /// Drives the writer thread loop. Returns the first error encountered, or
-/// `Ok(frames_written)` on clean stop.
+/// `Ok(samples_written)` on clean stop.
 ///
 /// `stop` is set by the parent when the user requests stop *and* the capture
 /// thread has finished pushing its last buffer. Until both conditions hold the
-/// writer keeps draining.
+/// writer keeps draining — and once it is set, every remaining sample is
+/// written regardless of batch size.
 pub fn run_writer(
     mut consumer: Consumer<f32>,
     cfg: WriterConfig,
     stop: Arc<AtomicBool>,
 ) -> Result<u64, YipError> {
     let file = File::create(&cfg.path)?;
-    let buf = BufWriter::with_capacity(64 * 1024, file);
+    let buf = BufWriter::with_capacity(FILE_BUFFER_BYTES, file);
     let mut writer = WavWriter::new(buf, cfg.spec())?;
     let mut total: u64 = 0;
 
     loop {
+        // Read the flag first: anything the capture thread pushed before
+        // setting it is already visible in `slots()` below, so the drain that
+        // follows cannot miss the final packet.
+        let stopping = stop.load(Ordering::Acquire);
         let n = consumer.slots();
-        if n > 0 {
-            // `read_chunk(n)` only fails if n > slots(), which cannot happen here.
-            let chunk = consumer.read_chunk(n).map_err(|_| YipError::Overrun)?;
-            let (a, b) = chunk.as_slices();
-            for &s in a {
-                writer.write_sample(s)?;
-                total += 1;
+
+        if n == 0 {
+            if stopping {
+                break;
             }
-            for &s in b {
-                writer.write_sample(s)?;
-                total += 1;
-            }
-            chunk.commit_all();
-        } else if stop.load(Ordering::Acquire) {
-            break;
-        } else {
-            // Ring is empty and capture is still running. Park briefly —
-            // not a hot loop: we wake on every audio buffer (~10 ms).
-            std::thread::sleep(Duration::from_millis(2));
+            std::thread::sleep(PARK);
+            continue;
         }
+        if n < MIN_DRAIN_SAMPLES && !stopping {
+            // Let a few more packets pile up rather than paying the chunk
+            // dance for each one. The ring has seconds of headroom.
+            std::thread::sleep(PARK);
+            continue;
+        }
+
+        // `read_chunk(n)` only fails if n > slots(), which cannot happen here.
+        let chunk = consumer.read_chunk(n).map_err(|_| YipError::Overrun)?;
+        let (a, b) = chunk.as_slices();
+        for &s in a {
+            writer.write_sample(s)?;
+        }
+        for &s in b {
+            writer.write_sample(s)?;
+        }
+        total += (a.len() + b.len()) as u64;
+        chunk.commit_all();
     }
 
     writer.finalize()?;

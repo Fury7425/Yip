@@ -36,7 +36,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />  <!-- dot / handle -->
                     <ColumnDefinition Width="Auto" />  <!-- meter (composition-hosted) -->
-                    <ColumnDefinition Width="*" />     <!-- spacer -->
+                    <ColumnDefinition Width="*" />     <!-- elapsed time -->
                     <ColumnDefinition Width="Auto" />  <!-- expanded buttons -->
                 </Grid.ColumnDefinitions>
 
@@ -55,12 +55,27 @@
                         VerticalAlignment="Center"
                         Opacity="0" />
 
+                <!-- Elapsed time. The pill is often the only thing on screen
+                     while recording, so it has to answer "how long has this
+                     been running" without opening the main window. -->
+                <TextBlock x:Name="ElapsedText"
+                           Grid.Column="2"
+                           Text="00:00"
+                           FontFamily="Cascadia Mono,Consolas,Courier New"
+                           FontSize="13"
+                           Foreground="{ThemeResource YipIndicatorTimerBrush}"
+                           VerticalAlignment="Center"
+                           HorizontalAlignment="Left"
+                           Margin="10,0,8,0"
+                           Opacity="0"
+                           AutomationProperties.Name="Elapsed recording time" />
+
                 <StackPanel x:Name="ExpandedActions"
                             Grid.Column="3"
                             Orientation="Horizontal"
                             Spacing="6"
                             VerticalAlignment="Center"
-                            Opacity="0"
+                            Visibility="Collapsed"
                             IsHitTestVisible="False">
                     <Button x:Name="StopButton"
                             Click="OnStopClicked"

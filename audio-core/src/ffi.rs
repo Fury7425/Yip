@@ -11,10 +11,12 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use std::panic::catch_unwind;
 use std::ptr;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use crate::capture::Recorder;
 use crate::devices::{Device, list_devices};
 use crate::error::YipError;
+use crate::ring::METER;
 
 /// Integer status returned across FFI. 0 == success.
 #[repr(C)]
@@ -66,6 +68,39 @@ impl Default for RecConfig {
     }
 }
 
+/// One-call snapshot of capture health, filled by [`rec_meter`].
+///
+/// Every field is read from an atomic, so a UI tick costs one FFI call and no
+/// lock at all — the old shape needed four calls, each taking the recorder
+/// mutex. Reads are non-destructive: two windows polling at different rates
+/// see the same levels instead of stealing peaks from each other.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RecMeter {
+    /// Decaying peak envelope. Float capture can exceed 1.0.
+    pub peak: f32,
+    /// Smoothed RMS over roughly the last 150 ms.
+    pub rms: f32,
+    /// Largest peak since the session started, or since [`rec_reset_clip`].
+    pub session_peak: f32,
+    /// Samples at or beyond full scale this session.
+    pub clip_count: u32,
+    /// Times the ring ran out of room.
+    pub overrun_count: u32,
+    /// 1 while capture is live.
+    pub recording: u8,
+    /// 1 once the first packet has arrived.
+    pub started: u8,
+    /// Reserved; keeps the 8-byte fields below naturally aligned.
+    pub reserved: [u8; 2],
+    /// Frames lost to overruns.
+    pub dropped_frames: u64,
+    /// Frames handed to the writer.
+    pub frames_captured: u64,
+    /// Monotonic ms since `rec_start` succeeded. 0 when not recording.
+    pub elapsed_ms: u64,
+}
+
 /// C-visible device record. Strings are UTF-8, null-terminated, owned by the
 /// returned array and freed via [`rec_free_devices`].
 #[repr(C)]
@@ -88,6 +123,24 @@ fn set_last_error(e: &YipError) {
 
 fn clear_last_error() {
     LAST_ERROR.with(|cell| *cell.borrow_mut() = None);
+}
+
+/// Live-session flag mirrored outside the recorder mutex, so the UI's poll
+/// path never contends with `rec_start` / `rec_stop`.
+static RECORDING: AtomicBool = AtomicBool::new(false);
+
+/// `process_base()`-relative ms at which the current session started.
+static SESSION_START_MS: AtomicU64 = AtomicU64::new(0);
+
+/// Fixed monotonic origin for the whole process. `Instant` cannot live in an
+/// atomic, so elapsed time is tracked as a ms offset from this.
+fn process_base() -> std::time::Instant {
+    static BASE: OnceLock<std::time::Instant> = OnceLock::new();
+    *BASE.get_or_init(std::time::Instant::now)
+}
+
+fn now_ms() -> u64 {
+    u64::try_from(process_base().elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
 fn singleton() -> &'static parking_lot::Mutex<Option<Recorder>> {
@@ -220,7 +273,11 @@ pub unsafe extern "C" fn rec_start(
         if guard.is_some() {
             return Err(YipError::InvalidState("already recording"));
         }
+        // Clear the meter before the capture thread can push its first packet.
+        METER.reset();
         let rec = Recorder::start(dev, std::path::Path::new(p), config)?;
+        SESSION_START_MS.store(now_ms(), Ordering::Relaxed);
+        RECORDING.store(true, Ordering::Release);
         *guard = Some(rec);
         Ok(())
     });
@@ -240,31 +297,76 @@ pub extern "C" fn rec_stop() -> RecStatus {
         }
         Ok(())
     });
-    // The session is gone either way — a failed flush still ends capture.
+    // The session is gone either way — a failed flush still ends capture. The
+    // session totals stay readable; only the live levels drop to zero.
+    RECORDING.store(false, Ordering::Release);
+    METER.silence();
     notify_state(false);
     status
 }
 
-/// 0.0..=1.0 peak level since last call. Returns 0.0 if not recording.
-/// Realtime-safe: single atomic load.
+/// Current peak envelope, roughly 0.0..=1.0. Returns 0.0 when not recording.
+///
+/// Lock-free and non-destructive — poll it from as many places as you like.
 #[unsafe(no_mangle)]
 pub extern "C" fn rec_peak_level() -> f32 {
-    let guard = singleton().lock();
-    guard.as_ref().map_or(0.0, Recorder::peak_level)
+    METER.peak()
 }
 
-/// 1 if a recording is active, 0 otherwise.
+/// 1 if a recording is active, 0 otherwise. Lock-free.
 #[unsafe(no_mangle)]
 pub extern "C" fn rec_is_recording() -> u8 {
-    let guard = singleton().lock();
-    u8::from(guard.is_some())
+    u8::from(RECORDING.load(Ordering::Acquire))
 }
 
-/// Monotonic ms since `rec_start` succeeded. 0 if not recording.
+/// Monotonic ms since `rec_start` succeeded. 0 if not recording. Lock-free.
 #[unsafe(no_mangle)]
 pub extern "C" fn rec_elapsed_ms() -> u64 {
-    let guard = singleton().lock();
-    guard.as_ref().map_or(0, Recorder::elapsed_ms)
+    if !RECORDING.load(Ordering::Acquire) {
+        return 0;
+    }
+    now_ms().saturating_sub(SESSION_START_MS.load(Ordering::Relaxed))
+}
+
+/// Fill `out` with the whole meter in one lock-free call.
+///
+/// # Safety
+/// `out` must point at a writable [`RecMeter`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rec_meter(out: *mut RecMeter) -> RecStatus {
+    run(|| {
+        if out.is_null() {
+            return Err(YipError::InvalidArgument("out was null"));
+        }
+        let recording = RECORDING.load(Ordering::Acquire);
+        let snapshot = RecMeter {
+            peak: METER.peak(),
+            rms: METER.rms(),
+            session_peak: METER.session_peak(),
+            clip_count: METER.clip_count(),
+            overrun_count: METER.overrun_count(),
+            recording: u8::from(recording),
+            started: u8::from(METER.started()),
+            reserved: [0; 2],
+            dropped_frames: METER.dropped_frames(),
+            frames_captured: METER.frames_captured(),
+            elapsed_ms: if recording {
+                now_ms().saturating_sub(SESSION_START_MS.load(Ordering::Relaxed))
+            } else {
+                0
+            },
+        };
+        // SAFETY: caller guarantees `out` is a valid writable RecMeter.
+        unsafe { ptr::write(out, snapshot) };
+        Ok(())
+    })
+}
+
+/// Clear the clip counter and the session peak. Lets the UI's clip indicator
+/// be acknowledged without interrupting the recording.
+#[unsafe(no_mangle)]
+pub extern "C" fn rec_reset_clip() {
+    METER.reset_clip();
 }
 
 /// Thread-local copy of the active recording path. Pointer valid until next
