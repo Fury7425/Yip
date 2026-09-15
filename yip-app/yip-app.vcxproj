@@ -131,6 +131,7 @@
         shell32.lib;
         user32.lib;
         gdi32.lib;
+        dwmapi.lib;
         runtimeobject.lib;
         windowsapp.lib;
         %(AdditionalDependencies)

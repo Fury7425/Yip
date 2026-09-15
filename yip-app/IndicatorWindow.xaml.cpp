@@ -9,6 +9,7 @@
 #include "Settings.h"
 #include "ThemeColors.h"
 
+#include <dwmapi.h>
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Microsoft.UI.h>
 #include <winrt/Microsoft.UI.Composition.h>
@@ -246,6 +247,15 @@ void IndicatorWindow::ApplyToolWindowStyle()
     ex |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     ex &= ~(WS_EX_APPWINDOW | WS_EX_LAYERED);
     ::SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, ex);
+
+    // Windows 11 rounds top-level windows to 8px and draws a 1px frame along
+    // the rectangle. The region already makes the pill a capsule, so that
+    // frame showed as square-ish corners outside it. Neither attribute exists
+    // before Windows 11; the calls just fail there, which is fine.
+    const DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_DONOTROUND;
+    (void)::DwmSetWindowAttribute(m_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
+    const COLORREF noBorder = DWMWA_COLOR_NONE;
+    (void)::DwmSetWindowAttribute(m_hwnd, DWMWA_BORDER_COLOR, &noBorder, sizeof(noBorder));
 }
 
 void IndicatorWindow::ApplyAlwaysOnTop()
@@ -381,7 +391,9 @@ void IndicatorWindow::UpdateMeterBars(float level, bool hot)
 void IndicatorWindow::UpdateDotForState(::yip::IndicatorState s)
 {
     if (!m_dotVisual) return;
-    const bool live = (s == ::yip::IndicatorState::Recording);
+    // Expanding the pill mid-take is still a live take: the lamp stays red.
+    const bool live = (s == ::yip::IndicatorState::Recording) ||
+                      (s == ::yip::IndicatorState::Expanded && m_recording);
     m_dotVisual.Brush(live ? m_dotRecordBrush : m_dotNeutralBrush);
 
     // Pulse opacity gently during recording for "alive" feel.
@@ -468,6 +480,7 @@ void IndicatorWindow::OnRecordingStateChanged(bool recording)
         // not yank the controls away. Just make sure the meter is live.
         if (m_state == ::yip::IndicatorState::Expanded) {
             if (m_meterTimer && !m_meterTimer.IsRunning()) m_meterTimer.Start();
+            UpdateDotForState(m_state);
             return;
         }
         TransitionTo(::yip::IndicatorState::Recording, true);

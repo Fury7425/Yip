@@ -106,6 +106,9 @@
                     <SolidColorBrush x:Key="YipIndicatorDotIdleBrush"      Color="#8A90A0" />
                     <SolidColorBrush x:Key="YipIndicatorDotLiveBrush"      Color="#E5484D" />
                     <SolidColorBrush x:Key="YipIndicatorTimerBrush"        Color="#0A0A0B" />
+                    <SolidColorBrush x:Key="YipIndicatorActionFillBrush"   Color="#000000" Opacity="0.06" />
+                    <SolidColorBrush x:Key="YipIndicatorActionStrokeBrush" Color="#000000" Opacity="0.07" />
+                    <SolidColorBrush x:Key="YipIndicatorActionInkBrush"    Color="#525866" />
                 </ResourceDictionary>
 
                 <ResourceDictionary x:Key="Dark">
@@ -146,6 +149,9 @@
                     <SolidColorBrush x:Key="YipIndicatorDotIdleBrush"      Color="#767C8C" />
                     <SolidColorBrush x:Key="YipIndicatorDotLiveBrush"      Color="#E5484D" />
                     <SolidColorBrush x:Key="YipIndicatorTimerBrush"        Color="#F2F3F5" />
+                    <SolidColorBrush x:Key="YipIndicatorActionFillBrush"   Color="#FFFFFF" Opacity="0.07" />
+                    <SolidColorBrush x:Key="YipIndicatorActionStrokeBrush" Color="#FFFFFF" Opacity="0.07" />
+                    <SolidColorBrush x:Key="YipIndicatorActionInkBrush"    Color="#C9CED8" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>
