@@ -199,7 +199,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Midl Include="App.idl" />
     <Midl Include="MainWindow.idl" />
     <Midl Include="SettingsDialog.idl" />
     <Midl Include="IndicatorWindow.idl" />

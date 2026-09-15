@@ -31,10 +31,6 @@
 #include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Microsoft.UI.Xaml.Navigation.h>
 
-// Bootstrapper for unpackaged Windows App SDK lookup.
-#include <MddBootstrap.h>
-#include <WindowsAppSDK-VersionInfo.h>
-
 #include <atomic>
 #include <chrono>
 #include <filesystem>
