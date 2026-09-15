@@ -9,17 +9,13 @@
 
     <Grid x:Name="Root" Background="Transparent">
         <!--
-            Window HWND is fixed at 320x56 (YipIndicatorWindow{Width,Height}).
-            The visible pill is the Border below, sized to the maximum state.
-            We attach a Composition GeometricClip whose rounded-rectangle
-            geometry animates to convey state changes — no XAML layout work
-            during transitions. The clip lives on this Border's Visual.
+            The window is the pill: IndicatorWindow::SyncWindowToState sizes the
+            HWND and this Border together, per state, around a fixed anchor so
+            the capsule stays centred where it was placed. Size and radius are
+            set from code before the first show.
         -->
         <Border
             x:Name="PillFrame"
-            Width="{StaticResource YipIndicatorExpandedWidth}"
-            Height="{StaticResource YipIndicatorExpandedHeight}"
-            CornerRadius="{StaticResource YipIndicatorCornerRadius}"
             Background="{ThemeResource YipIndicatorSurfaceBrush}"
             BorderBrush="{ThemeResource YipIndicatorStrokeQuietBrush}"
             BorderThickness="1"
@@ -34,46 +30,49 @@
 
             <Grid x:Name="PillContent" Padding="{StaticResource YipIndicatorPadding}">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />  <!-- dot / handle -->
-                    <ColumnDefinition Width="Auto" />  <!-- meter (composition-hosted) -->
-                    <ColumnDefinition Width="*" />     <!-- elapsed time -->
-                    <ColumnDefinition Width="Auto" />  <!-- expanded buttons -->
+                    <ColumnDefinition Width="*" />     <!-- readout, centred in what is left -->
+                    <ColumnDefinition Width="Auto" />  <!-- expanded actions -->
                 </Grid.ColumnDefinitions>
 
-                <!-- Dot host — a 12x12 empty Border whose Visual receives a
-                     SpriteVisual fill, animated by code-behind. -->
-                <Border x:Name="DotHost"
-                        Grid.Column="0"
-                        Width="12" Height="12"
-                        Margin="2,0,8,0"
-                        VerticalAlignment="Center" />
+                <!-- Dot, meter and clock travel as one group. With the actions
+                     collapsed the star column is the whole pill, so the group sits
+                     dead centre; expanded, it centres in the space left of them. -->
+                <StackPanel x:Name="ReadoutGroup"
+                            Orientation="Horizontal"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                    <!-- Dot host — its Visual receives a SpriteVisual fill. -->
+                    <Border x:Name="DotHost"
+                            Width="12" Height="12"
+                            Margin="0,0,8,0"
+                            VerticalAlignment="Center" />
 
-                <!-- Meter host — 4 bars are appended as child visuals here. -->
-                <Border x:Name="MeterHost"
-                        Grid.Column="1"
-                        Width="36" Height="22"
-                        VerticalAlignment="Center"
-                        Opacity="0" />
+                    <!-- Meter host — 4 bars appended as child visuals. Exactly as
+                         wide as the bars, or the group centres off to one side. -->
+                    <Border x:Name="MeterHost"
+                            Width="24" Height="22"
+                            VerticalAlignment="Center"
+                            Opacity="0" />
 
-                <!-- Elapsed time. The pill is often the only thing on screen
-                     while recording, so it has to answer "how long has this
-                     been running" without opening the main window. -->
-                <TextBlock x:Name="ElapsedText"
-                           Grid.Column="2"
-                           Text="00:00"
-                           FontFamily="Cascadia Mono,Consolas,Courier New"
-                           FontSize="13"
-                           Foreground="{ThemeResource YipIndicatorTimerBrush}"
-                           VerticalAlignment="Center"
-                           HorizontalAlignment="Left"
-                           Margin="10,0,8,0"
-                           Opacity="0"
-                           AutomationProperties.Name="Elapsed recording time" />
+                    <!-- Elapsed time. The pill is often the only thing on screen
+                         while recording, so it answers "how long has this been
+                         running" without opening the main window. -->
+                    <TextBlock x:Name="ElapsedText"
+                               Text="00:00"
+                               FontFamily="Cascadia Mono,Consolas,Courier New"
+                               FontSize="13"
+                               Foreground="{ThemeResource YipIndicatorTimerBrush}"
+                               VerticalAlignment="Center"
+                               Margin="10,0,0,0"
+                               Opacity="0"
+                               AutomationProperties.Name="Elapsed recording time" />
+                </StackPanel>
 
                 <StackPanel x:Name="ExpandedActions"
-                            Grid.Column="3"
+                            Grid.Column="1"
                             Orientation="Horizontal"
                             Spacing="6"
+                            Margin="8,0,0,0"
                             VerticalAlignment="Center"
                             Visibility="Collapsed"
                             IsHitTestVisible="False">
@@ -99,18 +98,6 @@
                             ToolTipService.ToolTip="Stop">
                         <Rectangle Width="9" Height="9" RadiusX="2" RadiusY="2"
                                    Fill="{ThemeResource YipIndicatorActionInkBrush}" />
-                    </Button>
-                    <Button x:Name="MarkButton"
-                            Style="{StaticResource PillActionButton}"
-                            Click="OnMarkClicked"
-                            AutomationProperties.Name="Mark moment"
-                            ToolTipService.ToolTip="Mark moment">
-                        <!-- Three strokes: a waveform tick, not a generic glyph. -->
-                        <Path Width="14" Height="14" Stretch="Uniform"
-                              Data="M12,4 L12,20 M6,9 L6,15 M18,9 L18,15"
-                              Stroke="{ThemeResource YipIndicatorActionInkBrush}"
-                              StrokeThickness="1.6"
-                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
                     </Button>
                     <Button x:Name="OpenLastButton"
                             Style="{StaticResource PillActionButton}"

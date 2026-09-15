@@ -69,6 +69,10 @@ theme dictionaries. **No colour is written in C++.**
   appears on screen, a token key is wrong.
 - Surfaces are a **tint over the window backdrop**, never an opaque fill. If a
   surface needs a solid colour to look right, Mica/acrylic has stopped working.
+  The pill is the one exception: DWM draws a system backdrop over the whole
+  window rectangle and ignores the window region, so behind a capsule acrylic
+  leaked out as light corners. The pill uses a transparent backdrop and a
+  denser `YipIndicatorSurfaceBrush` tint instead.
 - Geometry and motion constants that only code consumes are **not** mirrored in
   App.xaml — the pill's state sizes and timings are `constexpr` in
   [yip-app/IndicatorWindow.xaml.cpp](yip-app/IndicatorWindow.xaml.cpp). Only
@@ -137,7 +141,7 @@ Output binary: `build/release/yip-app/Release/yip-app.exe` (self-contained, no W
 ## Milestones
 
 - **M1–M3** ✅ — Rust FFI skeleton, WASAPI capture + WAV writer, MainWindow + device picker + start/stop.
-- **M4** ✅ — Recording indicator pill (Composition state machine, GPU meter, dock/snap, click-through, markers sidecar; idle/armed hidden by product decision).
+- **M4** ✅ — Recording indicator pill (Composition state machine, GPU meter, dock/snap, click-through; idle/armed hidden by product decision). The pill's "Mark moment" button was removed by product decision — expanded it offers Stop and Open last only. `Markers.cpp` stays: deleting a take still removes any existing sidecar. The pill is sized around an anchor (top centre unless docked to another edge) so it stays centred as it expands, and morphs between sizes with a composition clip.
 - **M5** ✅ — VST3 host C ABI (`yip_vst_load / unload / param_count / param_at / render / last_error`). SDK-gated via `YIP_HAVE_VST3_SDK`; CMake auto-detects `vst-host/third_party/vst3sdk/`. Without SDK: synthetic params + float32-WAV passthrough render so the pipeline runs. **Real Steinberg processing still TODO** — drop SDK + implement `load_with_sdk / unload_with_sdk / process_chain_with_sdk`.
 - **M6** ✅ — Process dialog: pick recording → add `.vst3` chain → edit params as native sliders → offline render on bg thread w/ progress. `VstInterop` wraps the C ABI.
 - **M7** ⏳ — Done: global start/stop hotkey (`HotkeyManager`, Ctrl+Alt+R, persisted) **and** its config UI (capture box in `SettingsDialog`, validated + persisted); idle-CPU 0% (`rec_set_state_callback` → `RecordingStateBus` → per-window meter timers, no timer ticks while idle); ARM64 CI (`native-arm64` job, CMake now passes `--target` to cargo); installer ([installer/yip.iss](installer/yip.iss), Inno Setup, per-user, self-contained); lock-free meter snapshot (`rec_meter`) plus the bulk-copy capture path and batched writer drains; main-window redesign (Mica, extended title bar, elapsed clock, logarithmic meter with peak-hold and clip lamp, filterable recordings list with a context menu, `InfoBar` error surface, keyboard accelerators) and the design-token layer in [yip-app/App.xaml](yip-app/App.xaml). Remaining: clippy sweep, clang-format gate flip (`yip-app/` mixes attached-brace and Allman styles — needs one `clang-format -i` sweep before `continue-on-error` comes off), on-device WPR profiling.

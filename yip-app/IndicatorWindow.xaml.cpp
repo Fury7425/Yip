@@ -5,10 +5,10 @@
 #include "IndicatorWindow.g.cpp"
 #endif
 
-#include "Markers.h"
 #include "Settings.h"
 #include "ThemeColors.h"
 
+#include <DispatcherQueue.h>
 #include <dwmapi.h>
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Microsoft.UI.h>
@@ -18,8 +18,10 @@
 #include <winrt/Microsoft.UI.Windowing.h>
 #include <winrt/Microsoft.UI.Xaml.Hosting.h>
 #include <winrt/Microsoft.UI.Xaml.Input.h>
+#include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.h>
+#include <winrt/Windows.UI.Composition.h>
 #include <winrt/Windows.UI.Core.h>
 
 #include <algorithm>
@@ -35,18 +37,14 @@ namespace muxi = winrt::Microsoft::UI::Xaml::Input;
 namespace mucomp = winrt::Microsoft::UI::Composition;
 namespace muw = winrt::Microsoft::UI::Windowing;
 namespace muxd = winrt::Microsoft::UI::Dispatching;
+using winrt::Windows::Foundation::Numerics::float2;
+using winrt::Windows::Foundation::Numerics::float3;
 
 namespace {
 // Geometry and motion for the pill are owned here, not in App.xaml: only the
-// two sizes the pill's XAML actually binds to live there. Colours are the
-// other way round — every one of them is resolved from the theme dictionaries
-// by ResolveThemeBrushes().
-// The widest state. Only used to place the pill on restore, before any state
-// has sized the window; every live size comes from GeometryFor().
-constexpr int kWindowW = 320;
-constexpr int kWindowH = 56;
-constexpr int kFadeMs = 180;
-constexpr int kResizeMs = 220;
+// padding the pill's XAML actually binds to lives there. Colours are the other
+// way round — every one of them is resolved from the theme dictionaries by
+// ResolveThemeBrushes().
 constexpr int kMeterMs = 33;
 constexpr int kSnapPx = 20;
 constexpr int kAutoCollapseMs = 3000;
@@ -55,6 +53,20 @@ constexpr float kBarWidth = 3.0f;
 constexpr float kBarGap = 4.0f;
 constexpr float kBarMaxHeight = 18.0f;
 constexpr int kSavingHoldMs = 350; // how long the Saving frame stays up
+
+// Motion. Entrances and the morph use a strong ease-out so the pill moves on
+// the frame it is asked to; exits are shorter than entrances, because nobody
+// is waiting to watch something leave.
+constexpr int kFadeMs = 180;          // opacity settle between two visible states
+constexpr int kShowMs = 220;          // hidden -> visible
+constexpr int kHideMs = 160;          // visible -> hidden
+constexpr int kMorphMs = 260;         // collapsed <-> expanded
+constexpr int kActionsInMs = 180;     // buttons arriving, after the capsule has started to open
+constexpr int kActionsInDelayMs = 70;
+constexpr int kActionsOutMs = 90;     // buttons leaving, before the capsule closes over them
+constexpr float kShowScale = 0.9f;    // never from zero: nothing appears out of nowhere
+constexpr float kHideScale = 0.96f;
+constexpr float kActionsSlidePx = 8.0f;
 
 // Bottom of the bar meter, in dBFS. Same curve as the main window: on a linear
 // amplitude scale these bars barely leave the floor.
@@ -108,28 +120,111 @@ struct StateGeom {
 
 StateGeom GeometryFor(::yip::IndicatorState s) noexcept
 {
+    // Collapsed, the readout (dot, meter, clock: ~93 DIP) sits centred with room
+    // for the capsule's round ends either side. Expanded, it centres in the
+    // space left of the two 34 DIP buttons, whose outer circle is concentric
+    // with the capsule's end. The hidden states share the collapsed size so a
+    // take starting never resizes a window that is about to appear.
     using S = ::yip::IndicatorState;
     switch (s) {
         case S::Idle:
-            return {92.0f, 28.0f, 0.60f};
         case S::Armed:
-            return {132.0f, 36.0f, 1.00f};
         case S::Recording:
-            return {210.0f, 44.0f, 1.00f};
+            return {156.0f, 44.0f, 1.00f};
         case S::Saving:
-            return {210.0f, 44.0f, 0.85f};
+            return {156.0f, 44.0f, 0.85f};
         case S::Expanded:
-            return {320.0f, 56.0f, 1.00f};
+            return {232.0f, 56.0f, 1.00f};
     }
-    return {92.0f, 28.0f, 0.60f};
+    return {156.0f, 44.0f, 1.00f};
 }
 
-// CubicBezier(0.4, 0.0, 0.2, 1.0) — Fluent standard easing.
+bool IsShownState(::yip::IndicatorState s) noexcept
+{
+    // Idle + Armed are invisible by product decision; the pill only exists on
+    // screen while there is a take to talk about.
+    using S = ::yip::IndicatorState;
+    return s == S::Recording || s == S::Saving || s == S::Expanded;
+}
+
+/// Where in the pill its anchor sits, as fractions of width and height: top
+/// centre when floating or docked top, otherwise the docked edge's midpoint.
+struct AnchorFraction {
+    float x;
+    float y;
+};
+
+AnchorFraction AnchorFor(::yip::DockEdge edge) noexcept
+{
+    switch (edge) {
+        case ::yip::DockEdge::Left:
+            return {0.0f, 0.5f};
+        case ::yip::DockEdge::Right:
+            return {1.0f, 0.5f};
+        case ::yip::DockEdge::Bottom:
+            return {0.5f, 1.0f};
+        case ::yip::DockEdge::Top:
+        case ::yip::DockEdge::None:
+        default:
+            return {0.5f, 0.0f};
+    }
+}
+
+// CubicBezier(0.4, 0.0, 0.2, 1.0) — Fluent standard easing, for the meter.
 mucomp::CompositionEasingFunction StandardEase(mucomp::Compositor const& c)
 {
-    winrt::Windows::Foundation::Numerics::float2 cp1{0.4f, 0.0f};
-    winrt::Windows::Foundation::Numerics::float2 cp2{0.2f, 1.0f};
-    return c.CreateCubicBezierEasingFunction(cp1, cp2);
+    return c.CreateCubicBezierEasingFunction(float2{0.4f, 0.0f}, float2{0.2f, 1.0f});
+}
+
+// Strong ease-out for anything entering, leaving or answering a click.
+mucomp::CompositionEasingFunction StrongEaseOut(mucomp::Compositor const& c)
+{
+    return c.CreateCubicBezierEasingFunction(float2{0.23f, 1.0f}, float2{0.32f, 1.0f});
+}
+
+// Drawer-style curve for the capsule changing size on screen: quick off the
+// mark, long soft landing.
+mucomp::CompositionEasingFunction MorphEase(mucomp::Compositor const& c)
+{
+    return c.CreateCubicBezierEasingFunction(float2{0.32f, 0.72f}, float2{0.0f, 1.0f});
+}
+
+void AnimateScalar(mucomp::Compositor const& c, mucomp::CompositionObject const& target, wchar_t const* property,
+                   float to, int ms, mucomp::CompositionEasingFunction const& ease, int delayMs = 0)
+{
+    auto anim = c.CreateScalarKeyFrameAnimation();
+    anim.InsertKeyFrame(1.0f, to, ease);
+    anim.Duration(std::chrono::milliseconds(std::max(ms, 1)));
+    if (delayMs > 0) anim.DelayTime(std::chrono::milliseconds(delayMs));
+    target.StartAnimation(property, anim);
+}
+
+void AnimateVector2(mucomp::Compositor const& c, mucomp::CompositionObject const& target, wchar_t const* property,
+                    float2 to, int ms, mucomp::CompositionEasingFunction const& ease)
+{
+    auto anim = c.CreateVector2KeyFrameAnimation();
+    anim.InsertKeyFrame(1.0f, to, ease);
+    anim.Duration(std::chrono::milliseconds(std::max(ms, 1)));
+    target.StartAnimation(property, anim);
+}
+
+void AnimateVector3(mucomp::Compositor const& c, mucomp::CompositionObject const& target, wchar_t const* property,
+                    float3 to, int ms, mucomp::CompositionEasingFunction const& ease, int delayMs = 0)
+{
+    auto anim = c.CreateVector3KeyFrameAnimation();
+    anim.InsertKeyFrame(1.0f, to, ease);
+    anim.Duration(std::chrono::milliseconds(std::max(ms, 1)));
+    if (delayMs > 0) anim.DelayTime(std::chrono::milliseconds(delayMs));
+    target.StartAnimation(property, anim);
+}
+
+/// Jump an element's composition Translation, cancelling any animation on it.
+/// The element must have had translation enabled (BuildCompositionLayer).
+void SetTranslation(mux::UIElement const& element, float dx, float dy)
+{
+    auto visual = muxh::ElementCompositionPreview::GetElementVisual(element);
+    visual.StopAnimation(L"Translation");
+    visual.Properties().InsertVector3(L"Translation", float3{dx, dy, 0.0f});
 }
 
 // Shown only if a token key is wrong. A deliberate flat grey rather than a
@@ -151,22 +246,22 @@ IndicatorWindow::IndicatorWindow()
 
     ApplyToolWindowStyle();
     ApplyAlwaysOnTop();
+    // After the presenter change: SetBorderAndTitleBar re-applies the frame,
+    // and the default corner preference with it.
+    ApplyFrameless();
 
-    // Real translucency: the pill is its own window, so the system gives it a
-    // blurred backdrop for free. The Border's tint then sits on top of that
-    // instead of on top of black.
-    SystemBackdrop(mux::Media::DesktopAcrylicBackdrop{});
+    // No acrylic. DWM draws a system backdrop across the whole window
+    // rectangle, rounded only by its own 8px corner and ignoring the window
+    // region, so behind a capsule it showed as light corners and a light rim.
+    // A transparent backdrop leaves the Border as the only thing drawn.
+    ApplyTransparentBackdrop();
 
     BuildCompositionLayer();
     ApplyClickThrough(m_persisted.click_through);
     RestoreFromPersistence();
 
-    // Idle + Armed are *invisible* by design (per user). Pill only
-    // materialises on Recording / Saving / Expanded.
-    //   - Idle    → AppWindow.Hide()
-    //   - Armed   → AppWindow.Hide() (M7 hotkey arming may revisit)
-    //   - Recording / Saving / Expanded → AppWindow.Show()
-    TransitionTo(::yip::IndicatorState::Idle, /*animate*/ false);
+    // Hidden until there is a take: m_state starts Idle and m_shown false, and
+    // TransitionTo only ever shows the window for a visible state.
     HideWindow();
 
     auto dq = muxd::DispatcherQueue::GetForCurrentThread();
@@ -247,15 +342,60 @@ void IndicatorWindow::ApplyToolWindowStyle()
     ex |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
     ex &= ~(WS_EX_APPWINDOW | WS_EX_LAYERED);
     ::SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, ex);
+}
 
-    // Windows 11 rounds top-level windows to 8px and draws a 1px frame along
-    // the rectangle. The region already makes the pill a capsule, so that
-    // frame showed as square-ish corners outside it. Neither attribute exists
-    // before Windows 11; the calls just fail there, which is fine.
+void IndicatorWindow::ApplyFrameless()
+{
+    if (!m_hwnd) return;
+
+    // SetBorderAndTitleBar(false, false) still leaves WS_DLGFRAME and
+    // WS_SYSMENU on the window, and with per-pixel alpha on that frame shows
+    // as a 1px white rectangle around the capsule. Strip every frame bit.
+    LONG_PTR style = ::GetWindowLongPtrW(m_hwnd, GWL_STYLE);
+    style &= ~static_cast<LONG_PTR>(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU);
+    ::SetWindowLongPtrW(m_hwnd, GWL_STYLE, style);
+    ::SetWindowPos(m_hwnd, nullptr, 0, 0, 0, 0,
+                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    // Windows 11 rounds top-level windows to 8px and strokes a 1px frame along
+    // the rectangle; around a capsule both read as stray corners. Neither
+    // attribute exists before Windows 11, where the calls simply fail.
     const DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_DONOTROUND;
     (void)::DwmSetWindowAttribute(m_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &corner, sizeof(corner));
     const COLORREF noBorder = DWMWA_COLOR_NONE;
     (void)::DwmSetWindowAttribute(m_hwnd, DWMWA_BORDER_COLOR, &noBorder, sizeof(noBorder));
+}
+
+void IndicatorWindow::ApplyTransparentBackdrop()
+{
+    auto target = try_as<mucomp::ICompositionSupportsSystemBackdrop>();
+    if (!target) return;
+
+    // The backdrop brush comes from the system compositor
+    // (Windows.UI.Composition), which needs a Windows.System dispatcher queue
+    // on this thread; WinUI only guarantees the Microsoft.UI one.
+    if (!winrt::Windows::System::DispatcherQueue::GetForCurrentThread()) {
+        DispatcherQueueOptions options{sizeof(DispatcherQueueOptions), DQTYPE_THREAD_CURRENT, DQTAT_COM_NONE};
+        if (FAILED(::CreateDispatcherQueueController(
+                options, reinterpret_cast<ABI::Windows::System::IDispatcherQueueController**>(
+                             winrt::put_abi(m_backdropQueue))))) {
+            return;
+        }
+    }
+    if (!m_backdropCompositor) m_backdropCompositor = winrt::Windows::UI::Composition::Compositor{};
+    target.SystemBackdrop(m_backdropCompositor.CreateColorBrush(winrt::Microsoft::UI::Colors::Transparent()));
+
+    // A transparent brush alone still composites onto black. Blur-behind with
+    // a region entirely off the window is what turns on per-pixel alpha for
+    // the window's content; nothing is actually blurred.
+    if (m_hwnd) {
+        DWM_BLURBEHIND blur{};
+        blur.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
+        blur.fEnable = TRUE;
+        blur.hRgnBlur = ::CreateRectRgn(-2, -2, -1, -1);
+        (void)::DwmEnableBlurBehindWindow(m_hwnd, &blur);
+        if (blur.hRgnBlur) ::DeleteObject(blur.hRgnBlur);
+    }
 }
 
 void IndicatorWindow::ApplyAlwaysOnTop()
@@ -291,14 +431,24 @@ void IndicatorWindow::BuildCompositionLayer()
     auto pillVisual = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
     m_compositor = pillVisual.Compositor();
     m_ease = StandardEase(m_compositor);
+    m_easeOut = StrongEaseOut(m_compositor);
+    m_easeMorph = MorphEase(m_compositor);
+
+    // The morph clip. Built once, attached only while a size change runs.
+    m_clipGeometry = m_compositor.CreateRoundedRectangleGeometry();
+    m_clip = m_compositor.CreateGeometricClip(m_clipGeometry);
+
+    // The readout glides and the buttons slide during a morph; both move via
+    // composition Translation so no layout pass runs per frame.
+    muxh::ElementCompositionPreview::SetIsTranslationEnabled(ReadoutGroup(), true);
+    muxh::ElementCompositionPreview::SetIsTranslationEnabled(ExpandedActions(), true);
 
     // Brushes first: the bars and the dot below are handed one as they are
     // created.
     ResolveThemeBrushes();
 
-    // Child visual tree for dot + meter bars. Parented to the meter host
-    // (anchored within the pill grid by XAML layout so it stays inside
-    // the visible clip).
+    // Child visual tree for the meter bars, parented to the meter host (which
+    // XAML layout places inside the readout group).
     auto meterContainer = m_compositor.CreateContainerVisual();
     meterContainer.Size({kBarCount * (kBarWidth + kBarGap) - kBarGap, kBarMaxHeight + 4});
     muxh::ElementCompositionPreview::SetElementChildVisual(MeterHost(), meterContainer);
@@ -320,7 +470,7 @@ void IndicatorWindow::BuildCompositionLayer()
         m_barVisuals[static_cast<size_t>(i)] = bar;
     }
 
-    // Recording dot — drawn as a 10×10 sprite visual on the DotHost element.
+    // Recording dot — drawn as an 8×8 sprite visual on the DotHost element.
     auto dotContainer = m_compositor.CreateContainerVisual();
     dotContainer.Size({12.0f, 12.0f});
     muxh::ElementCompositionPreview::SetElementChildVisual(DotHost(), dotContainer);
@@ -500,38 +650,23 @@ void IndicatorWindow::OnRecordingStateChanged(bool recording)
 
 void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
 {
-    // Size before show, or the first frame after Show() lands at the previous
-    // state's size.
-    SyncWindowToState(s);
+    using S = ::yip::IndicatorState;
+    const bool show = IsShownState(s);
+    if (s == m_state && show == m_shown) return;
 
-    // Visibility gate — runs even when s == m_state on the very first call
-    // from the constructor (m_state initialised to Idle).
-    SyncVisibilityForState(s);
-
-    if (s == m_state) return;
-
+    const auto from = m_state;
     // Remember "base" so Expanded can return after auto-collapse.
-    if (s == ::yip::IndicatorState::Expanded) {
-        m_baseState = m_state;
-    }
-
+    if (s == S::Expanded && from != S::Expanded) m_baseState = from;
     m_state = s;
+    ++m_motionGen;
 
-    // XAML opacity transitions (composition-backed in WinUI 3).
-    const bool wantActions = (s == ::yip::IndicatorState::Expanded);
-    const bool wantMeter = (s == ::yip::IndicatorState::Recording || s == ::yip::IndicatorState::Expanded ||
-                            s == ::yip::IndicatorState::Saving);
-
-    // Collapsed, not transparent: at Opacity 0 the three buttons still took
-    // their ~114px of the row, which left the timer a sliver of the 210px
-    // recording pill and clipped it.
-    ExpandedActions().Visibility(wantActions ? mux::Visibility::Visible : mux::Visibility::Collapsed);
-    ExpandedActions().IsHitTestVisible(wantActions);
-
-    MeterHost().Opacity(wantMeter ? 1.0 : 0.0);
-    ElapsedText().Opacity(wantMeter ? 1.0 : 0.0);
-
-    AnimatePillToState(s, animate);
+    const bool wantMeter = (s == S::Recording || s == S::Expanded || s == S::Saving);
+    // A pill on its way out keeps its last frame; blanking the readout
+    // mid-fade reads as a glitch.
+    if (show) {
+        MeterHost().Opacity(wantMeter ? 1.0 : 0.0);
+        ElapsedText().Opacity(wantMeter ? 1.0 : 0.0);
+    }
     UpdateDotForState(s);
 
     // Meter timer runs only while a meter is visible AND audio is live.
@@ -545,58 +680,251 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
     }
 
     // Auto-collapse after 3s when expanded.
-    if (s == ::yip::IndicatorState::Expanded)
+    if (s == S::Expanded)
         ResetAutoCollapseTimer();
     else
         StopAutoCollapseTimer();
+
+    if (!show) {
+        HidePill(animate);
+        return;
+    }
+    if (!m_shown) {
+        // Size before show, or the first frame lands at the previous size.
+        ApplyLayoutFor(s);
+        ShowPill(animate);
+        return;
+    }
+    if (animate) {
+        MorphPill(from, s);
+        return;
+    }
+    ApplyLayoutFor(s);
+    auto pill = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
+    pill.StopAnimation(L"Opacity");
+    pill.Opacity(GeometryFor(s).opacity);
+}
+
+void IndicatorWindow::ApplyLayoutFor(::yip::IndicatorState s)
+{
+    // Collapsed, not transparent: at Opacity 0 the buttons still took their
+    // width, which pushed the readout off centre.
+    const bool wantActions = (s == ::yip::IndicatorState::Expanded);
+    ExpandedActions().Visibility(wantActions ? mux::Visibility::Visible : mux::Visibility::Collapsed);
+    ExpandedActions().IsHitTestVisible(wantActions);
+
+    auto actions = muxh::ElementCompositionPreview::GetElementVisual(ExpandedActions());
+    actions.StopAnimation(L"Opacity");
+    actions.Opacity(1.0f);
+    SetTranslation(ExpandedActions(), 0.0f, 0.0f);
+    SetTranslation(ReadoutGroup(), 0.0f, 0.0f);
+    ClearClip();
+
+    SyncWindowToState(s);
 }
 
 void IndicatorWindow::SyncWindowToState(::yip::IndicatorState s)
 {
-    if (!m_hwnd) return;
     const auto g = GeometryFor(s);
-    const int w = static_cast<int>(std::lround(g.w));
-    const int h = static_cast<int>(std::lround(g.h));
-    if (w <= 0 || h <= 0) return;
 
-    // The window is the pill. It used to be a fixed 320x56 with a Composition
-    // clip picking out the visible part — but the clip was centred while the
-    // content is left-anchored, so the dot and the meter were cut off the left
-    // edge and the timer lost its first digit. Sizing the window to the state
-    // cannot drift out of step with the content.
+    // The window is the pill. The HWND is sized in physical pixels while the
+    // geometry is DIPs: unscaled, a pill at 200% got half a window and lost
+    // its content off the right and bottom edges.
     //
-    // The HWND and its region are physical pixels while the geometry is DIPs:
-    // unscaled, a 210x44 pill at 200% got a 105x22 window and lost half its
-    // content off the right and bottom edges.
-    const int pw = static_cast<int>(std::lround(g.w * DpiScale()));
-    const int ph = static_cast<int>(std::lround(g.h * DpiScale()));
-    auto appWindow = muw::AppWindow::GetFromWindowId(AppWindow().Id());
-    if (appWindow) appWindow.Resize({pw, ph});
+    // It is sized around m_anchor rather than from its top-left corner, so a
+    // pill centred on the screen stays centred as it expands instead of
+    // growing off to the right.
+    if (m_hwnd) {
+        const double scale = DpiScale();
+        const int pw = static_cast<int>(std::lround(g.w * scale));
+        const int ph = static_cast<int>(std::lround(g.h * scale));
+        if (pw > 0 && ph > 0) {
+            const auto anchor = AnchorFor(m_persisted.dock_edge);
+            const int x = static_cast<int>(m_anchor.x) - static_cast<int>(std::lround(pw * anchor.x));
+            const int y = static_cast<int>(m_anchor.y) - static_cast<int>(std::lround(ph * anchor.y));
+            auto appWindow = muw::AppWindow::GetFromWindowId(AppWindow().Id());
+            if (appWindow) appWindow.MoveAndResize({x, y, pw, ph});
+        }
+    }
 
-    // Windows takes ownership of the region.
-    ::SetWindowRgn(m_hwnd, ::CreateRoundRectRgn(0, 0, pw + 1, ph + 1, ph, ph), TRUE);
-
+    // No window region: it is aliased, so it chewed the Border's antialiased
+    // edge into a stepped rim, and with a transparent backdrop there is
+    // nothing outside the capsule for it to hide.
     const double radius = g.h * 0.5;
     PillFrame().Width(g.w);
     PillFrame().Height(g.h);
     PillFrame().CornerRadius({radius, radius, radius, radius});
 }
 
-void IndicatorWindow::AnimatePillToState(::yip::IndicatorState s, bool animate)
+// =========================================================== Motion
+
+void IndicatorWindow::ShowPill(bool animate)
 {
-    if (!m_compositor) return;
-    const auto g = GeometryFor(s);
+    m_shown = true;
+    const auto g = GeometryFor(m_state);
+    const auto anchor = AnchorFor(m_persisted.dock_edge);
 
-    // `animate == false` means "land on the resting values now" — used for the
-    // initial state, which must not visibly fade in on launch. The size change
-    // is instant: an HWND resize is not something to tween.
-    const auto fadeMs = std::chrono::milliseconds(animate ? kFadeMs : 0);
+    // Grows out of its anchor — down from the top edge it is pinned to, not
+    // outward from its middle.
+    auto pill = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
+    pill.StopAnimation(L"Opacity");
+    pill.StopAnimation(L"Scale");
+    pill.CenterPoint({g.w * anchor.x, g.h * anchor.y, 0.0f});
 
-    auto pillVisual = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
-    auto fade = m_compositor.CreateScalarKeyFrameAnimation();
-    fade.InsertKeyFrame(1.0f, g.opacity, m_ease);
-    fade.Duration(fadeMs);
-    pillVisual.StartAnimation(L"Opacity", fade);
+    if (!animate) {
+        pill.Opacity(g.opacity);
+        pill.Scale({1.0f, 1.0f, 1.0f});
+        if (!m_windowVisible) ShowWindow();
+        return;
+    }
+
+    // A pill still fading out is picked up from wherever it has got to.
+    if (!m_windowVisible) {
+        pill.Opacity(0.0f);
+        pill.Scale({kShowScale, kShowScale, 1.0f});
+        ShowWindow();
+    }
+    AnimateScalar(m_compositor, pill, L"Opacity", g.opacity, kShowMs, m_easeOut);
+    AnimateVector3(m_compositor, pill, L"Scale", {1.0f, 1.0f, 1.0f}, kShowMs, m_easeOut);
+}
+
+void IndicatorWindow::HidePill(bool animate)
+{
+    m_shown = false;
+    if (!m_windowVisible) return;
+    if (!animate) {
+        HideWindow();
+        return;
+    }
+
+    const auto anchor = AnchorFor(m_persisted.dock_edge);
+    const auto w = static_cast<float>(PillFrame().Width());
+    const auto h = static_cast<float>(PillFrame().Height());
+    auto pill = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
+    pill.CenterPoint({w * anchor.x, h * anchor.y, 0.0f});
+
+    const auto gen = m_motionGen;
+    auto batch = m_compositor.CreateScopedBatch(mucomp::CompositionBatchTypes::Animation);
+    AnimateScalar(m_compositor, pill, L"Opacity", 0.0f, kHideMs, m_easeOut);
+    AnimateVector3(m_compositor, pill, L"Scale", {kHideScale, kHideScale, 1.0f}, kHideMs, m_easeOut);
+    batch.End();
+    batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
+        if (auto self = weak.get(); self && self->m_motionGen == gen && !self->m_shown) {
+            self->HideWindow();
+        }
+    });
+}
+
+void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorState to)
+{
+    const auto a = GeometryFor(from);
+    const auto b = GeometryFor(to);
+    auto pill = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
+
+    if (a.w == b.w && a.h == b.h) {
+        ApplyLayoutFor(to);
+        AnimateScalar(m_compositor, pill, L"Opacity", b.opacity, kFadeMs, m_easeOut);
+        return;
+    }
+
+    // The HWND cannot be tweened, so the window jumps to whichever of the two
+    // sizes is larger and a rounded clip draws the capsule between them. Where
+    // the readout sits in each layout is measured, and the gap between the two
+    // is played out as a composition translation, so it glides rather than
+    // teleports. `anchor` says which part of the pill stays put on screen.
+    const auto anchor = AnchorFor(m_persisted.dock_edge);
+    const float dw = b.w - a.w;
+    const float dh = b.h - a.h;
+    const auto before = ReadoutCentre();
+    auto readout = muxh::ElementCompositionPreview::GetElementVisual(ReadoutGroup());
+    auto actions = muxh::ElementCompositionPreview::GetElementVisual(ExpandedActions());
+    const auto gen = m_motionGen;
+
+    auto batch = m_compositor.CreateScopedBatch(mucomp::CompositionBatchTypes::Animation);
+    AnimateScalar(m_compositor, pill, L"Opacity", b.opacity, kFadeMs, m_easeOut);
+
+    if (dw >= 0.0f) {
+        // Opening: take the new layout now, then hold it inside the old outline
+        // and let the outline go.
+        ApplyLayoutFor(to);
+        PillFrame().UpdateLayout();
+        const auto after = ReadoutCentre();
+
+        SetTranslation(ReadoutGroup(), before.X - after.X + dw * anchor.x, before.Y - after.Y + dh * anchor.y);
+        AnimateVector3(m_compositor, readout, L"Translation", {0.0f, 0.0f, 0.0f}, kMorphMs, m_easeMorph);
+
+        SetClip(a.w, a.h, dw * anchor.x, dh * anchor.y);
+        AnimateClip(b.w, b.h, 0.0f, 0.0f);
+
+        // The buttons arrive once there is room for them, sliding out from
+        // behind the readout.
+        actions.Opacity(0.0f);
+        SetTranslation(ExpandedActions(), -kActionsSlidePx, 0.0f);
+        AnimateScalar(m_compositor, actions, L"Opacity", 1.0f, kActionsInMs, m_easeOut, kActionsInDelayMs);
+        AnimateVector3(m_compositor, actions, L"Translation", {0.0f, 0.0f, 0.0f}, kActionsInMs, m_easeOut,
+                       kActionsInDelayMs);
+
+        batch.End();
+        batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
+            if (auto self = weak.get(); self && self->m_motionGen == gen) self->ClearClip();
+        });
+        return;
+    }
+
+    // Closing: the buttons leave first, the outline closes over them, and only
+    // then does the window shrink and the layout change underneath.
+    AnimateScalar(m_compositor, actions, L"Opacity", 0.0f, kActionsOutMs, m_easeOut);
+
+    // In the collapsed layout the readout is centred in the new outline.
+    const float tx = -dw * anchor.x + b.w * 0.5f - before.X;
+    const float ty = -dh * anchor.y + b.h * 0.5f - before.Y;
+    AnimateVector3(m_compositor, readout, L"Translation", {tx, ty, 0.0f}, kMorphMs, m_easeMorph);
+
+    SetClip(a.w, a.h, 0.0f, 0.0f);
+    AnimateClip(b.w, b.h, -dw * anchor.x, -dh * anchor.y);
+
+    batch.End();
+    batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
+        if (auto self = weak.get(); self && self->m_motionGen == gen) self->ApplyLayoutFor(self->m_state);
+    });
+}
+
+void IndicatorWindow::SetClip(float w, float h, float x, float y)
+{
+    if (!m_clipGeometry) return;
+    m_clipGeometry.StopAnimation(L"Size");
+    m_clipGeometry.StopAnimation(L"Offset");
+    m_clipGeometry.StopAnimation(L"CornerRadius");
+    m_clipGeometry.Size({w, h});
+    m_clipGeometry.Offset({x, y});
+    m_clipGeometry.CornerRadius({h * 0.5f, h * 0.5f});
+    muxh::ElementCompositionPreview::GetElementVisual(PillFrame()).Clip(m_clip);
+}
+
+void IndicatorWindow::AnimateClip(float w, float h, float x, float y)
+{
+    if (!m_clipGeometry) return;
+    AnimateVector2(m_compositor, m_clipGeometry, L"Size", {w, h}, kMorphMs, m_easeMorph);
+    AnimateVector2(m_compositor, m_clipGeometry, L"Offset", {x, y}, kMorphMs, m_easeMorph);
+    AnimateVector2(m_compositor, m_clipGeometry, L"CornerRadius", {h * 0.5f, h * 0.5f}, kMorphMs, m_easeMorph);
+}
+
+void IndicatorWindow::ClearClip()
+{
+    if (!m_clipGeometry) return;
+    m_clipGeometry.StopAnimation(L"Size");
+    m_clipGeometry.StopAnimation(L"Offset");
+    m_clipGeometry.StopAnimation(L"CornerRadius");
+    muxh::ElementCompositionPreview::GetElementVisual(PillFrame()).Clip(nullptr);
+}
+
+winrt::Windows::Foundation::Point IndicatorWindow::ReadoutCentre()
+{
+    auto group = ReadoutGroup();
+    const auto origin =
+        group.TransformToVisual(PillFrame()).TransformPoint(winrt::Windows::Foundation::Point{0.0f, 0.0f});
+    return {origin.X + static_cast<float>(group.ActualWidth()) * 0.5f,
+            origin.Y + static_cast<float>(group.ActualHeight()) * 0.5f};
 }
 
 // =========================================================== Pointer + drag
@@ -646,6 +974,9 @@ void IndicatorWindow::OnPillPointerMoved(winrt::Windows::Foundation::IInspectabl
     auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
     appWindow.Move({newX, newY});
+    // Keep the anchor with the pill, or an auto-collapse mid-drag would snap it
+    // back to where the drag started.
+    UpdateAnchorFromWindow();
 }
 
 void IndicatorWindow::OnPillPointerReleased(winrt::Windows::Foundation::IInspectable const& /*sender*/,
@@ -658,6 +989,8 @@ void IndicatorWindow::OnPillPointerReleased(winrt::Windows::Foundation::IInspect
     if (m_movedDuringPress) {
         SnapToNearestEdgeIfClose();
         RememberPosition();
+        // The dock edge may have changed, and with it which point is the anchor.
+        UpdateAnchorFromWindow();
     }
 }
 
@@ -687,28 +1020,6 @@ void IndicatorWindow::OnStopClicked(winrt::Windows::Foundation::IInspectable con
     (void)::rec_stop();
     // No transition here: rec_stop fires the audio-core state callback, and
     // OnRecordingStateChanged pulls the pill through Saving → Idle.
-    ResetAutoCollapseTimer();
-}
-
-void IndicatorWindow::OnMarkClicked(winrt::Windows::Foundation::IInspectable const& /*sender*/,
-                                    mux::RoutedEventArgs const& /*args*/)
-{
-    if (!::rec_is_recording()) return;
-    const auto t_ms = ::rec_elapsed_ms();
-    const char* path_utf8 = ::rec_current_path();
-    if (!path_utf8) return;
-
-    // utf8 → wide → path
-    const int n = ::MultiByteToWideChar(CP_UTF8, 0, path_utf8, -1, nullptr, 0);
-    std::wstring wide;
-    if (n > 0) {
-        wide.resize(static_cast<size_t>(n) - 1);
-        ::MultiByteToWideChar(CP_UTF8, 0, path_utf8, -1, wide.data(), n);
-    }
-    std::filesystem::path p(wide);
-    ::yip::markers::Marker m{t_ms, std::nullopt};
-    (void)::yip::markers::Append(p, m);
-
     ResetAutoCollapseTimer();
 }
 
@@ -765,9 +1076,11 @@ void IndicatorWindow::RestoreFromPersistence()
     if (!m_hwnd) return;
 
     // WorkArea is physical pixels, so the pill's DIP size has to be scaled
-    // before it is used to centre or dock against it.
-    const int winW = static_cast<int>(std::lround(kWindowW * DpiScale()));
-    const int winH = static_cast<int>(std::lround(kWindowH * DpiScale()));
+    // before it is used to centre or dock against it. Placed at the size it
+    // will first appear at, so the anchor derived below is exact.
+    const auto g = GeometryFor(::yip::IndicatorState::Recording);
+    const int winW = static_cast<int>(std::lround(g.w * DpiScale()));
+    const int winH = static_cast<int>(std::lround(g.h * DpiScale()));
 
     auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
@@ -813,7 +1126,21 @@ void IndicatorWindow::RestoreFromPersistence()
         default:
             break;
     }
-    appWindow.Move({x, y});
+    appWindow.MoveAndResize({x, y, winW, winH});
+
+    const auto anchor = AnchorFor(m_persisted.dock_edge);
+    m_anchor.x = x + static_cast<LONG>(std::lround(winW * anchor.x));
+    m_anchor.y = y + static_cast<LONG>(std::lround(winH * anchor.y));
+}
+
+void IndicatorWindow::UpdateAnchorFromWindow()
+{
+    if (!m_hwnd) return;
+    RECT rc{};
+    if (!::GetWindowRect(m_hwnd, &rc)) return;
+    const auto anchor = AnchorFor(m_persisted.dock_edge);
+    m_anchor.x = rc.left + static_cast<LONG>(std::lround((rc.right - rc.left) * anchor.x));
+    m_anchor.y = rc.top + static_cast<LONG>(std::lround((rc.bottom - rc.top) * anchor.y));
 }
 
 void IndicatorWindow::SnapToNearestEdgeIfClose()
@@ -821,8 +1148,6 @@ void IndicatorWindow::SnapToNearestEdgeIfClose()
     if (!m_hwnd) return;
     RECT rc{};
     ::GetWindowRect(m_hwnd, &rc);
-    const int cx = (rc.left + rc.right) / 2;
-    const int cy = (rc.top + rc.bottom) / 2;
 
     auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
@@ -907,6 +1232,10 @@ void IndicatorWindow::ShowWindow()
     auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
     if (appWindow) appWindow.Show();
+    m_windowVisible = true;
+    // The presenter can put frame bits back while showing; strip them again
+    // or the white 1px rectangle returns around the capsule.
+    ApplyFrameless();
     // Re-assert TOPMOST + NoActivate after show, in case the Win32
     // show path clobbered them.
     ::SetWindowPos(m_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -918,16 +1247,7 @@ void IndicatorWindow::HideWindow()
     auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
     if (appWindow) appWindow.Hide();
-}
-
-void IndicatorWindow::SyncVisibilityForState(::yip::IndicatorState s)
-{
-    using S = ::yip::IndicatorState;
-    const bool visible = (s == S::Recording || s == S::Saving || s == S::Expanded);
-    if (visible)
-        ShowWindow();
-    else
-        HideWindow();
+    m_windowVisible = false;
 }
 
 // =========================================================== Auto-collapse

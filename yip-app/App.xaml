@@ -21,7 +21,12 @@
             <CornerRadius x:Key="YipCardCornerRadius">14</CornerRadius>
             <CornerRadius x:Key="YipControlCornerRadius">8</CornerRadius>
             <CornerRadius x:Key="YipMeterCornerRadius">8</CornerRadius>
-            <CornerRadius x:Key="YipPillCornerRadius">999</CornerRadius>
+            <CornerRadius x:Key="YipDialogCornerRadius">14</CornerRadius>
+            <!-- Exactly half of YipPillHeight. WinUI does not clamp an oversized
+                 radius to a capsule the way CSS does — it scales the corners
+                 down proportionally, so 999 on a 152x30 box drew an ellipse. -->
+            <x:Double x:Key="YipPillHeight">32</x:Double>
+            <CornerRadius x:Key="YipPillCornerRadius">16</CornerRadius>
 
             <!-- Spacing scale. Every gap in the app is one of these five. -->
             <x:Double x:Key="YipSpaceXs">4</x:Double>
@@ -49,11 +54,10 @@
             <x:Double x:Key="YipWaveHeight">76</x:Double>
 
             <!-- ===================== Indicator pill (XAML-side) ===================== -->
-            <!-- Only what the pill's XAML reads. Its state geometry and motion
-                 timings are constants in IndicatorWindow.xaml.cpp. -->
-            <x:Double x:Key="YipIndicatorExpandedWidth">320</x:Double>
-            <x:Double x:Key="YipIndicatorExpandedHeight">56</x:Double>
-            <CornerRadius x:Key="YipIndicatorCornerRadius">22</CornerRadius>
+            <!-- Only what the pill's XAML reads. Its state geometry (including
+                 the capsule's own size and radius) and motion timings are
+                 constants in IndicatorWindow.xaml.cpp. The padding is symmetric
+                 on purpose: the readout centres itself inside it. -->
             <Thickness x:Key="YipIndicatorPadding">10,4,10,4</Thickness>
 
             <!-- ===================== Theme-aware surfaces ===================== -->
@@ -99,7 +103,10 @@
                     <SolidColorBrush x:Key="YipLampLiveBrush"        Color="#E5484D" />
 
                     <!-- Indicator pill -->
-                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"      Color="#FAFAFB" Opacity="0.72" />
+                    <!-- The pill has no backdrop to blur what is behind it (see
+                         IndicatorWindow::ApplyTransparentBackdrop), so its tint
+                         is denser than the cards' to stay legible. -->
+                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"      Color="#FAFAFB" Opacity="0.88" />
                     <SolidColorBrush x:Key="YipIndicatorStrokeQuietBrush"  Color="#000000" Opacity="0.07" />
                     <SolidColorBrush x:Key="YipIndicatorMeterBarIdleBrush" Color="#525866" />
                     <SolidColorBrush x:Key="YipIndicatorMeterBarLiveBrush" Color="#E5484D" />
@@ -109,6 +116,25 @@
                     <SolidColorBrush x:Key="YipIndicatorActionFillBrush"   Color="#000000" Opacity="0.06" />
                     <SolidColorBrush x:Key="YipIndicatorActionStrokeBrush" Color="#000000" Opacity="0.07" />
                     <SolidColorBrush x:Key="YipIndicatorActionInkBrush"    Color="#525866" />
+
+                    <!-- Dialogs. A ContentDialog floats over the window's own
+                         content, so it cannot be a tint: it is the one opaque
+                         surface, kept in the same family as the cards. -->
+                    <SolidColorBrush x:Key="YipGroupBrush"                 Color="#000000" Opacity="0.03" />
+                    <SolidColorBrush x:Key="ContentDialogTopOverlay"       Color="#FBFBFC" />
+                    <SolidColorBrush x:Key="ContentDialogBackground"       Color="#F1F2F4" />
+                    <SolidColorBrush x:Key="ContentDialogBorderBrush"      Color="#000000" Opacity="0.08" />
+
+                    <!-- Lightweight overrides for the stock text box and combo
+                         box, so hover and focus stay glass instead of dropping
+                         to the default opaque fill. -->
+                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver"          Color="#FFFFFF" Opacity="0.85" />
+                    <SolidColorBrush x:Key="TextControlBackgroundFocused"              Color="#FFFFFF" Opacity="0.95" />
+                    <SolidColorBrush x:Key="TextControlPlaceholderForeground"          Color="#6E7485" />
+                    <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#6E7485" />
+                    <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused"   Color="#8A90A0" />
+                    <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver"             Color="#FFFFFF" Opacity="0.85" />
+                    <SolidColorBrush x:Key="ComboBoxBackgroundPressed"                 Color="#FFFFFF" Opacity="0.60" />
                 </ResourceDictionary>
 
                 <ResourceDictionary x:Key="Dark">
@@ -142,7 +168,7 @@
                     <SolidColorBrush x:Key="YipLampIdleBrush"        Color="#767C8C" />
                     <SolidColorBrush x:Key="YipLampLiveBrush"        Color="#E5484D" />
 
-                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"      Color="#141518" Opacity="0.62" />
+                    <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"      Color="#141518" Opacity="0.84" />
                     <SolidColorBrush x:Key="YipIndicatorStrokeQuietBrush"  Color="#FFFFFF" Opacity="0.075" />
                     <SolidColorBrush x:Key="YipIndicatorMeterBarIdleBrush" Color="#B7BCC8" />
                     <SolidColorBrush x:Key="YipIndicatorMeterBarLiveBrush" Color="#FF6B70" />
@@ -152,6 +178,19 @@
                     <SolidColorBrush x:Key="YipIndicatorActionFillBrush"   Color="#FFFFFF" Opacity="0.07" />
                     <SolidColorBrush x:Key="YipIndicatorActionStrokeBrush" Color="#FFFFFF" Opacity="0.07" />
                     <SolidColorBrush x:Key="YipIndicatorActionInkBrush"    Color="#C9CED8" />
+
+                    <SolidColorBrush x:Key="YipGroupBrush"                 Color="#FFFFFF" Opacity="0.035" />
+                    <SolidColorBrush x:Key="ContentDialogTopOverlay"       Color="#1E1F25" />
+                    <SolidColorBrush x:Key="ContentDialogBackground"       Color="#17181D" />
+                    <SolidColorBrush x:Key="ContentDialogBorderBrush"      Color="#FFFFFF" Opacity="0.08" />
+
+                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver"          Color="#FFFFFF" Opacity="0.14" />
+                    <SolidColorBrush x:Key="TextControlBackgroundFocused"              Color="#000000" Opacity="0.30" />
+                    <SolidColorBrush x:Key="TextControlPlaceholderForeground"          Color="#9BA2B2" />
+                    <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#9BA2B2" />
+                    <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused"   Color="#767C8C" />
+                    <SolidColorBrush x:Key="ComboBoxBackgroundPointerOver"             Color="#FFFFFF" Opacity="0.14" />
+                    <SolidColorBrush x:Key="ComboBoxBackgroundPressed"                 Color="#FFFFFF" Opacity="0.07" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
         </ResourceDictionary>
