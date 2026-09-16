@@ -52,7 +52,6 @@ namespace {
 // way round — every one of them is resolved from the theme dictionaries by
 // ResolveThemeBrushes().
 constexpr int kMeterMs = 33;
-constexpr int kSnapPx = 20;
 constexpr int kAutoCollapseMs = 3000;
 constexpr int kBarCount = 4;
 constexpr float kBarWidth = 3.0f;
@@ -153,28 +152,18 @@ bool IsShownState(::yip::IndicatorState s) noexcept
     return s == S::Recording || s == S::Saving || s == S::Expanded;
 }
 
-/// Where in the pill its anchor sits, as fractions of width and height: top
-/// centre when floating or docked top, otherwise the docked edge's midpoint.
+/// Where in the pill its anchor sits, as fractions of width and height. The
+/// pill hangs from its top centre: that is the point that stays put when it
+/// changes size, and the point it grows out of when it appears.
 struct AnchorFraction {
     float x;
     float y;
 };
 
-AnchorFraction AnchorFor(::yip::DockEdge edge) noexcept
-{
-    switch (edge) {
-        case ::yip::DockEdge::Left:
-            return {0.0f, 0.5f};
-        case ::yip::DockEdge::Right:
-            return {1.0f, 0.5f};
-        case ::yip::DockEdge::Bottom:
-            return {0.5f, 1.0f};
-        case ::yip::DockEdge::Top:
-        case ::yip::DockEdge::None:
-        default:
-            return {0.5f, 0.0f};
-    }
-}
+constexpr AnchorFraction kAnchor{0.5f, 0.0f};
+
+/// Gap between the pill and the top of the work area, in physical pixels.
+constexpr int kHomeMarginPx = 12;
 
 // The curves and animation helpers are templated over the compositor: the XAML
 // compositor draws the pill, the system compositor draws the blur behind it,
@@ -340,7 +329,7 @@ IndicatorWindow::IndicatorWindow()
 
     BuildCompositionLayer();
     ApplyClickThrough(m_persisted.click_through);
-    RestoreFromPersistence();
+    PlacePillAtHome();
 
     // Hidden until there is a take: m_state starts Idle and m_shown false, and
     // TransitionTo only ever shows the window for a visible state.
@@ -959,9 +948,8 @@ void IndicatorWindow::SyncWindowToState(::yip::IndicatorState s, ClipPolicy clip
         const int pw = static_cast<int>(std::lround(g.w * scale));
         const int ph = static_cast<int>(std::lround(g.h * scale));
         if (pw > 0 && ph > 0) {
-            const auto anchor = AnchorFor(m_persisted.dock_edge);
-            const int x = static_cast<int>(m_anchor.x) - static_cast<int>(std::lround(pw * anchor.x));
-            const int y = static_cast<int>(m_anchor.y) - static_cast<int>(std::lround(ph * anchor.y));
+            const int x = static_cast<int>(m_anchor.x) - static_cast<int>(std::lround(pw * kAnchor.x));
+            const int y = static_cast<int>(m_anchor.y) - static_cast<int>(std::lround(ph * kAnchor.y));
             auto appWindow = muw::AppWindow::GetFromWindowId(AppWindow().Id());
             if (appWindow) appWindow.MoveAndResize({x, y, pw, ph});
         }
@@ -974,11 +962,9 @@ void IndicatorWindow::ShowPill(bool animate)
 {
     m_shown = true;
     const auto g = GeometryFor(m_state);
-    const auto anchor = AnchorFor(m_persisted.dock_edge);
-
     // Grows out of its anchor — down from the top edge it is pinned to, not
     // outward from its middle.
-    SetPillCentre(g.w * anchor.x, g.h * anchor.y);
+    SetPillCentre(g.w * kAnchor.x, g.h * kAnchor.y);
 
     if (!animate) {
         SetPillFade(g.opacity, 1.0f);
@@ -1004,10 +990,9 @@ void IndicatorWindow::HidePill(bool animate)
         return;
     }
 
-    const auto anchor = AnchorFor(m_persisted.dock_edge);
     const auto w = static_cast<float>(PillFrame().Width());
     const auto h = static_cast<float>(PillFrame().Height());
-    SetPillCentre(w * anchor.x, h * anchor.y);
+    SetPillCentre(w * kAnchor.x, h * kAnchor.y);
 
     const auto gen = m_motionGen;
     auto batch = m_compositor.CreateScopedBatch(mucomp::CompositionBatchTypes::Animation);
@@ -1045,8 +1030,7 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
     // sizes is larger and a rounded clip draws the capsule between them. Where
     // the readout sits in each layout is measured, and the gap between the two
     // is played out as a composition translation, so it glides rather than
-    // teleports. `anchor` says which part of the pill stays put on screen.
-    const auto anchor = AnchorFor(m_persisted.dock_edge);
+    // teleports. `kAnchor` says which part of the pill stays put on screen.
     const float dw = b.w - a.w;
     const float dh = b.h - a.h;
     const auto before = ReadoutCentre();
@@ -1062,12 +1046,13 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
         // let the outline go. Clipping before the resize is the whole point —
         // the resize can render a frame on its own, and with no clip installed
         // that frame is the full expanded capsule appearing out of nowhere.
-        SetClip(a.w, a.h, dw * anchor.x, dh * anchor.y);
+        SetClip(a.w, a.h, dw * kAnchor.x, dh * kAnchor.y);
         ApplyLayoutFor(to, ClipPolicy::Keep);
         PillFrame().UpdateLayout();
         const auto after = ReadoutCentre();
 
-        SetTranslation(ReadoutGroup(), before.X - after.X + dw * anchor.x, before.Y - after.Y + dh * anchor.y);
+        SetTranslation(ReadoutGroup(), before.X - after.X + dw * kAnchor.x,
+                       before.Y - after.Y + dh * kAnchor.y);
         AnimateVector3(m_compositor, readout, L"Translation", {0.0f, 0.0f, 0.0f}, kMorphMs, m_easeMorph);
 
         AnimateClip(b.w, b.h, 0.0f, 0.0f);
@@ -1099,12 +1084,12 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
     AnimateScalar(m_compositor, actions, L"Opacity", 0.0f, kActionsOutMs, m_easeOut);
 
     // In the collapsed layout the readout is centred in the new outline.
-    const float tx = -dw * anchor.x + b.w * 0.5f - before.X;
-    const float ty = -dh * anchor.y + b.h * 0.5f - before.Y;
+    const float tx = -dw * kAnchor.x + b.w * 0.5f - before.X;
+    const float ty = -dh * kAnchor.y + b.h * 0.5f - before.Y;
     AnimateVector3(m_compositor, readout, L"Translation", {tx, ty, 0.0f}, kMorphMs, m_easeMorph);
 
     SetClip(a.w, a.h, 0.0f, 0.0f);
-    AnimateClip(b.w, b.h, -dw * anchor.x, -dh * anchor.y);
+    AnimateClip(b.w, b.h, -dw * kAnchor.x, -dh * kAnchor.y);
 
     batch.End();
     batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
@@ -1239,98 +1224,25 @@ winrt::Windows::Foundation::Point IndicatorWindow::ReadoutCentre()
             origin.Y + static_cast<float>(group.ActualHeight()) * 0.5f};
 }
 
-// =========================================================== Pointer + drag
+// ================================================================= Pointer
 
 void IndicatorWindow::OnPillPointerPressed(winrt::Windows::Foundation::IInspectable const& /*sender*/,
                                            muxi::PointerRoutedEventArgs const& args)
 {
-    // Ctrl+click → flip click-through. Do not capture; let the press fall
-    // through as a "tap" for state expansion.
+    // Ctrl+click → flip click-through. Nothing else happens on the press: the
+    // pill cannot be moved, so there is no drag to start and no pointer to
+    // capture, and a plain press falls through as a "tap" for state expansion.
     const auto mods = args.KeyModifiers();
     if ((mods & winrt::Windows::System::VirtualKeyModifiers::Control) ==
         winrt::Windows::System::VirtualKeyModifiers::Control) {
         ApplyClickThrough(!m_persisted.click_through);
         (void)m_persisted.Save();
-        return;
     }
-
-    m_movedDuringPress = false;
-    m_dragging = false;
-
-    const auto pt = args.GetCurrentPoint(nullptr).Position();
-    m_dragOrigin = pt;
-
-    RECT rc{};
-    ::GetWindowRect(m_hwnd, &rc);
-    m_windowOriginAtDragStart = {static_cast<float>(rc.left), static_cast<float>(rc.top)};
-
-    PillFrame().CapturePointer(args.Pointer());
-    m_dragging = true;
-
-    // Hold the pill open for as long as the pointer is down. A drag that takes
-    // longer than the auto-collapse used to collapse under the cursor, and the
-    // morph's closing layout pass then fought the drag for the window's
-    // position.
-    StopAutoCollapseTimer();
-}
-
-void IndicatorWindow::OnPillPointerMoved(winrt::Windows::Foundation::IInspectable const& /*sender*/,
-                                         muxi::PointerRoutedEventArgs const& args)
-{
-    if (!m_dragging || !m_hwnd) return;
-
-    const auto pt = args.GetCurrentPoint(nullptr).Position();
-    const float dx = pt.X - m_dragOrigin.X;
-    const float dy = pt.Y - m_dragOrigin.Y;
-    if (std::abs(dx) < 2.0f && std::abs(dy) < 2.0f) return;
-
-    m_movedDuringPress = true;
-
-    const int newX = static_cast<int>(std::lround(m_windowOriginAtDragStart.X + dx));
-    const int newY = static_cast<int>(std::lround(m_windowOriginAtDragStart.Y + dy));
-
-    auto wid = AppWindow().Id();
-    auto appWindow = muw::AppWindow::GetFromWindowId(wid);
-    appWindow.Move({newX, newY});
-    // Keep the anchor with the pill, or an auto-collapse mid-drag would snap it
-    // back to where the drag started.
-    UpdateAnchorFromWindow();
-}
-
-void IndicatorWindow::OnPillPointerReleased(winrt::Windows::Foundation::IInspectable const& /*sender*/,
-                                            muxi::PointerRoutedEventArgs const& args)
-{
-    if (!m_dragging) return;
-    m_dragging = false;
-    PillFrame().ReleasePointerCapture(args.Pointer());
-
-    if (m_movedDuringPress) {
-        SnapToNearestEdgeIfClose();
-        RememberPosition();
-        // The dock edge may have changed, and with it which point is the anchor.
-        UpdateAnchorFromWindow();
-    }
-
-    // The tap handler runs after this and starts the clock for an expansion;
-    // this restarts it for a pill that was already expanded when the press
-    // began (a drag, or a press that went nowhere).
-    if (m_state == ::yip::IndicatorState::Expanded) ResetAutoCollapseTimer();
-}
-
-void IndicatorWindow::OnPillPointerCaptureLost(winrt::Windows::Foundation::IInspectable const& /*sender*/,
-                                               muxi::PointerRoutedEventArgs const& /*args*/)
-{
-    m_dragging = false;
-    // Capture can be lost without a release; the pill would otherwise stay
-    // expanded forever on a timer that was stopped by the press.
-    if (m_state == ::yip::IndicatorState::Expanded) ResetAutoCollapseTimer();
 }
 
 void IndicatorWindow::OnPillTapped(winrt::Windows::Foundation::IInspectable const& /*sender*/,
                                    muxi::TappedRoutedEventArgs const& /*args*/)
 {
-    if (m_movedDuringPress) return; // drag, not tap
-
     if (m_state == ::yip::IndicatorState::Expanded) {
         TransitionTo(m_baseState, true);
     } else {
@@ -1368,7 +1280,7 @@ void IndicatorWindow::OnPauseClicked(winrt::Windows::Foundation::IInspectable co
     ResetAutoCollapseTimer();
 }
 
-// =========================================================== Edge snap + persistence
+// =============================================================== Placement
 
 double IndicatorWindow::DpiScale() const noexcept
 {
@@ -1376,157 +1288,28 @@ double IndicatorWindow::DpiScale() const noexcept
     return dpi > 0 ? static_cast<double>(dpi) / 96.0 : 1.0;
 }
 
-void IndicatorWindow::RestoreFromPersistence()
+void IndicatorWindow::PlacePillAtHome()
 {
     if (!m_hwnd) return;
 
     // WorkArea is physical pixels, so the pill's DIP size has to be scaled
-    // before it is used to centre or dock against it. Placed at the size it
-    // will first appear at, so the anchor derived below is exact.
+    // before it is used to centre against it. Placed at the size it will first
+    // appear at, so the anchor derived below is exact.
     const auto g = GeometryFor(::yip::IndicatorState::Recording);
     const int winW = static_cast<int>(std::lround(g.w * DpiScale()));
     const int winH = static_cast<int>(std::lround(g.h * DpiScale()));
 
-    auto wid = AppWindow().Id();
-    auto appWindow = muw::AppWindow::GetFromWindowId(wid);
+    auto appWindow = muw::AppWindow::GetFromWindowId(AppWindow().Id());
+    auto primary = muw::DisplayArea::Primary();
+    if (!appWindow || !primary) return;
 
-    // Find target monitor.
-    auto displays = muw::DisplayArea::FindAll();
-    muw::DisplayArea chosen{nullptr};
-    for (auto const& d : displays) {
-        if (d.DisplayId().Value == m_persisted.monitor_id) {
-            chosen = d;
-            break;
-        }
-    }
-    if (!chosen) {
-        chosen = muw::DisplayArea::Primary();
-    }
-    if (!chosen) return;
-
-    const auto work = chosen.WorkArea();
-
-    int x = work.X + (work.Width - winW) / 2;
-    int y = work.Y + 20;
-
-    const double t = std::clamp(m_persisted.edge_offset, 0.0, 1.0);
-    switch (m_persisted.dock_edge) {
-        case ::yip::DockEdge::Top:
-            x = work.X + static_cast<int>(std::lround((work.Width - winW) * t));
-            y = work.Y + 12;
-            break;
-        case ::yip::DockEdge::Bottom:
-            x = work.X + static_cast<int>(std::lround((work.Width - winW) * t));
-            y = work.Y + work.Height - winH - 12;
-            break;
-        case ::yip::DockEdge::Left:
-            x = work.X + 12;
-            y = work.Y + static_cast<int>(std::lround((work.Height - winH) * t));
-            break;
-        case ::yip::DockEdge::Right:
-            x = work.X + work.Width - winW - 12;
-            y = work.Y + static_cast<int>(std::lround((work.Height - winH) * t));
-            break;
-        case ::yip::DockEdge::None:
-        default:
-            break;
-    }
+    const auto work = primary.WorkArea();
+    const int x = work.X + (work.Width - winW) / 2;
+    const int y = work.Y + kHomeMarginPx;
     appWindow.MoveAndResize({x, y, winW, winH});
 
-    const auto anchor = AnchorFor(m_persisted.dock_edge);
-    m_anchor.x = x + static_cast<LONG>(std::lround(winW * anchor.x));
-    m_anchor.y = y + static_cast<LONG>(std::lround(winH * anchor.y));
-}
-
-void IndicatorWindow::UpdateAnchorFromWindow()
-{
-    if (!m_hwnd) return;
-    RECT rc{};
-    if (!::GetWindowRect(m_hwnd, &rc)) return;
-    const auto anchor = AnchorFor(m_persisted.dock_edge);
-    m_anchor.x = rc.left + static_cast<LONG>(std::lround((rc.right - rc.left) * anchor.x));
-    m_anchor.y = rc.top + static_cast<LONG>(std::lround((rc.bottom - rc.top) * anchor.y));
-}
-
-void IndicatorWindow::SnapToNearestEdgeIfClose()
-{
-    if (!m_hwnd) return;
-    RECT rc{};
-    ::GetWindowRect(m_hwnd, &rc);
-
-    auto wid = AppWindow().Id();
-    auto appWindow = muw::AppWindow::GetFromWindowId(wid);
-
-    // Pick the DisplayArea containing the window center.
-    muw::DisplayArea host{muw::DisplayArea::GetFromWindowId(wid, muw::DisplayAreaFallback::Primary)};
-    if (!host) return;
-    const auto work = host.WorkArea();
-
-    const int winW = rc.right - rc.left;
-    const int winH = rc.bottom - rc.top;
-
-    const int distTop = std::abs(rc.top - work.Y);
-    const int distBottom = std::abs((work.Y + work.Height) - rc.bottom);
-    const int distLeft = std::abs(rc.left - work.X);
-    const int distRight = std::abs((work.X + work.Width) - rc.right);
-    const int minDist = std::min({distTop, distBottom, distLeft, distRight});
-    if (minDist > kSnapPx) return;
-
-    int x = rc.left;
-    int y = rc.top;
-    if (minDist == distTop)
-        y = work.Y + 12;
-    else if (minDist == distBottom)
-        y = work.Y + work.Height - winH - 12;
-    else if (minDist == distLeft)
-        x = work.X + 12;
-    else if (minDist == distRight)
-        x = work.X + work.Width - winW - 12;
-    appWindow.Move({x, y});
-}
-
-void IndicatorWindow::RememberPosition()
-{
-    if (!m_hwnd) return;
-
-    auto wid = AppWindow().Id();
-    muw::DisplayArea host{muw::DisplayArea::GetFromWindowId(wid, muw::DisplayAreaFallback::Primary)};
-    if (!host) return;
-
-    m_persisted.monitor_id = host.DisplayId().Value;
-
-    RECT rc{};
-    ::GetWindowRect(m_hwnd, &rc);
-    const auto work = host.WorkArea();
-    const int winW = rc.right - rc.left;
-    const int winH = rc.bottom - rc.top;
-
-    const int distTop = std::abs(rc.top - work.Y);
-    const int distBottom = std::abs((work.Y + work.Height) - rc.bottom);
-    const int distLeft = std::abs(rc.left - work.X);
-    const int distRight = std::abs((work.X + work.Width) - rc.right);
-    const int minDist = std::min({distTop, distBottom, distLeft, distRight});
-
-    if (minDist > kSnapPx) {
-        m_persisted.dock_edge = ::yip::DockEdge::None;
-    } else if (minDist == distTop) {
-        m_persisted.dock_edge = ::yip::DockEdge::Top;
-        const int span = std::max(1, work.Width - winW);
-        m_persisted.edge_offset = std::clamp(double(rc.left - work.X) / span, 0.0, 1.0);
-    } else if (minDist == distBottom) {
-        m_persisted.dock_edge = ::yip::DockEdge::Bottom;
-        const int span = std::max(1, work.Width - winW);
-        m_persisted.edge_offset = std::clamp(double(rc.left - work.X) / span, 0.0, 1.0);
-    } else if (minDist == distLeft) {
-        m_persisted.dock_edge = ::yip::DockEdge::Left;
-        const int span = std::max(1, work.Height - winH);
-        m_persisted.edge_offset = std::clamp(double(rc.top - work.Y) / span, 0.0, 1.0);
-    } else {
-        m_persisted.dock_edge = ::yip::DockEdge::Right;
-        const int span = std::max(1, work.Height - winH);
-        m_persisted.edge_offset = std::clamp(double(rc.top - work.Y) / span, 0.0, 1.0);
-    }
-    (void)m_persisted.Save();
+    m_anchor.x = x + static_cast<LONG>(std::lround(winW * kAnchor.x));
+    m_anchor.y = y + static_cast<LONG>(std::lround(winH * kAnchor.y));
 }
 
 // =========================================================== Visibility

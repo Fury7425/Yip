@@ -20,22 +20,6 @@ fs::path LocalAppDataRoot()
     }
     return fs::current_path() / L"yip-data";
 }
-
-yip::DockEdge ParseEdge(uint32_t v)
-{
-    switch (v) {
-        case 1:
-            return yip::DockEdge::Top;
-        case 2:
-            return yip::DockEdge::Bottom;
-        case 3:
-            return yip::DockEdge::Left;
-        case 4:
-            return yip::DockEdge::Right;
-        default:
-            return yip::DockEdge::None;
-    }
-}
 } // namespace
 
 namespace yip {
@@ -62,15 +46,6 @@ IndicatorPersistence IndicatorPersistence::Load()
     wdj::JsonObject obj{nullptr};
     if (!wdj::JsonObject::TryParse(wide, obj)) return s;
 
-    if (obj.HasKey(L"dock_edge")) {
-        s.dock_edge = ParseEdge(static_cast<uint32_t>(obj.GetNamedNumber(L"dock_edge", 1.0)));
-    }
-    if (obj.HasKey(L"monitor_id")) {
-        s.monitor_id = static_cast<uint64_t>(obj.GetNamedNumber(L"monitor_id", 0.0));
-    }
-    if (obj.HasKey(L"edge_offset")) {
-        s.edge_offset = obj.GetNamedNumber(L"edge_offset", 0.5);
-    }
     if (obj.HasKey(L"click_through")) {
         s.click_through = obj.GetNamedBoolean(L"click_through", false);
     }
@@ -83,9 +58,6 @@ IndicatorPersistence IndicatorPersistence::Load()
 bool IndicatorPersistence::Save() const
 {
     wdj::JsonObject obj;
-    obj.SetNamedValue(L"dock_edge", wdj::JsonValue::CreateNumberValue(static_cast<double>(dock_edge)));
-    obj.SetNamedValue(L"monitor_id", wdj::JsonValue::CreateNumberValue(static_cast<double>(monitor_id)));
-    obj.SetNamedValue(L"edge_offset", wdj::JsonValue::CreateNumberValue(edge_offset));
     obj.SetNamedValue(L"click_through", wdj::JsonValue::CreateBooleanValue(click_through));
     obj.SetNamedValue(L"last_expanded", wdj::JsonValue::CreateBooleanValue(last_expanded));
 

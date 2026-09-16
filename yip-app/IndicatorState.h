@@ -16,14 +16,6 @@ enum class IndicatorState : uint8_t {
     Expanded = 4,  // user-revealed controls (overlays any base state)
 };
 
-enum class DockEdge : uint8_t {
-    None = 0,
-    Top = 1,
-    Bottom = 2,
-    Left = 3,
-    Right = 4,
-};
-
 inline const wchar_t* StateName(IndicatorState s) noexcept
 {
     switch (s) {

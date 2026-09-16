@@ -21,12 +21,6 @@ struct IndicatorWindow : IndicatorWindowT<IndicatorWindow> {
     // Event handlers (declared in XAML)
     void OnPillPointerPressed(winrt::Windows::Foundation::IInspectable const& sender,
                               winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& args);
-    void OnPillPointerMoved(winrt::Windows::Foundation::IInspectable const& sender,
-                            winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& args);
-    void OnPillPointerReleased(winrt::Windows::Foundation::IInspectable const& sender,
-                               winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& args);
-    void OnPillPointerCaptureLost(winrt::Windows::Foundation::IInspectable const& sender,
-                                  winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& args);
     void OnPillTapped(winrt::Windows::Foundation::IInspectable const& sender,
                       winrt::Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const& args);
 
@@ -112,12 +106,11 @@ private:
     // composition translation is not included).
     winrt::Windows::Foundation::Point ReadoutCentre();
 
-    // ----- Edge dock / monitor restore -----
-    void RestoreFromPersistence();
+    // ----- Placement -----
+    // The pill is not movable: it always sits at the top centre of the primary
+    // display's work area. Called once, before the first show.
+    void PlacePillAtHome();
     double DpiScale() const noexcept;
-    void SnapToNearestEdgeIfClose();
-    void RememberPosition();
-    void UpdateAnchorFromWindow();
 
     // ----- Visibility -----
     void ShowWindow();
@@ -150,9 +143,8 @@ private:
     ::yip::RecordingStateBus::Token m_stateToken{0};
     winrt::event_token m_themeToken{};
 
-    // The physical-pixel point the pill is sized around: its top centre while
-    // floating or docked top, the docked edge's midpoint otherwise. Resizing
-    // around it is what keeps a centred pill centred when it expands.
+    // The physical-pixel point the pill is sized around: its top centre.
+    // Resizing around it is what keeps a centred pill centred when it expands.
     POINT m_anchor{};
 
     // Bumped on every transition. A motion's completion handler only acts if
@@ -192,12 +184,6 @@ private:
     winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_savingTimer{nullptr};
     winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_meterTimer{nullptr};
     winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_collapseTimer{nullptr};
-
-    // Drag state
-    bool m_dragging{false};
-    winrt::Windows::Foundation::Point m_dragOrigin{};
-    winrt::Windows::Foundation::Point m_windowOriginAtDragStart{};
-    bool m_movedDuringPress{false};
 
     // Last state delivered by the bus. Cheaper than asking audio-core again
     // from inside a transition.

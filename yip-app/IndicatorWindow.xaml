@@ -21,11 +21,7 @@
             BorderThickness="1"
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
-            ManipulationMode="TranslateX,TranslateY"
             PointerPressed="OnPillPointerPressed"
-            PointerMoved="OnPillPointerMoved"
-            PointerReleased="OnPillPointerReleased"
-            PointerCaptureLost="OnPillPointerCaptureLost"
             Tapped="OnPillTapped">
 
             <Grid x:Name="PillContent" Padding="{StaticResource YipIndicatorPadding}">
