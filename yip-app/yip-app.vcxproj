@@ -173,6 +173,8 @@
     <ClCompile Include="Markers.cpp" />
     <ClCompile Include="HotkeyManager.cpp" />
     <ClCompile Include="RecordingStateBus.cpp" />
+    <ClCompile Include="TrayIcon.cpp" />
+    <ClCompile Include="SingleInstance.cpp" />
     <ClCompile Include="WavProbe.cpp" />
     <ClCompile Include="ThemeColors.cpp" />
   </ItemGroup>
@@ -203,6 +205,8 @@
     <ClInclude Include="Markers.h" />
     <ClInclude Include="HotkeyManager.h" />
     <ClInclude Include="RecordingStateBus.h" />
+    <ClInclude Include="TrayIcon.h" />
+    <ClInclude Include="SingleInstance.h" />
     <ClInclude Include="WavProbe.h" />
     <ClInclude Include="ThemeColors.h" />
   </ItemGroup>
