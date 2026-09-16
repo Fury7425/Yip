@@ -5,24 +5,27 @@
 #include "IndicatorWindow.g.cpp"
 #endif
 
-#include "Settings.h"
 #include "ThemeColors.h"
 
 #include <DispatcherQueue.h>
 #include <dwmapi.h>
 #include <microsoft.ui.xaml.window.h>
+#include <windows.graphics.effects.interop.h>
 #include <winrt/Microsoft.UI.h>
 #include <winrt/Microsoft.UI.Composition.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
 #include <winrt/Microsoft.UI.Input.h>
 #include <winrt/Microsoft.UI.Windowing.h>
+#include <winrt/Microsoft.UI.Xaml.Automation.h>
 #include <winrt/Microsoft.UI.Xaml.Hosting.h>
 #include <winrt/Microsoft.UI.Xaml.Input.h>
 #include <winrt/Microsoft.UI.Xaml.Media.h>
+#include <winrt/Windows.Graphics.Effects.h>
 #include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.h>
 #include <winrt/Windows.UI.Composition.h>
 #include <winrt/Windows.UI.Core.h>
+#include <winrt/Windows.UI.ViewManagement.h>
 
 #include <algorithm>
 #include <cmath>
@@ -37,6 +40,9 @@ namespace muxi = winrt::Microsoft::UI::Xaml::Input;
 namespace mucomp = winrt::Microsoft::UI::Composition;
 namespace muw = winrt::Microsoft::UI::Windowing;
 namespace muxd = winrt::Microsoft::UI::Dispatching;
+namespace wuc = winrt::Windows::UI::Composition;
+namespace wge = winrt::Windows::Graphics::Effects;
+namespace abi_ge = ABI::Windows::Graphics::Effects;
 using winrt::Windows::Foundation::Numerics::float2;
 using winrt::Windows::Foundation::Numerics::float3;
 
@@ -170,27 +176,35 @@ AnchorFraction AnchorFor(::yip::DockEdge edge) noexcept
     }
 }
 
+// The curves and animation helpers are templated over the compositor: the XAML
+// compositor draws the pill, the system compositor draws the blur behind it,
+// and the two have to move on the same curve.
+
 // CubicBezier(0.4, 0.0, 0.2, 1.0) — Fluent standard easing, for the meter.
-mucomp::CompositionEasingFunction StandardEase(mucomp::Compositor const& c)
+template <typename Compositor>
+auto StandardEase(Compositor const& c)
 {
     return c.CreateCubicBezierEasingFunction(float2{0.4f, 0.0f}, float2{0.2f, 1.0f});
 }
 
 // Strong ease-out for anything entering, leaving or answering a click.
-mucomp::CompositionEasingFunction StrongEaseOut(mucomp::Compositor const& c)
+template <typename Compositor>
+auto StrongEaseOut(Compositor const& c)
 {
     return c.CreateCubicBezierEasingFunction(float2{0.23f, 1.0f}, float2{0.32f, 1.0f});
 }
 
 // Drawer-style curve for the capsule changing size on screen: quick off the
 // mark, long soft landing.
-mucomp::CompositionEasingFunction MorphEase(mucomp::Compositor const& c)
+template <typename Compositor>
+auto MorphEase(Compositor const& c)
 {
     return c.CreateCubicBezierEasingFunction(float2{0.32f, 0.72f}, float2{0.0f, 1.0f});
 }
 
-void AnimateScalar(mucomp::Compositor const& c, mucomp::CompositionObject const& target, wchar_t const* property,
-                   float to, int ms, mucomp::CompositionEasingFunction const& ease, int delayMs = 0)
+template <typename Compositor, typename Target, typename Ease>
+void AnimateScalar(Compositor const& c, Target const& target, wchar_t const* property, float to, int ms,
+                   Ease const& ease, int delayMs = 0)
 {
     auto anim = c.CreateScalarKeyFrameAnimation();
     anim.InsertKeyFrame(1.0f, to, ease);
@@ -199,8 +213,9 @@ void AnimateScalar(mucomp::Compositor const& c, mucomp::CompositionObject const&
     target.StartAnimation(property, anim);
 }
 
-void AnimateVector2(mucomp::Compositor const& c, mucomp::CompositionObject const& target, wchar_t const* property,
-                    float2 to, int ms, mucomp::CompositionEasingFunction const& ease)
+template <typename Compositor, typename Target, typename Ease>
+void AnimateVector2(Compositor const& c, Target const& target, wchar_t const* property, float2 to, int ms,
+                    Ease const& ease)
 {
     auto anim = c.CreateVector2KeyFrameAnimation();
     anim.InsertKeyFrame(1.0f, to, ease);
@@ -208,8 +223,9 @@ void AnimateVector2(mucomp::Compositor const& c, mucomp::CompositionObject const
     target.StartAnimation(property, anim);
 }
 
-void AnimateVector3(mucomp::Compositor const& c, mucomp::CompositionObject const& target, wchar_t const* property,
-                    float3 to, int ms, mucomp::CompositionEasingFunction const& ease, int delayMs = 0)
+template <typename Compositor, typename Target, typename Ease>
+void AnimateVector3(Compositor const& c, Target const& target, wchar_t const* property, float3 to, int ms,
+                    Ease const& ease, int delayMs = 0)
 {
     auto anim = c.CreateVector3KeyFrameAnimation();
     anim.InsertKeyFrame(1.0f, to, ease);
@@ -230,6 +246,71 @@ void SetTranslation(mux::UIElement const& element, float dx, float dy)
 // Shown only if a token key is wrong. A deliberate flat grey rather than a
 // second copy of the palette, so a miss is visible instead of plausible.
 constexpr winrt::Windows::UI::Color kMissingToken{0xFF, 0x80, 0x80, 0x80};
+
+// CLSID_D2D1AlphaMask, spelled out so one GUID does not pull in d2d1effects_2.h
+// and a dxguid.lib link.
+constexpr GUID kAlphaMaskEffectId{0xc80ecff0, 0x3fd5, 0x4f05, {0x83, 0x28, 0xc5, 0xd1, 0x72, 0x4b, 0x4f, 0x0a}};
+
+/// Direct2D's alpha-mask effect as a composition effect graph: source 0 is
+/// multiplied by the alpha of source 1. Composition reads the effect through
+/// the D2D1 interop metadata, which Win2D would normally provide; the project
+/// has no Win2D, so this is that metadata by hand.
+struct AlphaMaskEffect : winrt::implements<AlphaMaskEffect, wge::IGraphicsEffect, wge::IGraphicsEffectSource,
+                                           abi_ge::IGraphicsEffectD2D1Interop> {
+    AlphaMaskEffect(wge::IGraphicsEffectSource source, wge::IGraphicsEffectSource mask)
+        : m_sources{std::move(source), std::move(mask)}
+    {
+    }
+
+    winrt::hstring Name() const { return m_name; }
+    void Name(winrt::hstring const& name) { m_name = name; }
+
+    HRESULT STDMETHODCALLTYPE GetEffectId(GUID* id) noexcept override
+    {
+        if (!id) return E_POINTER;
+        *id = kAlphaMaskEffectId;
+        return S_OK;
+    }
+
+    // The effect has no properties, so there is nothing to name or animate.
+    HRESULT STDMETHODCALLTYPE GetNamedPropertyMapping(LPCWSTR, UINT*,
+                                                      abi_ge::GRAPHICS_EFFECT_PROPERTY_MAPPING*) noexcept override
+    {
+        return E_INVALIDARG;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetPropertyCount(UINT* count) noexcept override
+    {
+        if (!count) return E_POINTER;
+        *count = 0;
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetProperty(UINT, ABI::Windows::Foundation::IPropertyValue**) noexcept override
+    {
+        return E_BOUNDS;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetSource(UINT index, abi_ge::IGraphicsEffectSource** source) noexcept override
+    {
+        if (!source) return E_POINTER;
+        if (index >= m_sources.size()) return E_BOUNDS;
+        wge::IGraphicsEffectSource copy = m_sources[index];
+        *source = static_cast<abi_ge::IGraphicsEffectSource*>(winrt::detach_abi(copy));
+        return S_OK;
+    }
+
+    HRESULT STDMETHODCALLTYPE GetSourceCount(UINT* count) noexcept override
+    {
+        if (!count) return E_POINTER;
+        *count = static_cast<UINT>(m_sources.size());
+        return S_OK;
+    }
+
+private:
+    winrt::hstring m_name;
+    std::array<wge::IGraphicsEffectSource, 2> m_sources;
+};
 } // namespace
 
 namespace winrt::yip::implementation {
@@ -250,11 +331,12 @@ IndicatorWindow::IndicatorWindow()
     // and the default corner preference with it.
     ApplyFrameless();
 
-    // No acrylic. DWM draws a system backdrop across the whole window
+    // Not acrylic. DWM draws a system backdrop across the whole window
     // rectangle, rounded only by its own 8px corner and ignoring the window
-    // region, so behind a capsule it showed as light corners and a light rim.
-    // A transparent backdrop leaves the Border as the only thing drawn.
-    ApplyTransparentBackdrop();
+    // region, so behind a capsule acrylic showed as light corners and a light
+    // rim. The blur is cut to the capsule by an alpha mask instead, and outside
+    // the capsule the window stays fully transparent.
+    ApplyBackdrop();
 
     BuildCompositionLayer();
     ApplyClickThrough(m_persisted.click_through);
@@ -298,6 +380,14 @@ IndicatorWindow::IndicatorWindow()
         }
     });
 
+    // Transparency effects can be switched off in Settings or by power policy,
+    // and the blur has to follow. The event arrives on a worker thread.
+    m_effectsToken = m_uiSettings.AdvancedEffectsEnabledChanged([weak = get_weak(), dq](auto&&, auto&&) {
+        dq.TryEnqueue([weak] {
+            if (auto self = weak.get()) self->ApplyBackdrop();
+        });
+    });
+
     // A theme flip has to reach the composition brushes too — they are not
     // {ThemeResource} bindings, they are colours copied at build time.
     m_themeToken = Root().ActualThemeChanged({this, &IndicatorWindow::OnActualThemeChanged});
@@ -319,6 +409,10 @@ IndicatorWindow::~IndicatorWindow()
     if (m_themeToken) {
         Root().ActualThemeChanged(m_themeToken);
         m_themeToken = {};
+    }
+    if (m_effectsToken) {
+        m_uiSettings.AdvancedEffectsEnabledChanged(m_effectsToken);
+        m_effectsToken = {};
     }
     if (m_savingTimer) m_savingTimer.Stop();
     if (m_meterTimer) m_meterTimer.Stop();
@@ -366,7 +460,7 @@ void IndicatorWindow::ApplyFrameless()
     (void)::DwmSetWindowAttribute(m_hwnd, DWMWA_BORDER_COLOR, &noBorder, sizeof(noBorder));
 }
 
-void IndicatorWindow::ApplyTransparentBackdrop()
+void IndicatorWindow::ApplyBackdrop()
 {
     auto target = try_as<mucomp::ICompositionSupportsSystemBackdrop>();
     if (!target) return;
@@ -382,12 +476,24 @@ void IndicatorWindow::ApplyTransparentBackdrop()
             return;
         }
     }
-    if (!m_backdropCompositor) m_backdropCompositor = winrt::Windows::UI::Composition::Compositor{};
-    target.SystemBackdrop(m_backdropCompositor.CreateColorBrush(winrt::Microsoft::UI::Colors::Transparent()));
+    if (!m_backdropCompositor) m_backdropCompositor = wuc::Compositor{};
 
-    // A transparent brush alone still composites onto black. Blur-behind with
-    // a region entirely off the window is what turns on per-pixel alpha for
-    // the window's content; nothing is actually blurred.
+    // With transparency effects off the host backdrop stops being translucent,
+    // so there is nothing worth masking: a transparent backdrop and the denser
+    // tint, as before the blur existed.
+    const bool wantBlur = m_uiSettings.AdvancedEffectsEnabled();
+    if (wantBlur && !m_blurBrush) BuildBackdropBrush();
+    m_blurActive = wantBlur && m_blurBrush;
+    if (m_blurActive) {
+        target.SystemBackdrop(m_blurBrush);
+    } else {
+        target.SystemBackdrop(m_backdropCompositor.CreateColorBrush(winrt::Microsoft::UI::Colors::Transparent()));
+    }
+    ApplySurfaceTint();
+
+    // Either brush alone still composites onto black. DWM's own blur-behind,
+    // with a region entirely off the window, is what turns on per-pixel alpha
+    // for the window's content; DWM itself blurs nothing.
     if (m_hwnd) {
         DWM_BLURBEHIND blur{};
         blur.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
@@ -396,6 +502,64 @@ void IndicatorWindow::ApplyTransparentBackdrop()
         (void)::DwmEnableBlurBehindWindow(m_hwnd, &blur);
         if (blur.hRgnBlur) ::DeleteObject(blur.hRgnBlur);
     }
+}
+
+void IndicatorWindow::BuildBackdropBrush()
+{
+    auto const& c = m_backdropCompositor;
+    try {
+        // The mask is a capsule drawn into a visual surface. The DPI container
+        // rasterises it at physical pixels, so its antialiased edge lines up
+        // with the Border's; the shape visual under it mirrors the pill's
+        // opacity and scale.
+        auto shape = c.CreateRoundedRectangleGeometry();
+        auto fill = c.CreateSpriteShape(shape);
+        // Not a colour on screen: to the mask, opaque white just means alpha 1.
+        fill.FillBrush(c.CreateColorBrush(winrt::Microsoft::UI::Colors::White()));
+        auto visual = c.CreateShapeVisual();
+        visual.Shapes().Append(fill);
+        auto dpi = c.CreateContainerVisual();
+        dpi.Children().InsertAtTop(visual);
+        auto root = c.CreateContainerVisual();
+        root.Children().InsertAtTop(dpi);
+        auto surface = c.CreateVisualSurface();
+        surface.SourceVisual(root);
+        auto mask = c.CreateSurfaceBrush(surface);
+        mask.Stretch(wuc::CompositionStretch::Fill);
+
+        // The host backdrop arrives already blurred by the shell; the effect
+        // only cuts it to the capsule.
+        auto effect = winrt::make<AlphaMaskEffect>(wuc::CompositionEffectSourceParameter{L"Backdrop"},
+                                                   wuc::CompositionEffectSourceParameter{L"Mask"});
+        auto brush = c.CreateEffectFactory(effect).CreateBrush();
+        brush.SetSourceParameter(L"Backdrop", c.CreateHostBackdropBrush());
+        brush.SetSourceParameter(L"Mask", mask);
+
+        // Rebuilt mid-take when effects come back on: start where the pill is.
+        auto pill = PillVisual();
+        visual.Opacity(pill.Opacity());
+        visual.Scale(pill.Scale());
+        visual.CenterPoint(pill.CenterPoint());
+
+        m_maskShape = shape;
+        m_maskVisual = visual;
+        m_maskDpi = dpi;
+        m_maskRoot = root;
+        m_maskSurface = surface;
+        m_backdropEaseOut = StrongEaseOut(c);
+        m_backdropEaseMorph = MorphEase(c);
+        m_blurBrush = brush;
+        ResetBackdropShape();
+    } catch (winrt::hresult_error const&) {
+        // No effect support on this compositor: stay on the transparent backdrop.
+        m_blurBrush = nullptr;
+    }
+}
+
+void IndicatorWindow::ApplySurfaceTint()
+{
+    PillFrame().Background(
+        ::yip::theme::Brush(m_blurActive ? L"YipIndicatorSurfaceBlurredBrush" : L"YipIndicatorSurfaceBrush"));
 }
 
 void IndicatorWindow::ApplyAlwaysOnTop()
@@ -497,6 +661,14 @@ void IndicatorWindow::UpdateFromMeter()
     RecMeter snapshot{};
     if (::rec_meter(&snapshot) != REC_STATUS_OK) return;
 
+    // Pause is not on the state bus — a held take has not ended — so the
+    // snapshot is where the UI finds out, including when something other than
+    // this button did it.
+    if (const bool paused = snapshot.paused != 0; paused != m_paused) {
+        m_paused = paused;
+        ApplyPausedVisuals();
+    }
+
     UpdateMeterBars(MeterNorm(snapshot.peak), snapshot.clip_count > 0);
 
     auto text = winrt::hstring{FormatPillElapsed(snapshot.elapsed_ms)};
@@ -542,8 +714,10 @@ void IndicatorWindow::UpdateDotForState(::yip::IndicatorState s)
 {
     if (!m_dotVisual) return;
     // Expanding the pill mid-take is still a live take: the lamp stays red.
-    const bool live = (s == ::yip::IndicatorState::Recording) ||
-                      (s == ::yip::IndicatorState::Expanded && m_recording);
+    // A paused one is not — nothing is reaching the file, so the lamp goes
+    // neutral and stops pulsing.
+    const bool live = !m_paused && ((s == ::yip::IndicatorState::Recording) ||
+                                    (s == ::yip::IndicatorState::Expanded && m_recording));
     m_dotVisual.Brush(live ? m_dotRecordBrush : m_dotNeutralBrush);
 
     // Pulse opacity gently during recording for "alive" feel.
@@ -559,6 +733,21 @@ void IndicatorWindow::UpdateDotForState(::yip::IndicatorState s)
         m_dotVisual.StopAnimation(L"Opacity");
         m_dotVisual.Opacity(1.0f);
     }
+}
+
+void IndicatorWindow::ApplyPausedVisuals()
+{
+    // Segoe Fluent Icons: E768 Play, E769 Pause. The button shows what the
+    // next click does, which is the opposite of what the session is doing.
+    PauseGlyph().Glyph(m_paused ? L"\uE768" : L"\uE769");
+
+    // Braces, not `=`: copy-init from a literal would need two user-defined
+    // conversions to reach hstring.
+    winrt::hstring const label{m_paused ? L"Resume" : L"Pause"};
+    mux::Automation::AutomationProperties::SetName(PauseButton(), label);
+    muxc::ToolTipService::SetToolTip(PauseButton(), winrt::box_value(label));
+
+    UpdateDotForState(m_state);
 }
 
 void IndicatorWindow::StopMeterAnimations()
@@ -580,6 +769,8 @@ void IndicatorWindow::OnActualThemeChanged(winrt::Microsoft::UI::Xaml::Framework
                                            winrt::Windows::Foundation::IInspectable const& /*args*/)
 {
     ResolveThemeBrushes();
+    // Set from code, so it is a local value rather than a {ThemeResource}.
+    ApplySurfaceTint();
 }
 
 void IndicatorWindow::ResolveThemeBrushes()
@@ -623,6 +814,13 @@ void IndicatorWindow::OnRecordingStateChanged(bool recording)
 {
     if (m_recording == recording) return;
     m_recording = recording;
+
+    // Neither end of a session is ever paused. Land that before anything below
+    // repaints the dot.
+    if (m_paused) {
+        m_paused = false;
+        ApplyPausedVisuals();
+    }
 
     if (recording) {
         if (m_savingTimer) m_savingTimer.Stop();
@@ -700,12 +898,10 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
         return;
     }
     ApplyLayoutFor(s);
-    auto pill = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
-    pill.StopAnimation(L"Opacity");
-    pill.Opacity(GeometryFor(s).opacity);
+    SetPillFade(GeometryFor(s).opacity, 1.0f);
 }
 
-void IndicatorWindow::ApplyLayoutFor(::yip::IndicatorState s)
+void IndicatorWindow::ApplyLayoutFor(::yip::IndicatorState s, ClipPolicy clip)
 {
     // Collapsed, not transparent: at Opacity 0 the buttons still took their
     // width, which pushed the readout off centre.
@@ -718,14 +914,38 @@ void IndicatorWindow::ApplyLayoutFor(::yip::IndicatorState s)
     actions.Opacity(1.0f);
     SetTranslation(ExpandedActions(), 0.0f, 0.0f);
     SetTranslation(ReadoutGroup(), 0.0f, 0.0f);
-    ClearClip();
+    if (clip == ClipPolicy::Clear) {
+        ClearClip();
+        m_morphing = false;
+    }
 
-    SyncWindowToState(s);
+    SyncWindowToState(s, clip);
 }
 
-void IndicatorWindow::SyncWindowToState(::yip::IndicatorState s)
+void IndicatorWindow::SyncWindowToState(::yip::IndicatorState s, ClipPolicy clip)
 {
     const auto g = GeometryFor(s);
+
+    // Border first, HWND last, always. MoveAndResize dispatches WM_SIZE
+    // synchronously and the XAML island can commit a frame off the back of it;
+    // everything that describes the new size has to be in place before that
+    // happens, or that one frame shows the old capsule in the new window.
+    //
+    // No window region either: it is aliased, so it chewed the Border's
+    // antialiased edge into a stepped rim, and with a transparent backdrop
+    // there is nothing outside the capsule for it to hide.
+    const double radius = g.h * 0.5;
+    PillFrame().Width(g.w);
+    PillFrame().Height(g.h);
+    PillFrame().CornerRadius({radius, radius, radius, radius});
+
+    // Keep means a morph owns the mask's capsule right now: the surface still
+    // has to grow with the window, but the shape drawn into it is animating
+    // and must not be snapped to the new size under it.
+    if (clip == ClipPolicy::Clear)
+        ResetBackdropShape();
+    else
+        SyncBackdropSurface();
 
     // The window is the pill. The HWND is sized in physical pixels while the
     // geometry is DIPs: unscaled, a pill at 200% got half a window and lost
@@ -746,14 +966,6 @@ void IndicatorWindow::SyncWindowToState(::yip::IndicatorState s)
             if (appWindow) appWindow.MoveAndResize({x, y, pw, ph});
         }
     }
-
-    // No window region: it is aliased, so it chewed the Border's antialiased
-    // edge into a stepped rim, and with a transparent backdrop there is
-    // nothing outside the capsule for it to hide.
-    const double radius = g.h * 0.5;
-    PillFrame().Width(g.w);
-    PillFrame().Height(g.h);
-    PillFrame().CornerRadius({radius, radius, radius, radius});
 }
 
 // =========================================================== Motion
@@ -766,26 +978,21 @@ void IndicatorWindow::ShowPill(bool animate)
 
     // Grows out of its anchor — down from the top edge it is pinned to, not
     // outward from its middle.
-    auto pill = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
-    pill.StopAnimation(L"Opacity");
-    pill.StopAnimation(L"Scale");
-    pill.CenterPoint({g.w * anchor.x, g.h * anchor.y, 0.0f});
+    SetPillCentre(g.w * anchor.x, g.h * anchor.y);
 
     if (!animate) {
-        pill.Opacity(g.opacity);
-        pill.Scale({1.0f, 1.0f, 1.0f});
+        SetPillFade(g.opacity, 1.0f);
         if (!m_windowVisible) ShowWindow();
         return;
     }
 
     // A pill still fading out is picked up from wherever it has got to.
     if (!m_windowVisible) {
-        pill.Opacity(0.0f);
-        pill.Scale({kShowScale, kShowScale, 1.0f});
+        SetPillFade(0.0f, kShowScale);
         ShowWindow();
     }
-    AnimateScalar(m_compositor, pill, L"Opacity", g.opacity, kShowMs, m_easeOut);
-    AnimateVector3(m_compositor, pill, L"Scale", {1.0f, 1.0f, 1.0f}, kShowMs, m_easeOut);
+    AnimatePillOpacity(g.opacity, kShowMs);
+    AnimatePillScale(1.0f, kShowMs);
 }
 
 void IndicatorWindow::HidePill(bool animate)
@@ -800,13 +1007,12 @@ void IndicatorWindow::HidePill(bool animate)
     const auto anchor = AnchorFor(m_persisted.dock_edge);
     const auto w = static_cast<float>(PillFrame().Width());
     const auto h = static_cast<float>(PillFrame().Height());
-    auto pill = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
-    pill.CenterPoint({w * anchor.x, h * anchor.y, 0.0f});
+    SetPillCentre(w * anchor.x, h * anchor.y);
 
     const auto gen = m_motionGen;
     auto batch = m_compositor.CreateScopedBatch(mucomp::CompositionBatchTypes::Animation);
-    AnimateScalar(m_compositor, pill, L"Opacity", 0.0f, kHideMs, m_easeOut);
-    AnimateVector3(m_compositor, pill, L"Scale", {kHideScale, kHideScale, 1.0f}, kHideMs, m_easeOut);
+    AnimatePillOpacity(0.0f, kHideMs);
+    AnimatePillScale(kHideScale, kHideMs);
     batch.End();
     batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
         if (auto self = weak.get(); self && self->m_motionGen == gen && !self->m_shown) {
@@ -817,13 +1023,21 @@ void IndicatorWindow::HidePill(bool animate)
 
 void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorState to)
 {
+    // A morph already in flight left the HWND at one size and the clip
+    // somewhere between two others. Land it before anything below measures:
+    // `a` has to be a size the pill actually has, or the capsule jumps to a
+    // width it never had and morphs out of that.
+    if (m_morphing) {
+        ApplyLayoutFor(from);
+        PillFrame().UpdateLayout();
+    }
+
     const auto a = GeometryFor(from);
     const auto b = GeometryFor(to);
-    auto pill = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
 
     if (a.w == b.w && a.h == b.h) {
         ApplyLayoutFor(to);
-        AnimateScalar(m_compositor, pill, L"Opacity", b.opacity, kFadeMs, m_easeOut);
+        AnimatePillOpacity(b.opacity, kFadeMs);
         return;
     }
 
@@ -841,19 +1055,21 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
     const auto gen = m_motionGen;
 
     auto batch = m_compositor.CreateScopedBatch(mucomp::CompositionBatchTypes::Animation);
-    AnimateScalar(m_compositor, pill, L"Opacity", b.opacity, kFadeMs, m_easeOut);
+    AnimatePillOpacity(b.opacity, kFadeMs);
 
     if (dw >= 0.0f) {
-        // Opening: take the new layout now, then hold it inside the old outline
-        // and let the outline go.
-        ApplyLayoutFor(to);
+        // Opening: hold the old outline first, *then* take the new layout, then
+        // let the outline go. Clipping before the resize is the whole point —
+        // the resize can render a frame on its own, and with no clip installed
+        // that frame is the full expanded capsule appearing out of nowhere.
+        SetClip(a.w, a.h, dw * anchor.x, dh * anchor.y);
+        ApplyLayoutFor(to, ClipPolicy::Keep);
         PillFrame().UpdateLayout();
         const auto after = ReadoutCentre();
 
         SetTranslation(ReadoutGroup(), before.X - after.X + dw * anchor.x, before.Y - after.Y + dh * anchor.y);
         AnimateVector3(m_compositor, readout, L"Translation", {0.0f, 0.0f, 0.0f}, kMorphMs, m_easeMorph);
 
-        SetClip(a.w, a.h, dw * anchor.x, dh * anchor.y);
         AnimateClip(b.w, b.h, 0.0f, 0.0f);
 
         // The buttons arrive once there is room for them, sliding out from
@@ -866,13 +1082,20 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
 
         batch.End();
         batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
-            if (auto self = weak.get(); self && self->m_motionGen == gen) self->ClearClip();
+            if (auto self = weak.get(); self && self->m_motionGen == gen) {
+                self->ClearClip();
+                self->m_morphing = false;
+            }
         });
+        m_morphing = true;
         return;
     }
 
     // Closing: the buttons leave first, the outline closes over them, and only
-    // then does the window shrink and the layout change underneath.
+    // then does the window shrink and the layout change underneath. Hit
+    // testing goes with the fade, not with the layout pass 170 ms later — a
+    // button nobody can see must not still be a button.
+    ExpandedActions().IsHitTestVisible(false);
     AnimateScalar(m_compositor, actions, L"Opacity", 0.0f, kActionsOutMs, m_easeOut);
 
     // In the collapsed layout the readout is centred in the new outline.
@@ -887,6 +1110,7 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
     batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
         if (auto self = weak.get(); self && self->m_motionGen == gen) self->ApplyLayoutFor(self->m_state);
     });
+    m_morphing = true;
 }
 
 void IndicatorWindow::SetClip(float w, float h, float x, float y)
@@ -898,7 +1122,8 @@ void IndicatorWindow::SetClip(float w, float h, float x, float y)
     m_clipGeometry.Size({w, h});
     m_clipGeometry.Offset({x, y});
     m_clipGeometry.CornerRadius({h * 0.5f, h * 0.5f});
-    muxh::ElementCompositionPreview::GetElementVisual(PillFrame()).Clip(m_clip);
+    PillVisual().Clip(m_clip);
+    SetBackdropShape(w, h, x, y);
 }
 
 void IndicatorWindow::AnimateClip(float w, float h, float x, float y)
@@ -907,6 +1132,12 @@ void IndicatorWindow::AnimateClip(float w, float h, float x, float y)
     AnimateVector2(m_compositor, m_clipGeometry, L"Size", {w, h}, kMorphMs, m_easeMorph);
     AnimateVector2(m_compositor, m_clipGeometry, L"Offset", {x, y}, kMorphMs, m_easeMorph);
     AnimateVector2(m_compositor, m_clipGeometry, L"CornerRadius", {h * 0.5f, h * 0.5f}, kMorphMs, m_easeMorph);
+
+    if (!m_maskShape) return;
+    AnimateVector2(m_backdropCompositor, m_maskShape, L"Size", {w, h}, kMorphMs, m_backdropEaseMorph);
+    AnimateVector2(m_backdropCompositor, m_maskShape, L"Offset", {x, y}, kMorphMs, m_backdropEaseMorph);
+    AnimateVector2(m_backdropCompositor, m_maskShape, L"CornerRadius", {h * 0.5f, h * 0.5f}, kMorphMs,
+                   m_backdropEaseMorph);
 }
 
 void IndicatorWindow::ClearClip()
@@ -915,7 +1146,88 @@ void IndicatorWindow::ClearClip()
     m_clipGeometry.StopAnimation(L"Size");
     m_clipGeometry.StopAnimation(L"Offset");
     m_clipGeometry.StopAnimation(L"CornerRadius");
-    muxh::ElementCompositionPreview::GetElementVisual(PillFrame()).Clip(nullptr);
+    PillVisual().Clip(nullptr);
+    // Set, not merely stopped: the mask runs on the other compositor and may
+    // still be a frame short of where the clip landed.
+    ResetBackdropShape();
+}
+
+mucomp::Visual IndicatorWindow::PillVisual()
+{
+    return muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
+}
+
+void IndicatorWindow::SetPillCentre(float x, float y)
+{
+    PillVisual().CenterPoint({x, y, 0.0f});
+    if (m_maskVisual) m_maskVisual.CenterPoint({x, y, 0.0f});
+}
+
+void IndicatorWindow::SetPillFade(float opacity, float scale)
+{
+    const auto land = [opacity, scale](auto const& visual) {
+        visual.StopAnimation(L"Opacity");
+        visual.StopAnimation(L"Scale");
+        visual.Opacity(opacity);
+        visual.Scale({scale, scale, 1.0f});
+    };
+    land(PillVisual());
+    if (m_maskVisual) land(m_maskVisual);
+}
+
+void IndicatorWindow::AnimatePillOpacity(float to, int ms)
+{
+    AnimateScalar(m_compositor, PillVisual(), L"Opacity", to, ms, m_easeOut);
+    if (m_maskVisual) AnimateScalar(m_backdropCompositor, m_maskVisual, L"Opacity", to, ms, m_backdropEaseOut);
+}
+
+void IndicatorWindow::AnimatePillScale(float to, int ms)
+{
+    AnimateVector3(m_compositor, PillVisual(), L"Scale", {to, to, 1.0f}, ms, m_easeOut);
+    if (m_maskVisual) {
+        AnimateVector3(m_backdropCompositor, m_maskVisual, L"Scale", {to, to, 1.0f}, ms, m_backdropEaseOut);
+    }
+}
+
+void IndicatorWindow::SetBackdropShape(float w, float h, float x, float y)
+{
+    if (!m_maskShape) return;
+    m_maskShape.StopAnimation(L"Size");
+    m_maskShape.StopAnimation(L"Offset");
+    m_maskShape.StopAnimation(L"CornerRadius");
+    m_maskShape.Size({w, h});
+    m_maskShape.Offset({x, y});
+    m_maskShape.CornerRadius({h * 0.5f, h * 0.5f});
+}
+
+void IndicatorWindow::SyncBackdropSurface()
+{
+    if (!m_maskSurface) return;
+    const auto w = static_cast<float>(PillFrame().Width());
+    const auto h = static_cast<float>(PillFrame().Height());
+    if (!(w > 0.0f && h > 0.0f)) return; // NaN until the first SyncWindowToState
+
+    // The surface is the window's size in physical pixels and the shape is in
+    // DIPs, scaled up by the DPI container. The brush's Fill stretch then maps
+    // the surface onto the window exactly, whatever units the backdrop is
+    // painted in.
+    const auto scale = static_cast<float>(DpiScale());
+    const float2 px{w * scale, h * scale};
+    m_maskSurface.SourceSize(px);
+    m_maskRoot.Size(px);
+    m_maskDpi.Size({w, h});
+    m_maskDpi.Scale({scale, scale, 1.0f});
+    m_maskVisual.Size({w, h});
+}
+
+void IndicatorWindow::ResetBackdropShape()
+{
+    SyncBackdropSurface();
+    if (!m_maskShape) return;
+    const auto w = static_cast<float>(PillFrame().Width());
+    const auto h = static_cast<float>(PillFrame().Height());
+    if (!(w > 0.0f && h > 0.0f)) return;
+    SetBackdropShape(w, h, 0.0f, 0.0f);
 }
 
 winrt::Windows::Foundation::Point IndicatorWindow::ReadoutCentre()
@@ -954,6 +1266,12 @@ void IndicatorWindow::OnPillPointerPressed(winrt::Windows::Foundation::IInspecta
 
     PillFrame().CapturePointer(args.Pointer());
     m_dragging = true;
+
+    // Hold the pill open for as long as the pointer is down. A drag that takes
+    // longer than the auto-collapse used to collapse under the cursor, and the
+    // morph's closing layout pass then fought the drag for the window's
+    // position.
+    StopAutoCollapseTimer();
 }
 
 void IndicatorWindow::OnPillPointerMoved(winrt::Windows::Foundation::IInspectable const& /*sender*/,
@@ -992,12 +1310,20 @@ void IndicatorWindow::OnPillPointerReleased(winrt::Windows::Foundation::IInspect
         // The dock edge may have changed, and with it which point is the anchor.
         UpdateAnchorFromWindow();
     }
+
+    // The tap handler runs after this and starts the clock for an expansion;
+    // this restarts it for a pill that was already expanded when the press
+    // began (a drag, or a press that went nowhere).
+    if (m_state == ::yip::IndicatorState::Expanded) ResetAutoCollapseTimer();
 }
 
 void IndicatorWindow::OnPillPointerCaptureLost(winrt::Windows::Foundation::IInspectable const& /*sender*/,
                                                muxi::PointerRoutedEventArgs const& /*args*/)
 {
     m_dragging = false;
+    // Capture can be lost without a release; the pill would otherwise stay
+    // expanded forever on a timer that was stopped by the press.
+    if (m_state == ::yip::IndicatorState::Expanded) ResetAutoCollapseTimer();
 }
 
 void IndicatorWindow::OnPillTapped(winrt::Windows::Foundation::IInspectable const& /*sender*/,
@@ -1023,42 +1349,21 @@ void IndicatorWindow::OnStopClicked(winrt::Windows::Foundation::IInspectable con
     ResetAutoCollapseTimer();
 }
 
-void IndicatorWindow::OnOpenLastClicked(winrt::Windows::Foundation::IInspectable const& /*sender*/,
-                                        mux::RoutedEventArgs const& /*args*/)
+void IndicatorWindow::OnPauseClicked(winrt::Windows::Foundation::IInspectable const& /*sender*/,
+                                    mux::RoutedEventArgs const& /*args*/)
 {
-    std::wstring target;
-    if (::rec_is_recording()) {
-        const char* p = ::rec_current_path();
-        if (p) {
-            const int n = ::MultiByteToWideChar(CP_UTF8, 0, p, -1, nullptr, 0);
-            if (n > 0) {
-                target.resize(static_cast<size_t>(n) - 1);
-                ::MultiByteToWideChar(CP_UTF8, 0, p, -1, target.data(), n);
-            }
-        }
-    }
-    if (target.empty()) {
-        // Last-modified .wav in the output folder.
-        const auto root = ::yip::Settings::Load().output_folder;
-        std::error_code ec;
-        std::filesystem::file_time_type best{};
-        std::filesystem::path bestPath;
-        for (auto const& e : std::filesystem::directory_iterator(root, ec)) {
-            if (ec) break;
-            if (!e.is_regular_file()) continue;
-            if (e.path().extension() != L".wav") continue;
-            const auto t = std::filesystem::last_write_time(e.path(), ec);
-            if (bestPath.empty() || t > best) {
-                best = t;
-                bestPath = e.path();
-            }
-        }
-        if (!bestPath.empty()) target = bestPath.wstring();
-    }
-    if (target.empty()) return;
+    // Both calls are idempotent and refuse a dead session, so the return value
+    // says nothing the next read does not. Ask audio-core what actually
+    // happened rather than assuming the flip took.
+    if (m_paused)
+        (void)::rec_resume();
+    else
+        (void)::rec_pause();
 
-    std::wstring args = L"/select,\"" + target + L"\"";
-    ::ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+    // Repaint now instead of waiting up to a meter tick: the button has to
+    // answer the click on the frame it was clicked.
+    m_paused = ::rec_is_paused() != 0;
+    ApplyPausedVisuals();
 
     ResetAutoCollapseTimer();
 }

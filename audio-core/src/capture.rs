@@ -42,6 +42,9 @@ use crate::writer::{WriterConfig, run_writer};
 /// Owns the running capture session.
 pub struct Recorder {
     stop: Arc<AtomicBool>,
+    /// Set by the UI thread, read by the capture loop. While it is true the
+    /// stream keeps running but nothing reaches the ring.
+    paused: Arc<AtomicBool>,
     writer_stop: Arc<AtomicBool>,
     stop_event: SendHandle,
     capture_thread: Option<JoinHandle<Result<(), YipError>>>,
@@ -61,6 +64,7 @@ unsafe impl Sync for SendHandle {}
 impl Recorder {
     pub fn start(device_id: &str, path: &Path, cfg: RecConfig) -> Result<Self, YipError> {
         let stop = Arc::new(AtomicBool::new(false));
+        let paused = Arc::new(AtomicBool::new(false));
         let writer_stop = Arc::new(AtomicBool::new(false));
 
         let (mut producer, consumer) = split(RING_CAPACITY_SAMPLES);
@@ -75,6 +79,7 @@ impl Recorder {
         let device_id_owned = device_id.to_string();
         let path_owned: PathBuf = path.to_path_buf();
         let stop_for_capture = stop.clone();
+        let paused_for_capture = paused.clone();
         let writer_stop_for_capture = writer_stop.clone();
 
         let capture_thread = std::thread::Builder::new()
@@ -86,6 +91,7 @@ impl Recorder {
                     cfg,
                     &mut producer,
                     &stop_for_capture,
+                    &paused_for_capture,
                     &writer_stop_for_capture,
                     stop_event_for_thread,
                     &ready_tx,
@@ -106,6 +112,7 @@ impl Recorder {
 
         Ok(Self {
             stop,
+            paused,
             writer_stop,
             stop_event,
             capture_thread: Some(capture_thread),
@@ -125,6 +132,16 @@ impl Recorder {
     #[must_use]
     pub fn path(&self) -> &std::path::Path {
         &self.path
+    }
+
+    /// Hold or release capture without tearing the stream down.
+    ///
+    /// The WASAPI client keeps running either way: stopping it would drop the
+    /// endpoint's position and make resuming cost a re-initialise, and leaving
+    /// it running is what keeps the device from backing up into an overrun the
+    /// moment capture comes back. Paused packets are drained and discarded.
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Release);
     }
 
     pub fn stop(mut self) -> Result<(), YipError> {
@@ -183,6 +200,7 @@ fn capture_loop(
     cfg: RecConfig,
     producer: &mut rtrb::Producer<f32>,
     stop: &Arc<AtomicBool>,
+    paused: &Arc<AtomicBool>,
     writer_stop: &Arc<AtomicBool>,
     stop_event: SendHandle,
     ready_tx: &std::sync::mpsc::Sender<Result<WriterConfig, YipError>>,
@@ -363,6 +381,16 @@ fn capture_loop(
                 unsafe { capture.ReleaseBuffer(packet_frames)? };
                 continue;
             }
+            if paused.load(Ordering::Acquire) {
+                // Paused. Drain the packet so the endpoint keeps cycling, but
+                // it reaches neither the ring nor the statistics pass: a
+                // paused take must not grow the file or move the meter.
+                // SAFETY: paired with GetBuffer above.
+                unsafe { capture.ReleaseBuffer(packet_frames)? };
+                METER.silence();
+                continue;
+            }
+
             let n_samples = (packet_frames as usize) * samples_per_frame;
             let silent = packet_flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0;
 
