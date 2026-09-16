@@ -91,6 +91,19 @@
                             <Setter Property="VerticalContentAlignment" Value="Center" />
                         </Style>
                     </StackPanel.Resources>
+                    <!-- Hold before stop: pausing is the recoverable one, so it
+                         takes the inner slot where the thumb lands first, and
+                         the irreversible button is the one further out. -->
+                    <Button x:Name="PauseButton"
+                            Style="{StaticResource PillActionButton}"
+                            Click="OnPauseClicked"
+                            AutomationProperties.Name="Pause"
+                            ToolTipService.ToolTip="Pause">
+                        <FontIcon x:Name="PauseGlyph"
+                                  FontFamily="Segoe Fluent Icons"
+                                  Glyph="&#xE769;"
+                                  FontSize="13" />
+                    </Button>
                     <Button x:Name="StopButton"
                             Style="{StaticResource PillActionButton}"
                             Click="OnStopClicked"
@@ -98,15 +111,6 @@
                             ToolTipService.ToolTip="Stop">
                         <Rectangle Width="9" Height="9" RadiusX="2" RadiusY="2"
                                    Fill="{ThemeResource YipIndicatorActionInkBrush}" />
-                    </Button>
-                    <Button x:Name="OpenLastButton"
-                            Style="{StaticResource PillActionButton}"
-                            Click="OnOpenLastClicked"
-                            AutomationProperties.Name="Open last recording"
-                            ToolTipService.ToolTip="Open last recording">
-                        <FontIcon FontFamily="Segoe Fluent Icons"
-                                  Glyph="&#xE8B7;"
-                                  FontSize="13" />
                     </Button>
                 </StackPanel>
             </Grid>

@@ -103,10 +103,12 @@
                     <SolidColorBrush x:Key="YipLampLiveBrush"        Color="#E5484D" />
 
                     <!-- Indicator pill -->
-                    <!-- The pill has no backdrop to blur what is behind it (see
-                         IndicatorWindow::ApplyTransparentBackdrop), so its tint
-                         is denser than the cards' to stay legible. -->
+                    <!-- Two tints for the capsule (IndicatorWindow::ApplySurfaceTint).
+                         Over its blur the tint only has to shade. With
+                         transparency effects off there is no blur, and the
+                         denser one carries legibility on its own. -->
                     <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"      Color="#FAFAFB" Opacity="0.88" />
+                    <SolidColorBrush x:Key="YipIndicatorSurfaceBlurredBrush" Color="#FAFAFB" Opacity="0.70" />
                     <SolidColorBrush x:Key="YipIndicatorStrokeQuietBrush"  Color="#000000" Opacity="0.07" />
                     <SolidColorBrush x:Key="YipIndicatorMeterBarIdleBrush" Color="#525866" />
                     <SolidColorBrush x:Key="YipIndicatorMeterBarLiveBrush" Color="#E5484D" />
@@ -169,6 +171,7 @@
                     <SolidColorBrush x:Key="YipLampLiveBrush"        Color="#E5484D" />
 
                     <SolidColorBrush x:Key="YipIndicatorSurfaceBrush"      Color="#141518" Opacity="0.84" />
+                    <SolidColorBrush x:Key="YipIndicatorSurfaceBlurredBrush" Color="#141518" Opacity="0.66" />
                     <SolidColorBrush x:Key="YipIndicatorStrokeQuietBrush"  Color="#FFFFFF" Opacity="0.075" />
                     <SolidColorBrush x:Key="YipIndicatorMeterBarIdleBrush" Color="#B7BCC8" />
                     <SolidColorBrush x:Key="YipIndicatorMeterBarLiveBrush" Color="#FF6B70" />

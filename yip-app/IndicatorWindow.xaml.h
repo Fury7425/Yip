@@ -11,6 +11,7 @@
 
 #include <winrt/Windows.System.h>
 #include <winrt/Windows.UI.Composition.h>
+#include <winrt/Windows.UI.ViewManagement.h>
 
 namespace winrt::yip::implementation {
 struct IndicatorWindow : IndicatorWindowT<IndicatorWindow> {
@@ -31,19 +32,31 @@ struct IndicatorWindow : IndicatorWindowT<IndicatorWindow> {
 
     void OnStopClicked(winrt::Windows::Foundation::IInspectable const& sender,
                        winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
-    void OnOpenLastClicked(winrt::Windows::Foundation::IInspectable const& sender,
-                           winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+    void OnPauseClicked(winrt::Windows::Foundation::IInspectable const& sender,
+                        winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
 
 private:
+    // What a layout pass should do with the morph clip. `Keep` exists because
+    // a morph installs the *old* outline and then asks for the *new* layout;
+    // the layout pass must not undo the clip it is about to animate.
+    enum class ClipPolicy { Clear, Keep };
+
     // ----- HWND helpers -----
     HWND Hwnd() const noexcept { return m_hwnd; }
     void ApplyToolWindowStyle();
     void ApplyAlwaysOnTop();
     void ApplyClickThrough(bool enable);
-    // No DWM corner or frame, and a transparent system backdrop: the Border is
-    // the only thing drawn.
+    // No DWM corner or frame: the Border and the blur behind it are the only
+    // things drawn.
     void ApplyFrameless();
-    void ApplyTransparentBackdrop();
+    // Blur behind the capsule while transparency effects are on, a transparent
+    // backdrop while they are off. Re-run whenever that setting flips.
+    void ApplyBackdrop();
+    // The shell's host backdrop (already blurred) through an alpha mask drawn
+    // as the capsule. Leaves m_blurBrush null if the effect cannot be built.
+    void BuildBackdropBrush();
+    // The Border's tint: lighter over the blur, denser over the bare desktop.
+    void ApplySurfaceTint();
 
     // ----- Composition layer -----
     void BuildCompositionLayer();
@@ -56,6 +69,8 @@ private:
     void UpdateFromMeter();
     void UpdateMeterBars(float level, bool hot);
     void UpdateDotForState(::yip::IndicatorState s);
+    // Glyph, tooltip and dot for whichever of pause/resume the button offers.
+    void ApplyPausedVisuals();
     void StopMeterAnimations();
 
     // ----- State machine -----
@@ -64,10 +79,10 @@ private:
     void TransitionTo(::yip::IndicatorState s, bool animate = true);
     // Land every layout property on `s` at once: actions, window, Border,
     // readout translation and clip. Every motion path ends by calling this.
-    void ApplyLayoutFor(::yip::IndicatorState s);
+    void ApplyLayoutFor(::yip::IndicatorState s, ClipPolicy clip = ClipPolicy::Clear);
     // Resize the HWND and the Border to match the state, around m_anchor.
     // The window *is* the pill.
-    void SyncWindowToState(::yip::IndicatorState s);
+    void SyncWindowToState(::yip::IndicatorState s, ClipPolicy clip = ClipPolicy::Clear);
 
     // ----- Motion -----
     void ShowPill(bool animate);
@@ -78,6 +93,21 @@ private:
     void SetClip(float w, float h, float x, float y);
     void AnimateClip(float w, float h, float x, float y);
     void ClearClip();
+    // The pill visual and the backdrop mask take every opacity, scale and
+    // outline change together, or the blur arrives before the tint and
+    // outlives it.
+    winrt::Microsoft::UI::Composition::Visual PillVisual();
+    void SetPillCentre(float x, float y);
+    void SetPillFade(float opacity, float scale);
+    void AnimatePillOpacity(float to, int ms);
+    void AnimatePillScale(float to, int ms);
+    // Cut the blur to a capsule of w x h at (x, y), in PillFrame DIPs.
+    void SetBackdropShape(float w, float h, float x, float y);
+    // Re-rasterise the mask at the window's current size and DPI, leaving the
+    // capsule drawn into it alone — mid-morph that shape is animating.
+    void SyncBackdropSurface();
+    // Surface *and* shape back to the whole PillFrame. The resting state.
+    void ResetBackdropShape();
     // Centre of the readout group in PillFrame coordinates (layout only; the
     // composition translation is not included).
     winrt::Windows::Foundation::Point ReadoutCentre();
@@ -101,6 +131,19 @@ private:
     HWND m_hwnd{nullptr};
     winrt::Windows::System::DispatcherQueueController m_backdropQueue{nullptr};
     winrt::Windows::UI::Composition::Compositor m_backdropCompositor{nullptr};
+    // The blur lives on the system compositor, not the XAML one: only its
+    // brushes can be a window's system backdrop.
+    winrt::Windows::UI::Composition::CompositionEffectBrush m_blurBrush{nullptr};
+    winrt::Windows::UI::Composition::CompositionVisualSurface m_maskSurface{nullptr};
+    winrt::Windows::UI::Composition::ContainerVisual m_maskRoot{nullptr};
+    winrt::Windows::UI::Composition::ContainerVisual m_maskDpi{nullptr};
+    winrt::Windows::UI::Composition::ShapeVisual m_maskVisual{nullptr};
+    winrt::Windows::UI::Composition::CompositionRoundedRectangleGeometry m_maskShape{nullptr};
+    winrt::Windows::UI::Composition::CompositionEasingFunction m_backdropEaseOut{nullptr};
+    winrt::Windows::UI::Composition::CompositionEasingFunction m_backdropEaseMorph{nullptr};
+    winrt::Windows::UI::ViewManagement::UISettings m_uiSettings;
+    winrt::event_token m_effectsToken{};
+    bool m_blurActive{false};
     ::yip::IndicatorState m_state{::yip::IndicatorState::Idle};
     ::yip::IndicatorState m_baseState{::yip::IndicatorState::Idle}; // state before expansion
     ::yip::IndicatorPersistence m_persisted{};
@@ -115,6 +158,10 @@ private:
     // Bumped on every transition. A motion's completion handler only acts if
     // nothing has happened since it started.
     uint32_t m_motionGen{0};
+    // True between the start of a size change and the layout pass that lands
+    // it. A second morph starting inside that window has to land the first one
+    // before it measures, or it reads a size the pill never actually had.
+    bool m_morphing{false};
     // m_shown is the state machine's intent; m_windowVisible is the HWND. They
     // differ while the pill is fading out.
     bool m_shown{false};
@@ -155,6 +202,10 @@ private:
     // Last state delivered by the bus. Cheaper than asking audio-core again
     // from inside a transition.
     bool m_recording{false};
+
+    // Mirrors rec_is_paused(). A paused take is still a take: the bus never
+    // fires for it, so this arrives with the meter snapshot instead.
+    bool m_paused{false};
 
     // Cached so a tick only touches the TextBlock when the second rolls over.
     winrt::hstring m_elapsedText{L"00:00"};
