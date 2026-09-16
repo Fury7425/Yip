@@ -11,4 +11,9 @@
 
 #define IDI_YIP_APP 101
 
+// Notification-area glyphs. Drawn for 16px and up only. The tile reads as a muddy
+// square at tray sizes, which is why these exist as separate cuts.
+#define IDI_YIP_TRAY_IDLE 102
+#define IDI_YIP_TRAY_RECORDING 103
+
 #endif // YIP_APP_RESOURCE_H

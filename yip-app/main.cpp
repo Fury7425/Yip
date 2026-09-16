@@ -5,6 +5,7 @@
 
 #include "pch.h"
 #include "App.xaml.h"
+#include "SingleInstance.h"
 
 namespace winrt {
 using namespace winrt::Microsoft::UI::Xaml;
@@ -13,6 +14,14 @@ using namespace winrt::Microsoft::UI::Xaml;
 int APIENTRY wWinMain(_In_ HINSTANCE /*hInstance*/, _In_opt_ HINSTANCE /*hPrevInstance*/,
                       _In_ LPWSTR /*lpCmdLine*/, _In_ int /*nCmdShow*/)
 {
+    // One Yip per session. Claimed before anything else runs, so a second
+    // launch never reaches WASAPI, RegisterHotKey or the notification area.
+    const ::yip::SingleInstance instance;
+    if (!instance.IsPrimary()) {
+        ::yip::ActivateRunningInstance();
+        return 0;
+    }
+
     // Smoke-tests: confirm both native libs are linked and reachable.
     const int32_t audioProbe = rec_dummy();
     const int32_t vstProbe = yip_vst_dummy();

@@ -50,22 +50,31 @@ Each size is drawn separately on its own pixel grid, not scaled from the master.
 
 ## Building the .ico
 
-`make-ico.ps1` rasterises these SVGs with headless Edge and assembles
-`yip-app/Assets/yip.ico`: nine frames (16, 20, 24, 32, 40, 48, 64, 128, 256),
-each from the cut drawn for that size where one exists and from the master
-otherwise. Frames up to 128 are stored as 32-bit DIBs, 256 as PNG.
+`make-ico.ps1` rasterises these SVGs with headless Edge and assembles three
+icons under `yip-app/Assets/`:
+
+- `yip.ico` - nine frames (16, 20, 24, 32, 40, 48, 64, 128, 256), each from the
+  cut drawn for that size where one exists and from the master otherwise.
+- `tray-idle.ico` / `tray-recording.ico` - four frames (16, 20, 24, 32), all
+  from the one tray cut per state, which is what the notification area asks for
+  at 100 / 125 / 150 / 200% scaling.
+
+Frames up to 128 are stored as 32-bit DIBs, 256 as PNG.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .design/icons/make-ico.ps1 -Repo .
 ```
 
-The `.ico` is checked in, so building the app needs none of this. Re-run it
+The `.ico` files are checked in, so building the app needs none of this. Re-run it
 after changing any SVG here.
 
 ## Where the icon is used
 
 - [yip-app/yip-app.rc](../../yip-app/yip-app.rc) embeds it as `IDI_YIP_APP`,
-  which is what Explorer, the taskbar and Alt-Tab read off the `.exe`.
+  which is what Explorer, the taskbar and Alt-Tab read off the `.exe`, and the
+  tray cuts as `IDI_YIP_TRAY_IDLE` / `IDI_YIP_TRAY_RECORDING`.
+- [TrayIcon.cpp](../../yip-app/TrayIcon.cpp) loads the tray pair at the shell's
+  small-icon metric and swaps between them as capture starts and stops.
 - [MainWindow.xaml.cpp](../../yip-app/MainWindow.xaml.cpp) sets it on the
   window with `WM_SETICON`, so the title bar, Alt-Tab and thumbnails use the
   frame drawn for each size.
