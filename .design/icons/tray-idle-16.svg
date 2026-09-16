@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <title>Yip tray: idle</title>
+  <circle cx="4" cy="8" r="3" fill="#8A909C"/>
+  <g fill="#B7BCC8">
+    <rect x="9" y="3" width="2" height="10" rx="1"/>
+    <rect x="13" y="5" width="2" height="6" rx="1"/>
+  </g>
+</svg>

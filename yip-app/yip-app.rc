@@ -7,6 +7,12 @@
 
 #include <winver.h>
 
+#include "resource.h"
+
+// Application icon. Built from the hand-tuned SVGs in .design/icons by
+// .design/icons/make-ico.ps1 — edit those and re-run it, never the .ico.
+IDI_YIP_APP ICON "Assets\\yip.ico"
+
 #define YIP_VERSION_MAJOR 0
 #define YIP_VERSION_MINOR 1
 #define YIP_VERSION_PATCH 0

@@ -11,6 +11,7 @@
 #include "HotkeyManager.h"
 #include "Settings.h"
 #include "ThemeColors.h"
+#include "resource.h"
 
 #include <DispatcherQueue.h>
 #include <microsoft.ui.xaml.window.h>
@@ -118,6 +119,29 @@ winrt::yip::viewmodels::RecordingEntry EntryFrom(winrt::Windows::Foundation::IIn
 
 } // namespace
 
+namespace {
+// The shell reads the exe's icon resource for Explorer and the taskbar, but the
+// title bar, Alt-Tab and window thumbnails read the icon set on the HWND. Two
+// sizes are set because Windows picks between them by context; LoadImage
+// selects the .ico frame drawn for that size rather than scaling one, and
+// LR_SHARED hands back a cached handle that must not be destroyed.
+void ApplyWindowIcon(HWND hwnd)
+{
+    const HMODULE instance = ::GetModuleHandleW(nullptr);
+    const auto load = [instance](int cx, int cy) {
+        return static_cast<HICON>(::LoadImageW(instance, MAKEINTRESOURCEW(IDI_YIP_APP), IMAGE_ICON, cx, cy,
+                                               LR_DEFAULTCOLOR | LR_SHARED));
+    };
+
+    if (const HICON iconSmall = load(::GetSystemMetrics(SM_CXSMICON), ::GetSystemMetrics(SM_CYSMICON))) {
+        ::SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(iconSmall));
+    }
+    if (const HICON iconBig = load(::GetSystemMetrics(SM_CXICON), ::GetSystemMetrics(SM_CYICON))) {
+        ::SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(iconBig));
+    }
+}
+} // namespace
+
 namespace winrt::yip::implementation {
 MainWindow::MainWindow()
 {
@@ -136,6 +160,7 @@ MainWindow::MainWindow()
     if (auto native = try_as<::IWindowNative>()) {
         native->get_WindowHandle(&m_hwnd);
     }
+    if (m_hwnd) ApplyWindowIcon(m_hwnd);
 
     SetupTitleBar();
     SetupBackdrop();
