@@ -147,6 +147,21 @@ bool TrayIcon::AddIcon()
     return true;
 }
 
+void TrayIcon::ShowHint(const wchar_t* title, const wchar_t* body)
+{
+    if (!m_added || !m_host) return;
+
+    NOTIFYICONDATAW nid{};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = m_host;
+    nid.uID = kIconId;
+    nid.uFlags = NIF_INFO;
+    nid.dwInfoFlags = NIIF_INFO | NIIF_NOSOUND;  // a window closing is not an event worth a chime
+    ::wcscpy_s(nid.szInfoTitle, title);
+    ::wcscpy_s(nid.szInfo, body);
+    ::Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
 void TrayIcon::RemoveIcon()
 {
     if (!m_added || !m_host) return;

@@ -15,6 +15,8 @@ using namespace winrt::Microsoft::UI::Xaml::Controls;
 using namespace winrt::Microsoft::UI::Composition::SystemBackdrops;
 } // namespace winrt
 
+namespace muw = winrt::Microsoft::UI::Windowing;
+
 namespace winrt::yip::implementation {
 App::App()
 {
@@ -49,6 +51,7 @@ void App::OnLaunched(winrt::Microsoft::UI::Xaml::LaunchActivatedEventArgs const&
     m_indicator = winrt::make<winrt::yip::implementation::IndicatorWindow>();
 
     SetupTray();
+    WireCloseToTray();
 }
 
 App::~App()
@@ -63,11 +66,7 @@ void App::SetupTray()
     ::yip::TrayIcon::Callbacks callbacks;
     callbacks.onShow = [this]() { ShowMainWindow(); };
     callbacks.onToggleRecording = [this]() { ToggleRecording(); };
-    callbacks.onExit = [this]() {
-        // Same door as the title bar's close button: MainWindow's destructor
-        // stops any take in flight.
-        if (m_window) m_window.Close();
-    };
+    callbacks.onExit = [this]() { Quit(false); };
     m_tray = std::make_unique<::yip::TrayIcon>(std::move(callbacks));
 
     // The glyph follows capture state. Pushed from audio-core rather than
@@ -77,13 +76,6 @@ void App::SetupTray()
         if (m_tray) m_tray->SetRecording(recording);
     });
     m_tray->SetRecording(::yip::RecordingStateBus::IsRecording());
-
-    // The icon outlives nothing: once the main window is gone the process is on
-    // its way out, and an icon left registered is a dead slot in the tray until
-    // the shell next sweeps it.
-    if (m_window) {
-        m_window.Closed([this](auto&&, auto&&) { TeardownTray(); });
-    }
 }
 
 void App::TeardownTray()
@@ -93,9 +85,57 @@ void App::TeardownTray()
     m_tray.reset();
 }
 
+// ============================================================ Window lifetime
+
+void App::WireCloseToTray()
+{
+    if (!m_window) return;
+    auto appWindow = m_window.AppWindow();
+    if (!appWindow) return;
+
+    m_closingToken = appWindow.Closing(
+        [this](muw::AppWindow const&, muw::AppWindowClosingEventArgs const& args) {
+            if (m_quitting) return;
+
+            // Without a registered icon there would be nothing left to click:
+            // hiding then would strand the process exactly as it used to, alive
+            // with no window and no way back. So that close is a real quit.
+            if (!m_tray || !m_tray->IsLive()) {
+                Quit(true);
+                return;
+            }
+
+            args.Cancel(true);
+            HideMainWindow();
+        });
+}
+
+void App::HideMainWindow()
+{
+    if (!m_window) return;
+    if (auto appWindow = m_window.AppWindow()) {
+        appWindow.Hide();
+    }
+    // Windows 11 files a new notification icon into the overflow flyout rather
+    // than onto the taskbar, and no API promotes it out of there. The balloon is
+    // what points at the chevron the first time the window disappears.
+    if (m_tray && !m_hintShown) {
+        m_tray->ShowHint(L"Yip is still running",
+                         L"The window is closed, not the app - recording and the hotkey carry on. "
+                         L"Click this icon to bring the window back, or right-click it for Exit.");
+        m_hintShown = true;
+    }
+}
+
 void App::ShowMainWindow()
 {
     if (!m_window) return;
+
+    // AppWindow::Show is what undoes Hide; ShowWindow alone leaves the window
+    // out of the taskbar and Alt-Tab.
+    if (auto appWindow = m_window.AppWindow()) {
+        appWindow.Show();
+    }
 
     HWND hwnd = nullptr;
     if (auto native = m_window.try_as<::IWindowNative>()) {
@@ -108,10 +148,34 @@ void App::ShowMainWindow()
 
     if (::IsIconic(hwnd)) {
         ::ShowWindow(hwnd, SW_RESTORE);
-    } else if (!::IsWindowVisible(hwnd)) {
-        ::ShowWindow(hwnd, SW_SHOW);
     }
+    m_window.Activate();
     ::SetForegroundWindow(hwnd);
+}
+
+void App::Quit(bool windowAlreadyClosing)
+{
+    if (m_quitting) return;
+    m_quitting = true;
+
+    // A take in flight is finalised rather than truncated. MainWindow's
+    // destructor does this too, but Application::Exit is not obliged to run it.
+    if (::rec_is_recording()) {
+        (void)::rec_stop();
+    }
+
+    TeardownTray();
+
+    if (m_indicator) {
+        m_indicator.Close();
+        m_indicator = nullptr;
+    }
+    // Closing the main window used to leave the process alive behind it — the
+    // XAML application does not end with it — so the exit is explicit.
+    if (!windowAlreadyClosing && m_window) {
+        m_window.Close();
+    }
+    Exit();
 }
 
 void App::ToggleRecording()

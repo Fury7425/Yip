@@ -33,6 +33,12 @@ public:
     // Swap glyph and tooltip. Safe to call before the icon is on screen.
     void SetRecording(bool recording);
 
+    // Balloon over the icon. The one use is saying where the window went the
+    // first time it is closed to the tray: on Windows 11 a new icon starts life
+    // in the overflow flyout, so it cannot say that by being there. No-op until
+    // the icon is registered.
+    void ShowHint(const wchar_t* title, const wchar_t* body);
+
     // True once the shell has accepted the icon.
     bool IsLive() const noexcept { return m_added; }
 
