@@ -87,12 +87,16 @@ pub struct RecMeter {
     pub clip_count: u32,
     /// Times the ring ran out of room.
     pub overrun_count: u32,
-    /// 1 while capture is live.
+    /// 1 while capture is live. Stays 1 across a pause: a held take is still a
+    /// take, and the indicator has to stay on screen.
     pub recording: u8,
     /// 1 once the first packet has arrived.
     pub started: u8,
+    /// 1 while the session is paused. `elapsed_ms` is frozen and the levels
+    /// read silence.
+    pub paused: u8,
     /// Reserved; keeps the 8-byte fields below naturally aligned.
-    pub reserved: [u8; 2],
+    pub reserved: [u8; 1],
     /// Frames lost to overruns.
     pub dropped_frames: u64,
     /// Frames handed to the writer.
@@ -129,8 +133,17 @@ fn clear_last_error() {
 /// path never contends with `rec_start` / `rec_stop`.
 static RECORDING: AtomicBool = AtomicBool::new(false);
 
-/// `process_base()`-relative ms at which the current session started.
+/// `process_base()`-relative ms at which the current session started. Pushed
+/// forward by `rec_resume` so paused spans fall out of the elapsed clock.
 static SESSION_START_MS: AtomicU64 = AtomicU64::new(0);
+
+/// 1 while the live session is held. Deliberately separate from [`RECORDING`]:
+/// a paused take has not ended, so the state callback never fires for it.
+static PAUSED: AtomicBool = AtomicBool::new(false);
+
+/// `process_base()`-relative ms at which the current pause began. Only
+/// meaningful while `PAUSED` is true.
+static PAUSE_BEGAN_MS: AtomicU64 = AtomicU64::new(0);
 
 /// Fixed monotonic origin for the whole process. `Instant` cannot live in an
 /// atomic, so elapsed time is tracked as a ms offset from this.
@@ -141,6 +154,26 @@ fn process_base() -> std::time::Instant {
 
 fn now_ms() -> u64 {
     u64::try_from(process_base().elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Ms of *captured* audio in the current session: wall clock since the start,
+/// less every span spent paused.
+///
+/// Paused time is taken out by moving `SESSION_START_MS` forward on resume
+/// rather than by keeping a running total, so a reader needs two loads and no
+/// lock. `PAUSED` is loaded first, and `rec_resume` releases it after the
+/// adjustment, so nobody sees the cleared flag against the old origin.
+fn session_elapsed_ms() -> u64 {
+    if !RECORDING.load(Ordering::Acquire) {
+        return 0;
+    }
+    let paused = PAUSED.load(Ordering::Acquire);
+    let start = SESSION_START_MS.load(Ordering::Relaxed);
+    if paused {
+        // Frozen where the pause began.
+        return PAUSE_BEGAN_MS.load(Ordering::Relaxed).saturating_sub(start);
+    }
+    now_ms().saturating_sub(start)
 }
 
 fn singleton() -> &'static parking_lot::Mutex<Option<Recorder>> {
@@ -277,6 +310,7 @@ pub unsafe extern "C" fn rec_start(
         METER.reset();
         let rec = Recorder::start(dev, std::path::Path::new(p), config)?;
         SESSION_START_MS.store(now_ms(), Ordering::Relaxed);
+        PAUSED.store(false, Ordering::Release);
         RECORDING.store(true, Ordering::Release);
         *guard = Some(rec);
         Ok(())
@@ -300,9 +334,64 @@ pub extern "C" fn rec_stop() -> RecStatus {
     // The session is gone either way — a failed flush still ends capture. The
     // session totals stay readable; only the live levels drop to zero.
     RECORDING.store(false, Ordering::Release);
+    PAUSED.store(false, Ordering::Release);
     METER.silence();
     notify_state(false);
     status
+}
+
+/// Hold the active recording without closing the file. Idempotent; returns
+/// `InvalidState` when nothing is recording.
+///
+/// The WASAPI stream keeps running underneath, so resuming is instant and the
+/// device never backs up into an overrun. Captured audio stops reaching the
+/// file, the meter reads silence, and the elapsed clock freezes. The state
+/// callback does **not** fire: the session is held, not over.
+#[unsafe(no_mangle)]
+pub extern "C" fn rec_pause() -> RecStatus {
+    run(|| {
+        let guard = singleton().lock();
+        let Some(rec) = guard.as_ref() else {
+            return Err(YipError::InvalidState("not recording"));
+        };
+        if PAUSED.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        // Stamp before the flag: a lock-free reader that sees PAUSED set must
+        // already be able to see where the pause began.
+        PAUSE_BEGAN_MS.store(now_ms(), Ordering::Relaxed);
+        PAUSED.store(true, Ordering::Release);
+        rec.set_paused(true);
+        METER.silence();
+        Ok(())
+    })
+}
+
+/// Resume a paused recording. Idempotent; returns `InvalidState` when nothing
+/// is recording.
+#[unsafe(no_mangle)]
+pub extern "C" fn rec_resume() -> RecStatus {
+    run(|| {
+        let guard = singleton().lock();
+        let Some(rec) = guard.as_ref() else {
+            return Err(YipError::InvalidState("not recording"));
+        };
+        if !PAUSED.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        rec.set_paused(false);
+        // Slide the session origin past the held span, then clear the flag.
+        let held = now_ms().saturating_sub(PAUSE_BEGAN_MS.load(Ordering::Relaxed));
+        SESSION_START_MS.fetch_add(held, Ordering::Relaxed);
+        PAUSED.store(false, Ordering::Release);
+        Ok(())
+    })
+}
+
+/// 1 while the active recording is paused, 0 otherwise. Lock-free.
+#[unsafe(no_mangle)]
+pub extern "C" fn rec_is_paused() -> u8 {
+    u8::from(RECORDING.load(Ordering::Acquire) && PAUSED.load(Ordering::Acquire))
 }
 
 /// Current peak envelope, roughly 0.0..=1.0. Returns 0.0 when not recording.
@@ -319,13 +408,11 @@ pub extern "C" fn rec_is_recording() -> u8 {
     u8::from(RECORDING.load(Ordering::Acquire))
 }
 
-/// Monotonic ms since `rec_start` succeeded. 0 if not recording. Lock-free.
+/// Monotonic ms of captured audio this session, paused spans excluded. 0 if
+/// not recording. Lock-free.
 #[unsafe(no_mangle)]
 pub extern "C" fn rec_elapsed_ms() -> u64 {
-    if !RECORDING.load(Ordering::Acquire) {
-        return 0;
-    }
-    now_ms().saturating_sub(SESSION_START_MS.load(Ordering::Relaxed))
+    session_elapsed_ms()
 }
 
 /// Fill `out` with the whole meter in one lock-free call.
@@ -347,14 +434,11 @@ pub unsafe extern "C" fn rec_meter(out: *mut RecMeter) -> RecStatus {
             overrun_count: METER.overrun_count(),
             recording: u8::from(recording),
             started: u8::from(METER.started()),
-            reserved: [0; 2],
+            paused: u8::from(recording && PAUSED.load(Ordering::Acquire)),
+            reserved: [0; 1],
             dropped_frames: METER.dropped_frames(),
             frames_captured: METER.frames_captured(),
-            elapsed_ms: if recording {
-                now_ms().saturating_sub(SESSION_START_MS.load(Ordering::Relaxed))
-            } else {
-                0
-            },
+            elapsed_ms: session_elapsed_ms(),
         };
         // SAFETY: caller guarantees `out` is a valid writable RecMeter.
         unsafe { ptr::write(out, snapshot) };
