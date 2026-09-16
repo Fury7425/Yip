@@ -13,6 +13,11 @@
 // .design/icons/make-ico.ps1 — edit those and re-run it, never the .ico.
 IDI_YIP_APP ICON "Assets\\yip.ico"
 
+// Notification-area glyphs, one per capture state. Separate cuts from the same
+// script: the tile is a muddy square at 16px, these are not.
+IDI_YIP_TRAY_IDLE      ICON "Assets\\tray-idle.ico"
+IDI_YIP_TRAY_RECORDING ICON "Assets\\tray-recording.ico"
+
 #define YIP_VERSION_MAJOR 0
 #define YIP_VERSION_MINOR 1
 #define YIP_VERSION_PATCH 0
