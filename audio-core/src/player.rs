@@ -624,6 +624,8 @@ fn render_loop(
     // Set once the ring has run dry after EOF; from then on the loop is only
     // waiting for the endpoint to play out what it was already handed.
     let mut playing_out = false;
+    // Set while a flush is in flight, cleared once the new base has been read.
+    let mut resync = false;
 
     let result = loop {
         // SAFETY: handles array is in scope for the duration of the call.
@@ -680,8 +682,21 @@ fn render_loop(
                 }
             }
             PLAYBACK.drained.store(true, Ordering::Release);
-        } else if !paused {
-            written = pop_frames(consumer, dst, samples_per_frame);
+            resync = true;
+        } else {
+            if resync {
+                // The decoder writes the new base *before* it clears
+                // `flushing`, so seeing the flag clear is what makes the base
+                // safe to read. Reading it in the flush iteration itself would
+                // pick up the position we just seeked away from.
+                base_ms = PLAYBACK.seek_base_ms.load(Ordering::Relaxed);
+                frames_since_base = 0;
+                peak = 0.0;
+                resync = false;
+            }
+            if !paused {
+                written = pop_frames(consumer, dst, samples_per_frame);
+            }
         }
 
         // Anything not filled is silence: a pause, a flush, or the ring
@@ -702,11 +717,9 @@ fn render_loop(
             break Err(YipError::from(e));
         }
 
-        // Coming out of a flush the position is the decoder's, not ours.
+        // A flushed buffer says nothing about where playback is or how loud
+        // it was; the decoder is still landing the seek.
         if flushing {
-            base_ms = PLAYBACK.seek_base_ms.load(Ordering::Relaxed);
-            frames_since_base = 0;
-            peak = 0.0;
             PLAYBACK.peak_bits.store(0, Ordering::Relaxed);
             continue;
         }
