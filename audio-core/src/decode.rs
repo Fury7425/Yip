@@ -22,6 +22,12 @@ use crate::mf::Runtime;
 /// 100-ns media time per millisecond.
 const HNS_PER_MS: u128 = 10_000;
 
+/// Stream indices, unwrapped once. windows-rs wraps them in a newtype, while
+/// every `IMFSourceReader` method that takes one takes a plain `u32`.
+const FIRST_AUDIO_STREAM: u32 = mf::MF_SOURCE_READER_FIRST_AUDIO_STREAM.0;
+const ALL_STREAMS: u32 = mf::MF_SOURCE_READER_ALL_STREAMS.0;
+const MEDIA_SOURCE: u32 = mf::MF_SOURCE_READER_MEDIASOURCE.0;
+
 /// `VARENUM` for an unsigned 64-bit PROPVARIANT, which is what MF_PD_DURATION
 /// comes back as.
 const VT_UI8_TAG: u16 = 21;
@@ -82,17 +88,16 @@ impl Decoder {
         // SAFETY: live reader owned by this thread.
         unsafe {
             reader
-                .SetStreamSelection(mf::MF_SOURCE_READER_ALL_STREAMS, false)
+                .SetStreamSelection(ALL_STREAMS, false)
                 .context("deselect streams")?;
             reader
-                .SetStreamSelection(mf::MF_SOURCE_READER_FIRST_AUDIO_STREAM, true)
+                .SetStreamSelection(FIRST_AUDIO_STREAM, true)
                 .context("select audio stream")?;
         }
 
         // SAFETY: live reader; index 0 is the stream's own type.
-        let native =
-            unsafe { reader.GetNativeMediaType(mf::MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0) }
-                .context("native media type")?;
+        let native = unsafe { reader.GetNativeMediaType(FIRST_AUDIO_STREAM, 0) }
+            .context("native media type")?;
         let sample_rate = get_u32(&native, &mf::MF_MT_AUDIO_SAMPLES_PER_SECOND).unwrap_or(0);
         let channels = get_u32(&native, &mf::MF_MT_AUDIO_NUM_CHANNELS).unwrap_or(0);
         if sample_rate == 0 || channels == 0 {
@@ -137,7 +142,7 @@ impl Decoder {
         // SAFETY: live reader and media type, both owned by this thread.
         unsafe {
             self.reader
-                .SetCurrentMediaType(mf::MF_SOURCE_READER_FIRST_AUDIO_STREAM, None, &wanted)
+                .SetCurrentMediaType(FIRST_AUDIO_STREAM, None, &wanted)
         }
         .context("set output type")?;
 
@@ -145,11 +150,8 @@ impl Decoder {
         // a flat buffer, and a channel count that is not the one the endpoint
         // opened with would rotate the interleave for the whole file.
         // SAFETY: live reader.
-        let actual = unsafe {
-            self.reader
-                .GetCurrentMediaType(mf::MF_SOURCE_READER_FIRST_AUDIO_STREAM)
-        }
-        .context("read back output type")?;
+        let actual = unsafe { self.reader.GetCurrentMediaType(FIRST_AUDIO_STREAM) }
+            .context("read back output type")?;
         let got_rate = get_u32(&actual, &mf::MF_MT_AUDIO_SAMPLES_PER_SECOND).unwrap_or(0);
         let got_channels = get_u32(&actual, &mf::MF_MT_AUDIO_NUM_CHANNELS).unwrap_or(0);
         if got_rate != sample_rate || got_channels != u32::from(channels) {
@@ -175,7 +177,7 @@ impl Decoder {
         // SAFETY: live reader; both out-params are valid writable slots.
         unsafe {
             self.reader.ReadSample(
-                mf::MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+                FIRST_AUDIO_STREAM,
                 0,
                 None,
                 Some(std::ptr::addr_of_mut!(flags)),
@@ -237,7 +239,7 @@ impl Decoder {
 fn read_duration_ms(reader: &mf::IMFSourceReader) -> u64 {
     // SAFETY: live reader; MF_PD_DURATION is a static GUID key.
     let attribute = unsafe {
-        reader.GetPresentationAttribute(mf::MF_SOURCE_READER_MEDIASOURCE, &mf::MF_PD_DURATION)
+        reader.GetPresentationAttribute(MEDIA_SOURCE, &mf::MF_PD_DURATION)
     };
     let Ok(pv) = attribute else { return 0 };
     propvariant_u64(&pv).map_or(0, |hns| (u128::from(hns) / HNS_PER_MS) as u64)
@@ -324,7 +326,11 @@ mod tests {
 
     #[test]
     fn missing_file_is_an_io_error() {
-        let e = Decoder::open(Path::new("Z:/yip/does-not-exist.wav")).unwrap_err();
+        // `unwrap_err` would want Decoder: Debug, and a source reader has
+        // nothing worth printing.
+        let Err(e) = Decoder::open(Path::new("Z:/yip/does-not-exist.wav")) else {
+            panic!("opened a file that is not there");
+        };
         assert!(matches!(e, YipError::Io(_)), "{e}");
     }
 }
