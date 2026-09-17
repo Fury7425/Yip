@@ -704,6 +704,13 @@ void MainViewModel::ActivateRecording(winrt::yip::viewmodels::RecordingEntry con
 void MainViewModel::PlayRecording(winrt::yip::viewmodels::RecordingEntry const& entry)
 {
     if (!entry) return;
+    // The other half of the rule that starting a take stops playback: a take
+    // in flight owns the room, and a recorder that quietly records its own
+    // playback is worse than one that says no.
+    if (m_isRecording) {
+        SetError(L"Stop the take first \u2014 playing one back would end up in the recording");
+        return;
+    }
     const fs::path path{std::wstring{entry.FullPath()}};
     // Not path.string(): that encodes with the ANSI codepage and hands
     // audio-core bytes it rejects as invalid UTF-8 for any non-ASCII folder.
