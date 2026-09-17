@@ -491,14 +491,13 @@
                                    TextTrimming="CharacterEllipsis"
                                    VerticalAlignment="Center"
                                    Foreground="{ThemeResource YipTextPrimaryBrush}" />
-                        <!-- Output level. The same ramp the capture meter uses,
-                             so a take reads the same going out as it did
-                             coming in. -->
+                        <!-- Output level, on the capture meter's own
+                             logarithmic travel. -->
                         <ProgressBar Grid.Column="1"
                                      Width="44" Height="3"
                                      Minimum="0" Maximum="100"
                                      Value="{x:Bind ViewModel.PlaybackLevelPercent, Mode=OneWay}"
-                                     Foreground="{ThemeResource YipMeterGradientBrush}"
+                                     Foreground="{ThemeResource YipPlaybackLevelBrush}"
                                      Background="{ThemeResource YipMeterTrackQuietBrush}"
                                      VerticalAlignment="Center"
                                      IsHitTestVisible="False"
