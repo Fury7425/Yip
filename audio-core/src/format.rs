@@ -44,7 +44,9 @@ pub enum Encoding {
 }
 
 /// Bitrates the MPEG-1 Layer III bitstream can signal.
-const MP3_KBPS: [u16; 14] = [32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+const MP3_KBPS: [u16; 14] = [
+    32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+];
 
 /// Bitrates the Windows AAC encoder accepts.
 const AAC_KBPS: [u16; 4] = [96, 128, 160, 192];
@@ -64,7 +66,9 @@ impl Encoding {
                 16 => Ok(Self::Wav(SampleDepth::Int16)),
                 24 => Ok(Self::Wav(SampleDepth::Int24)),
                 0 | 32 => Ok(Self::Wav(SampleDepth::Float32)),
-                _ => Err(YipError::InvalidArgument("WAV bit depth must be 16, 24 or 32")),
+                _ => Err(YipError::InvalidArgument(
+                    "WAV bit depth must be 16, 24 or 32",
+                )),
             },
             f if f == RecFormat::Flac as u16 => match cfg.bit_depth {
                 16 => Ok(Self::Flac(SampleDepth::Int16)),
@@ -77,7 +81,9 @@ impl Encoding {
                         kbps: u32::from(kbps),
                     })
                 } else {
-                    Err(YipError::InvalidArgument("MP3 bitrate is not a valid MPEG-1 rate"))
+                    Err(YipError::InvalidArgument(
+                        "MP3 bitrate is not a valid MPEG-1 rate",
+                    ))
                 }
             }
             f if f == RecFormat::M4a as u16 => {
@@ -86,7 +92,9 @@ impl Encoding {
                         kbps: u32::from(kbps),
                     })
                 } else {
-                    Err(YipError::InvalidArgument("M4A bitrate must be 96, 128, 160 or 192"))
+                    Err(YipError::InvalidArgument(
+                        "M4A bitrate must be 96, 128, 160 or 192",
+                    ))
                 }
             }
             _ => Err(YipError::InvalidArgument("unknown recording format")),
@@ -244,7 +252,10 @@ mod tests {
         let mp3 = Encoding::Mp3 { kbps: 192 };
         assert_eq!(mp3.capture_rate(44_100), 44_100);
         assert_eq!(mp3.capture_rate(96_000), 48_000);
-        assert_eq!(Encoding::Flac(SampleDepth::Int24).capture_rate(96_000), 96_000);
+        assert_eq!(
+            Encoding::Flac(SampleDepth::Int24).capture_rate(96_000),
+            96_000
+        );
         assert_eq!(mp3.capture_channels(6), 2);
         assert_eq!(Encoding::Wav(SampleDepth::Float32).capture_channels(6), 6);
     }

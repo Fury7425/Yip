@@ -29,7 +29,11 @@ const MF_MISSING: &str = "Media Foundation is not installed. Windows N and KN ed
                           Media Feature Pack for FLAC, MP3 and M4A; WAV works without it.";
 
 fn encoder_error(what: &str, e: &WinError) -> YipError {
-    YipError::Encoder(format!("{what}: HRESULT 0x{:08X}: {}", e.code().0, e.message()))
+    YipError::Encoder(format!(
+        "{what}: HRESULT 0x{:08X}: {}",
+        e.code().0,
+        e.message()
+    ))
 }
 
 /// Tags a Media Foundation failure with the step that produced it.
@@ -54,7 +58,10 @@ impl Runtime {
         // has initialised; balanced in Drop.
         let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
         if hr.is_err() {
-            return Err(YipError::Encoder(format!("CoInitializeEx 0x{:08X}", hr.0 as u32)));
+            return Err(YipError::Encoder(format!(
+                "CoInitializeEx 0x{:08X}",
+                hr.0 as u32
+            )));
         }
         // SAFETY: COM is initialised on this thread; balanced in Drop.
         if let Err(e) = unsafe { mf::MFStartup(mf::MF_VERSION, mf::MFSTARTUP_LITE) } {
@@ -118,7 +125,9 @@ impl MfSink {
             Encoding::Mp3 { .. } => (mf::MFTranscodeContainerType_MP3, mf::MFAudioFormat_MP3),
             Encoding::M4a { .. } => (mf::MFTranscodeContainerType_MPEG4, mf::MFAudioFormat_AAC),
             Encoding::Wav(_) => {
-                return Err(YipError::InvalidState("WAV is not a Media Foundation format"));
+                return Err(YipError::InvalidState(
+                    "WAV is not a Media Foundation format",
+                ));
             }
         };
         let depth = encoding.depth();
@@ -175,7 +184,8 @@ impl MfSink {
         // per-batch durations, so rounding cannot drift over a long take.
         let start = self.hns(self.frames_written);
         let end = self.hns(self.frames_written + frames);
-        self.submit(len, start, end - start).context("WriteSample")?;
+        self.submit(len, start, end - start)
+            .context("WriteSample")?;
         self.frames_written += frames;
         Ok(())
     }
