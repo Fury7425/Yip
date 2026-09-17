@@ -101,11 +101,15 @@ impl Decoder {
             ));
         }
 
+        // Before the struct literal: the field initialisers move `reader`, and
+        // the duration has to be read while it is still ours to borrow.
+        let duration_ms = read_duration_ms(&reader);
+
         Ok(Self {
             reader,
             sample_rate,
             channels: channels as u16,
-            duration_ms: read_duration_ms(&reader),
+            duration_ms,
             _runtime: runtime,
         })
     }
