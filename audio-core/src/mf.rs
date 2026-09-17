@@ -328,7 +328,7 @@ fn output_type(
     unsafe {
         let t = mf::MFCreateMediaType()?;
         t.SetGUID(&mf::MF_MT_MAJOR_TYPE, &mf::MFMediaType_Audio)?;
-        t.SetGUID(&mf::MF_MT_SUBTYPE, &subtype)?;
+        t.SetGUID(&mf::MF_MT_SUBTYPE, &raw const subtype)?;
         t.SetUINT32(&mf::MF_MT_AUDIO_SAMPLES_PER_SECOND, sample_rate)?;
         t.SetUINT32(&mf::MF_MT_AUDIO_NUM_CHANNELS, u32::from(channels))?;
         match target_bytes {
