@@ -238,9 +238,7 @@ impl Decoder {
 /// stream with no duration still plays, the scrubber just has nothing to span.
 fn read_duration_ms(reader: &mf::IMFSourceReader) -> u64 {
     // SAFETY: live reader; MF_PD_DURATION is a static GUID key.
-    let attribute = unsafe {
-        reader.GetPresentationAttribute(MEDIA_SOURCE, &mf::MF_PD_DURATION)
-    };
+    let attribute = unsafe { reader.GetPresentationAttribute(MEDIA_SOURCE, &mf::MF_PD_DURATION) };
     let Ok(pv) = attribute else { return 0 };
     propvariant_u64(&pv).map_or(0, |hns| (u128::from(hns) / HNS_PER_MS) as u64)
 }
