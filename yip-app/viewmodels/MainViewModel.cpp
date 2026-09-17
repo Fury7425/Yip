@@ -325,8 +325,8 @@ void MainViewModel::RefreshRecordings()
     }
 
     // Newest first, by mtime rather than by name: the folder also holds
-    // `*-processed.wav` renders and anything the user dropped in, none of which
-    // carry Yip's timestamped naming.
+    // anything the user dropped in, which does not carry Yip's timestamped
+    // naming.
     std::sort(m_rows.begin(), m_rows.end(),
               [](const Row& a, const Row& b) { return a.modified > b.modified; });
 

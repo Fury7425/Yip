@@ -47,222 +47,230 @@
         </Style>
     </ContentDialog.Resources>
 
-    <StackPanel Spacing="8" MaxWidth="376">
-        <!-- ===================== Recording ===================== -->
-        <TextBlock Text="RECORDING" Style="{StaticResource SettingsSection}" />
+    <!-- ContentDialog's own content ScrollViewer has scrolling disabled, so it
+         hands this one a bounded height: once the groups outgrow the dialog
+         they scroll here instead of being cut off. The right padding keeps the
+         overlay scrollbar off the groups' borders. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled"
+                  Padding="0,0,12,0">
+        <StackPanel Spacing="8" MaxWidth="376">
+            <!-- ===================== Recording ===================== -->
+            <TextBlock Text="RECORDING" Style="{StaticResource SettingsSection}" />
 
-        <Border Style="{StaticResource SettingsGroup}">
-            <StackPanel Spacing="8">
-                <TextBlock Text="Save recordings to" Style="{StaticResource SettingsLabel}" />
-                <Grid ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="FolderBox"
-                             CornerRadius="{StaticResource YipControlCornerRadius}"
-                             PlaceholderText="C:\Users\You\Music\Yip"
-                             AutomationProperties.Name="Output folder" />
-                    <Button Grid.Column="1"
-                            Click="OnPickFolder"
-                            Content="Browse…"
-                            CornerRadius="{StaticResource YipControlCornerRadius}" />
-                </Grid>
-                <TextBlock x:Name="FolderHint"
-                           Style="{StaticResource SettingsHint}"
-                           Text="Created automatically if it does not exist." />
-            </StackPanel>
-        </Border>
-
-        <Border Style="{StaticResource SettingsGroup}">
-            <Grid RowSpacing="10" ColumnSpacing="12">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-
-                <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="Sample rate" Style="{StaticResource SettingsLabel}" />
-                    <TextBlock Style="{StaticResource SettingsHint}"
-                               Text="Uses the device rate if the input refuses this one." />
-                </StackPanel>
-                <ComboBox x:Name="SampleRateCombo"
-                          Grid.Column="1"
-                          Width="128"
-                          VerticalAlignment="Center"
-                          SelectedIndex="1"
-                          CornerRadius="{StaticResource YipControlCornerRadius}"
-                          AutomationProperties.Name="Sample rate">
-                    <ComboBoxItem Content="44.1 kHz" Tag="44100" />
-                    <ComboBoxItem Content="48 kHz" Tag="48000" />
-                    <ComboBoxItem Content="88.2 kHz" Tag="88200" />
-                    <ComboBoxItem Content="96 kHz" Tag="96000" />
-                </ComboBox>
-
-                <Rectangle Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
-
-                <TextBlock Grid.Row="2" Text="Channels" Style="{StaticResource SettingsLabel}" />
-                <ComboBox x:Name="ChannelsCombo"
-                          Grid.Row="2"
-                          Grid.Column="1"
-                          Width="128"
-                          VerticalAlignment="Center"
-                          SelectedIndex="1"
-                          CornerRadius="{StaticResource YipControlCornerRadius}"
-                          AutomationProperties.Name="Channels">
-                    <ComboBoxItem Content="Mono" Tag="1" />
-                    <ComboBoxItem Content="Stereo" Tag="2" />
-                </ComboBox>
-
-                <Rectangle Grid.Row="3" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
-
-                <!-- Item order is the format value (audio-core's REC_FORMAT_*). -->
-                <StackPanel Grid.Row="4" Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="Format" Style="{StaticResource SettingsLabel}" />
-                    <TextBlock x:Name="FormatHint"
+            <Border Style="{StaticResource SettingsGroup}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Save recordings to" Style="{StaticResource SettingsLabel}" />
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="FolderBox"
+                                 CornerRadius="{StaticResource YipControlCornerRadius}"
+                                 PlaceholderText="C:\Users\You\Music\Yip"
+                                 AutomationProperties.Name="Output folder" />
+                        <Button Grid.Column="1"
+                                Click="OnPickFolder"
+                                Content="Browse…"
+                                CornerRadius="{StaticResource YipControlCornerRadius}" />
+                    </Grid>
+                    <TextBlock x:Name="FolderHint"
                                Style="{StaticResource SettingsHint}"
-                               Text="Uncompressed. The only format Process can open." />
+                               Text="Created automatically if it does not exist." />
                 </StackPanel>
-                <ComboBox x:Name="FormatCombo"
-                          Grid.Row="4"
-                          Grid.Column="1"
-                          Width="128"
-                          VerticalAlignment="Center"
-                          SelectedIndex="0"
-                          SelectionChanged="OnFormatChanged"
-                          CornerRadius="{StaticResource YipControlCornerRadius}"
-                          AutomationProperties.Name="Format">
-                    <ComboBoxItem Content="WAV" />
-                    <ComboBoxItem Content="FLAC" />
-                    <ComboBoxItem Content="MP3" />
-                    <ComboBoxItem Content="M4A (AAC)" />
-                </ComboBox>
+            </Border>
 
-                <Rectangle Grid.Row="5" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
-
-                <!-- One cell, two pickers: bit depth for WAV and FLAC, bitrate for
-                     MP3 and M4A. The code-behind swaps them and disables what the
-                     chosen codec cannot do. -->
-                <TextBlock x:Name="QualityLabel"
-                           Grid.Row="6"
-                           Text="Bit depth"
-                           Style="{StaticResource SettingsLabel}" />
-                <ComboBox x:Name="BitDepthCombo"
-                          Grid.Row="6"
-                          Grid.Column="1"
-                          Width="128"
-                          VerticalAlignment="Center"
-                          SelectedIndex="2"
-                          CornerRadius="{StaticResource YipControlCornerRadius}"
-                          AutomationProperties.Name="Bit depth">
-                    <ComboBoxItem Content="16-bit" Tag="16" />
-                    <ComboBoxItem Content="24-bit" Tag="24" />
-                    <ComboBoxItem Content="32-bit float" Tag="32" />
-                </ComboBox>
-                <ComboBox x:Name="BitrateCombo"
-                          Grid.Row="6"
-                          Grid.Column="1"
-                          Width="128"
-                          VerticalAlignment="Center"
-                          SelectedIndex="3"
-                          Visibility="Collapsed"
-                          CornerRadius="{StaticResource YipControlCornerRadius}"
-                          AutomationProperties.Name="Bitrate">
-                    <ComboBoxItem Content="96 kbps" Tag="96" />
-                    <ComboBoxItem Content="128 kbps" Tag="128" />
-                    <ComboBoxItem Content="160 kbps" Tag="160" />
-                    <ComboBoxItem Content="192 kbps" Tag="192" />
-                    <ComboBoxItem Content="256 kbps" Tag="256" />
-                    <ComboBoxItem Content="320 kbps" Tag="320" />
-                </ComboBox>
-            </Grid>
-        </Border>
-
-        <!-- ===================== Indicator ===================== -->
-        <TextBlock Text="INDICATOR" Style="{StaticResource SettingsSection}" />
-
-        <Border Style="{StaticResource SettingsGroup}">
-            <Grid RowSpacing="10" ColumnSpacing="12">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-
-                <StackPanel Spacing="2" VerticalAlignment="Center">
-                    <TextBlock Text="Style" Style="{StaticResource SettingsLabel}" />
-                    <TextBlock Style="{StaticResource SettingsHint}"
-                               Text="Dot shows only the recording light. Click it for the timer and controls." />
-                </StackPanel>
-                <ComboBox x:Name="PillStyleCombo"
-                          Grid.Column="1"
-                          Width="128"
-                          VerticalAlignment="Center"
-                          SelectedIndex="0"
-                          CornerRadius="{StaticResource YipControlCornerRadius}"
-                          AutomationProperties.Name="Indicator style">
-                    <ComboBoxItem Content="Pill" />
-                    <ComboBoxItem Content="Dot" />
-                </ComboBox>
-
-                <Rectangle Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
-
-                <TextBlock Grid.Row="2" Text="Position" Style="{StaticResource SettingsLabel}" />
-                <ComboBox x:Name="PillEdgeCombo"
-                          Grid.Row="2"
-                          Grid.Column="1"
-                          Width="128"
-                          VerticalAlignment="Center"
-                          SelectedIndex="0"
-                          CornerRadius="{StaticResource YipControlCornerRadius}"
-                          AutomationProperties.Name="Indicator position">
-                    <ComboBoxItem Content="Top of screen" />
-                    <ComboBoxItem Content="Bottom of screen" />
-                </ComboBox>
-            </Grid>
-        </Border>
-
-        <!-- ===================== Shortcut ===================== -->
-        <TextBlock Text="SHORTCUT" Style="{StaticResource SettingsSection}" />
-
-        <Border Style="{StaticResource SettingsGroup}">
-            <StackPanel Spacing="8">
-                <TextBlock Text="Start and stop recording" Style="{StaticResource SettingsLabel}" />
-                <Grid ColumnSpacing="8">
+            <Border Style="{StaticResource SettingsGroup}">
+                <Grid RowSpacing="10" ColumnSpacing="12">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBox x:Name="HotkeyBox"
-                             IsReadOnly="True"
-                             IsSpellCheckEnabled="False"
-                             FontFamily="Cascadia Mono,Consolas,Courier New"
-                             CornerRadius="{StaticResource YipControlCornerRadius}"
-                             PreviewKeyDown="OnHotkeyKeyDown"
-                             PlaceholderText="Click, then press the keys"
-                             AutomationProperties.Name="Global record hotkey" />
-                    <Button Grid.Column="1"
-                            Click="OnResetHotkey"
-                            Content="Reset"
-                            CornerRadius="{StaticResource YipControlCornerRadius}" />
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="Sample rate" Style="{StaticResource SettingsLabel}" />
+                        <TextBlock Style="{StaticResource SettingsHint}"
+                                   Text="Uses the device rate if the input refuses this one." />
+                    </StackPanel>
+                    <ComboBox x:Name="SampleRateCombo"
+                              Grid.Column="1"
+                              Width="128"
+                              VerticalAlignment="Center"
+                              SelectedIndex="1"
+                              CornerRadius="{StaticResource YipControlCornerRadius}"
+                              AutomationProperties.Name="Sample rate">
+                        <ComboBoxItem Content="44.1 kHz" Tag="44100" />
+                        <ComboBoxItem Content="48 kHz" Tag="48000" />
+                        <ComboBoxItem Content="88.2 kHz" Tag="88200" />
+                        <ComboBoxItem Content="96 kHz" Tag="96000" />
+                    </ComboBox>
+
+                    <Rectangle Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
+
+                    <TextBlock Grid.Row="2" Text="Channels" Style="{StaticResource SettingsLabel}" />
+                    <ComboBox x:Name="ChannelsCombo"
+                              Grid.Row="2"
+                              Grid.Column="1"
+                              Width="128"
+                              VerticalAlignment="Center"
+                              SelectedIndex="1"
+                              CornerRadius="{StaticResource YipControlCornerRadius}"
+                              AutomationProperties.Name="Channels">
+                        <ComboBoxItem Content="Mono" Tag="1" />
+                        <ComboBoxItem Content="Stereo" Tag="2" />
+                    </ComboBox>
+
+                    <Rectangle Grid.Row="3" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
+
+                    <!-- Item order is the format value (audio-core's REC_FORMAT_*). -->
+                    <StackPanel Grid.Row="4" Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="Format" Style="{StaticResource SettingsLabel}" />
+                        <TextBlock x:Name="FormatHint"
+                                   Style="{StaticResource SettingsHint}"
+                                   Text="Uncompressed. The largest files, and no quality loss." />
+                    </StackPanel>
+                    <ComboBox x:Name="FormatCombo"
+                              Grid.Row="4"
+                              Grid.Column="1"
+                              Width="128"
+                              VerticalAlignment="Center"
+                              SelectedIndex="0"
+                              SelectionChanged="OnFormatChanged"
+                              CornerRadius="{StaticResource YipControlCornerRadius}"
+                              AutomationProperties.Name="Format">
+                        <ComboBoxItem Content="WAV" />
+                        <ComboBoxItem Content="FLAC" />
+                        <ComboBoxItem Content="MP3" />
+                        <ComboBoxItem Content="M4A (AAC)" />
+                    </ComboBox>
+
+                    <Rectangle Grid.Row="5" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
+
+                    <!-- One cell, two pickers: bit depth for WAV and FLAC, bitrate for
+                         MP3 and M4A. The code-behind swaps them and disables what the
+                         chosen codec cannot do. -->
+                    <TextBlock x:Name="QualityLabel"
+                               Grid.Row="6"
+                               Text="Bit depth"
+                               Style="{StaticResource SettingsLabel}" />
+                    <ComboBox x:Name="BitDepthCombo"
+                              Grid.Row="6"
+                              Grid.Column="1"
+                              Width="128"
+                              VerticalAlignment="Center"
+                              SelectedIndex="2"
+                              CornerRadius="{StaticResource YipControlCornerRadius}"
+                              AutomationProperties.Name="Bit depth">
+                        <ComboBoxItem Content="16-bit" Tag="16" />
+                        <ComboBoxItem Content="24-bit" Tag="24" />
+                        <ComboBoxItem Content="32-bit float" Tag="32" />
+                    </ComboBox>
+                    <ComboBox x:Name="BitrateCombo"
+                              Grid.Row="6"
+                              Grid.Column="1"
+                              Width="128"
+                              VerticalAlignment="Center"
+                              SelectedIndex="3"
+                              Visibility="Collapsed"
+                              CornerRadius="{StaticResource YipControlCornerRadius}"
+                              AutomationProperties.Name="Bitrate">
+                        <ComboBoxItem Content="96 kbps" Tag="96" />
+                        <ComboBoxItem Content="128 kbps" Tag="128" />
+                        <ComboBoxItem Content="160 kbps" Tag="160" />
+                        <ComboBoxItem Content="192 kbps" Tag="192" />
+                        <ComboBoxItem Content="256 kbps" Tag="256" />
+                        <ComboBoxItem Content="320 kbps" Tag="320" />
+                    </ComboBox>
                 </Grid>
-                <TextBlock x:Name="HotkeyHint"
-                           Style="{StaticResource SettingsHint}"
-                           Text="Works while Yip is in the background. Needs Ctrl, Alt, Shift or Win." />
-            </StackPanel>
-        </Border>
-    </StackPanel>
+            </Border>
+
+            <!-- ===================== Indicator ===================== -->
+            <TextBlock Text="INDICATOR" Style="{StaticResource SettingsSection}" />
+
+            <Border Style="{StaticResource SettingsGroup}">
+                <Grid RowSpacing="10" ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="Style" Style="{StaticResource SettingsLabel}" />
+                        <TextBlock Style="{StaticResource SettingsHint}"
+                                   Text="Dot shows only the recording light. Click it for the timer and controls." />
+                    </StackPanel>
+                    <ComboBox x:Name="PillStyleCombo"
+                              Grid.Column="1"
+                              Width="128"
+                              VerticalAlignment="Center"
+                              SelectedIndex="0"
+                              CornerRadius="{StaticResource YipControlCornerRadius}"
+                              AutomationProperties.Name="Indicator style">
+                        <ComboBoxItem Content="Pill" />
+                        <ComboBoxItem Content="Dot" />
+                    </ComboBox>
+
+                    <Rectangle Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
+
+                    <TextBlock Grid.Row="2" Text="Position" Style="{StaticResource SettingsLabel}" />
+                    <ComboBox x:Name="PillEdgeCombo"
+                              Grid.Row="2"
+                              Grid.Column="1"
+                              Width="128"
+                              VerticalAlignment="Center"
+                              SelectedIndex="0"
+                              CornerRadius="{StaticResource YipControlCornerRadius}"
+                              AutomationProperties.Name="Indicator position">
+                        <ComboBoxItem Content="Top of screen" />
+                        <ComboBoxItem Content="Bottom of screen" />
+                    </ComboBox>
+                </Grid>
+            </Border>
+
+            <!-- ===================== Shortcut ===================== -->
+            <TextBlock Text="SHORTCUT" Style="{StaticResource SettingsSection}" />
+
+            <Border Style="{StaticResource SettingsGroup}">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Start and stop recording" Style="{StaticResource SettingsLabel}" />
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox x:Name="HotkeyBox"
+                                 IsReadOnly="True"
+                                 IsSpellCheckEnabled="False"
+                                 FontFamily="Cascadia Mono,Consolas,Courier New"
+                                 CornerRadius="{StaticResource YipControlCornerRadius}"
+                                 PreviewKeyDown="OnHotkeyKeyDown"
+                                 PlaceholderText="Click, then press the keys"
+                                 AutomationProperties.Name="Global record hotkey" />
+                        <Button Grid.Column="1"
+                                Click="OnResetHotkey"
+                                Content="Reset"
+                                CornerRadius="{StaticResource YipControlCornerRadius}" />
+                    </Grid>
+                    <TextBlock x:Name="HotkeyHint"
+                               Style="{StaticResource SettingsHint}"
+                               Text="Works while Yip is in the background. Needs Ctrl, Alt, Shift or Win." />
+                </StackPanel>
+            </Border>
+        </StackPanel>
+    </ScrollViewer>
 </ContentDialog>

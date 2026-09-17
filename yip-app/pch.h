@@ -41,6 +41,5 @@
 #include <string_view>
 #include <vector>
 
-// Audio + VST FFI surfaces.
+// Audio FFI surface.
 #include "audio_core.h"
-#include "vst_host.h"

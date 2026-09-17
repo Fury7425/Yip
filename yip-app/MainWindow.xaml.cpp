@@ -7,7 +7,6 @@
 
 #include "AudioCoreInterop.h"
 #include "SettingsDialog.xaml.h"
-#include "ProcessDialog.xaml.h"
 #include "HotkeyManager.h"
 #include "Settings.h"
 #include "ThemeColors.h"
@@ -698,18 +697,6 @@ winrt::fire_and_forget MainWindow::OnOpenSettings(winrt::Windows::Foundation::II
     co_return;
 }
 
-winrt::fire_and_forget MainWindow::OnOpenProcess(winrt::Windows::Foundation::IInspectable const& /*sender*/,
-                                                 winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
-{
-    auto strong = get_strong();
-    auto dialog = winrt::make<winrt::yip::implementation::ProcessDialog>();
-    dialog.XamlRoot(strong->Content().XamlRoot());
-    co_await dialog.ShowAsync();
-    strong->m_viewModel.RefreshRecordings(); // pick up *-processed.wav
-    strong->UpdateEmptyState();
-    co_return;
-}
-
 void MainWindow::OnRefreshList(winrt::Windows::Foundation::IInspectable const& /*sender*/,
                                winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
 {
@@ -785,14 +772,6 @@ void MainWindow::OnRecordAccelerator(
 {
     args.Handled(true);
     m_viewModel.ToggleRecording();
-}
-
-void MainWindow::OnProcessAccelerator(
-    winrt::Microsoft::UI::Xaml::Input::KeyboardAccelerator const& /*sender*/,
-    winrt::Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
-{
-    args.Handled(true);
-    OnOpenProcess(nullptr, nullptr);
 }
 
 void MainWindow::OnSearchAccelerator(

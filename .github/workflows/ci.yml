@@ -74,7 +74,7 @@ jobs:
           retention-days: 7
 
   native:
-    name: native (vst-host + yip-app)
+    name: native (yip-app)
     # windows-latest is Windows Server 2025 carrying Visual Studio 2026, where
     # the "Visual Studio 17 2022" generator finds no instance. The toolset is
     # pinned to v143, so pin the image that ships it.
@@ -257,7 +257,7 @@ jobs:
           retention-days: 14
 
   format-cpp:
-    name: clang-format (yip-app + vst-host)
+    name: clang-format (yip-app)
     runs-on: windows-latest
     timeout-minutes: 5
     # Style-only check. Many WinRT/MIDL templates fight clang-format on first

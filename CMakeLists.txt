@@ -70,19 +70,13 @@ add_custom_target(audio_core_build ALL
     VERBATIM
 )
 
-# Imported target so vst-host or yip-app can link via target_link_libraries.
+# Imported target so yip-app can link via target_link_libraries.
 add_library(audio_core STATIC IMPORTED GLOBAL)
 set_target_properties(audio_core PROPERTIES
     IMPORTED_LOCATION ${AUDIO_CORE_LIB}
     INTERFACE_INCLUDE_DIRECTORIES ${AUDIO_CORE_DIR}/include
 )
 add_dependencies(audio_core audio_core_build)
-
-# ----------------------------------------------------------------------------
-# vst-host (C++ static lib)
-# ----------------------------------------------------------------------------
-
-add_subdirectory(vst-host)
 
 # ----------------------------------------------------------------------------
 # yip-app (WinUI 3 via MSBuild .vcxproj)
@@ -122,13 +116,11 @@ add_custom_target(yip_app ALL
         -p:OutDir=${YIP_APP_OUT}/${YIP_CONFIG}/
         -p:IntDir=${YIP_APP_OUT}/${YIP_CONFIG}/obj/
         -p:YipAudioCoreLib=${AUDIO_CORE_LIB}
-        -p:YipVstHostLib=$<TARGET_FILE:vst_host>
         -p:YipAudioCoreInclude=${AUDIO_CORE_DIR}/include
-        -p:YipVstHostInclude=${CMAKE_SOURCE_DIR}/vst-host/include
         -m
         -v:minimal
         -nologo
-    DEPENDS audio_core_build vst_host
+    DEPENDS audio_core_build
     COMMENT "msbuild yip-app.vcxproj (restore + build)"
     VERBATIM
 )

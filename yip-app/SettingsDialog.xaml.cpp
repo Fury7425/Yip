@@ -71,7 +71,7 @@ const wchar_t* FormatHintText(uint16_t format)
         case audiofmt::kM4a:
             return L"Lossy, smaller than MP3 at the same quality. Records at 44.1 or 48 kHz.";
         default:
-            return L"Uncompressed. The only format Process can open.";
+            return L"Uncompressed. The largest files, and no quality loss.";
     }
 }
 

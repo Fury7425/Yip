@@ -15,7 +15,6 @@
     <Grid x:Name="Root">
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="R" Modifiers="Control" Invoked="OnRecordAccelerator" />
-            <KeyboardAccelerator Key="P" Modifiers="Control" Invoked="OnProcessAccelerator" />
             <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnSearchAccelerator" />
             <KeyboardAccelerator Key="F5" Invoked="OnRefreshAccelerator" />
         </Grid.KeyboardAccelerators>
@@ -50,28 +49,6 @@
 
             <StackPanel x:Name="TitleBarActions" Grid.Column="2" Orientation="Horizontal"
                         Spacing="2" Margin="0,0,140,0" VerticalAlignment="Center">
-                <Button x:Name="ProcessButton" Click="OnOpenProcess"
-                        Background="Transparent" BorderThickness="0" Padding="9,6"
-                        AutomationProperties.Name="Process with VST3"
-                        ToolTipService.ToolTip="Process with VST3 (Ctrl+P)">
-                    <Grid Width="16" Height="16">
-                        <Rectangle Height="1.5" RadiusX="1" RadiusY="1" VerticalAlignment="Top"
-                                   Margin="1,3,1,0" Fill="{ThemeResource YipTextTertiaryBrush}" />
-                        <Ellipse Width="4.5" Height="4.5" HorizontalAlignment="Left"
-                                 VerticalAlignment="Top" Margin="9,1.5,0,0"
-                                 Fill="{ThemeResource YipTextSecondaryBrush}" />
-                        <Rectangle Height="1.5" RadiusX="1" RadiusY="1" VerticalAlignment="Center"
-                                   Margin="1,0,1,0" Fill="{ThemeResource YipTextTertiaryBrush}" />
-                        <Ellipse Width="4.5" Height="4.5" HorizontalAlignment="Left"
-                                 VerticalAlignment="Center" Margin="3,0,0,0"
-                                 Fill="{ThemeResource YipTextSecondaryBrush}" />
-                        <Rectangle Height="1.5" RadiusX="1" RadiusY="1" VerticalAlignment="Bottom"
-                                   Margin="1,0,1,3" Fill="{ThemeResource YipTextTertiaryBrush}" />
-                        <Ellipse Width="4.5" Height="4.5" HorizontalAlignment="Left"
-                                 VerticalAlignment="Bottom" Margin="6,0,0,1.5"
-                                 Fill="{ThemeResource YipTextSecondaryBrush}" />
-                    </Grid>
-                </Button>
                 <Button x:Name="SettingsButton" Click="OnOpenSettings"
                         Background="Transparent" BorderThickness="0" Padding="9,6"
                         AutomationProperties.Name="Settings"

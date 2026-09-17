@@ -93,7 +93,6 @@
       </PreprocessorDefinitions>
       <AdditionalIncludeDirectories>
         $(YipAudioCoreInclude);
-        $(YipVstHostInclude);
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
       <DisableSpecificWarnings>4100;4458</DisableSpecificWarnings>
@@ -118,7 +117,6 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>
         $(YipAudioCoreLib);
-        $(YipVstHostLib);
         ws2_32.lib;
         userenv.lib;
         bcrypt.lib;
@@ -170,12 +168,8 @@
     <ClCompile Include="IndicatorWindow.xaml.cpp">
       <DependentUpon>IndicatorWindow.xaml</DependentUpon>
     </ClCompile>
-    <ClCompile Include="ProcessDialog.xaml.cpp">
-      <DependentUpon>ProcessDialog.xaml</DependentUpon>
-    </ClCompile>
     <ClCompile Include="viewmodels\MainViewModel.cpp" />
     <ClCompile Include="AudioCoreInterop.cpp" />
-    <ClCompile Include="VstInterop.cpp" />
     <ClCompile Include="Settings.cpp" />
     <ClCompile Include="IndicatorPersistence.cpp" />
     <ClCompile Include="Markers.cpp" />
@@ -201,12 +195,8 @@
     <ClInclude Include="IndicatorWindow.xaml.h">
       <DependentUpon>IndicatorWindow.xaml</DependentUpon>
     </ClInclude>
-    <ClInclude Include="ProcessDialog.xaml.h">
-      <DependentUpon>ProcessDialog.xaml</DependentUpon>
-    </ClInclude>
     <ClInclude Include="viewmodels\MainViewModel.h" />
     <ClInclude Include="AudioCoreInterop.h" />
-    <ClInclude Include="VstInterop.h" />
     <ClInclude Include="Settings.h" />
     <ClInclude Include="IndicatorState.h" />
     <ClInclude Include="IndicatorPersistence.h" />
@@ -224,7 +214,6 @@
     <Midl Include="MainWindow.idl" />
     <Midl Include="SettingsDialog.idl" />
     <Midl Include="IndicatorWindow.idl" />
-    <Midl Include="ProcessDialog.idl" />
     <Midl Include="viewmodels\MainViewModel.idl" />
   </ItemGroup>
 
@@ -239,9 +228,6 @@
       <SubType>Designer</SubType>
     </Page>
     <Page Include="IndicatorWindow.xaml">
-      <SubType>Designer</SubType>
-    </Page>
-    <Page Include="ProcessDialog.xaml">
       <SubType>Designer</SubType>
     </Page>
   </ItemGroup>

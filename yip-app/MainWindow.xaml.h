@@ -29,8 +29,6 @@ struct MainWindow : MainWindowT<MainWindow> {
                         winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     winrt::fire_and_forget OnOpenSettings(winrt::Windows::Foundation::IInspectable const& sender,
                                           winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
-    winrt::fire_and_forget OnOpenProcess(winrt::Windows::Foundation::IInspectable const& sender,
-                                         winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     void OnRefreshList(winrt::Windows::Foundation::IInspectable const& sender,
                        winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     void OnWaveSizeChanged(winrt::Windows::Foundation::IInspectable const& sender,
@@ -56,9 +54,6 @@ struct MainWindow : MainWindowT<MainWindow> {
 
     // ----- accelerators -----
     void OnRecordAccelerator(
-        winrt::Microsoft::UI::Xaml::Input::KeyboardAccelerator const& sender,
-        winrt::Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
-    void OnProcessAccelerator(
         winrt::Microsoft::UI::Xaml::Input::KeyboardAccelerator const& sender,
         winrt::Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
     void OnSearchAccelerator(

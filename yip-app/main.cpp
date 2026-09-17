@@ -22,11 +22,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE /*hInstance*/, _In_opt_ HINSTANCE /*hPrevIn
         return 0;
     }
 
-    // Smoke-tests: confirm both native libs are linked and reachable.
+    // Smoke-test: confirm the native audio lib is linked and reachable.
     const int32_t audioProbe = rec_dummy();
-    const int32_t vstProbe = yip_vst_dummy();
-    wchar_t buf[128];
-    swprintf_s(buf, L"Yip: audio_core dummy=%d, vst_host dummy=%d\n", audioProbe, vstProbe);
+    wchar_t buf[64];
+    swprintf_s(buf, L"Yip: audio_core dummy=%d\n", audioProbe);
     OutputDebugStringW(buf);
 
     {
