@@ -22,11 +22,13 @@ use crate::mf::Runtime;
 /// 100-ns media time per millisecond.
 const HNS_PER_MS: u128 = 10_000;
 
-/// Stream indices, unwrapped once. windows-rs wraps them in a newtype, while
-/// every `IMFSourceReader` method that takes one takes a plain `u32`.
-const FIRST_AUDIO_STREAM: u32 = mf::MF_SOURCE_READER_FIRST_AUDIO_STREAM.0;
-const ALL_STREAMS: u32 = mf::MF_SOURCE_READER_ALL_STREAMS.0;
-const MEDIA_SOURCE: u32 = mf::MF_SOURCE_READER_MEDIASOURCE.0;
+/// Stream indices, unwrapped once. windows-rs wraps them in a signed newtype,
+/// while every `IMFSourceReader` method that takes one takes a plain `u32` —
+/// these are the 0xFFFFFFFD..0xFFFFFFFF sentinels, so the cast is the identity
+/// the header intends.
+const FIRST_AUDIO_STREAM: u32 = mf::MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
+const ALL_STREAMS: u32 = mf::MF_SOURCE_READER_ALL_STREAMS.0 as u32;
+const MEDIA_SOURCE: u32 = mf::MF_SOURCE_READER_MEDIASOURCE.0 as u32;
 
 /// `VARENUM` for an unsigned 64-bit PROPVARIANT, which is what MF_PD_DURATION
 /// comes back as.
