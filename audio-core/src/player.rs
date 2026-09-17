@@ -468,7 +468,11 @@ fn decoder_loop(
             let start = scratch.len() - pending;
             let written = push_frames(producer, &scratch[start..], samples_per_frame);
             pending -= written;
-            if pending > 0 {
+            if pending > 0 && pending < samples_per_frame {
+                // Less than a whole frame left. The ring only takes whole
+                // ones, so this would otherwise be waited on forever.
+                pending = 0;
+            } else if pending > 0 {
                 std::thread::sleep(std::time::Duration::from_millis(POLL_MS));
             }
             continue;

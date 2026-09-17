@@ -931,7 +931,9 @@ void MainWindow::OnPlayAccelerator(
     // With nothing loaded, Ctrl+P plays whatever is selected — which is what
     // the shortcut is for when the list has focus.
     if (!m_viewModel.IsPlaybackLoaded()) {
-        if (auto entry = RecordingsList().SelectedItem().try_as<winrt::yip::viewmodels::RecordingEntry>()) {
+        auto selected = RecordingsList().SelectedItem();
+        if (!selected) return;
+        if (auto entry = selected.try_as<winrt::yip::viewmodels::RecordingEntry>()) {
             m_viewModel.PlayRecording(entry);
         }
         return;
