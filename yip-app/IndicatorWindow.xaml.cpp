@@ -5,6 +5,7 @@
 #include "IndicatorWindow.g.cpp"
 #endif
 
+#include "Settings.h"
 #include "ThemeColors.h"
 
 #include <DispatcherQueue.h>
@@ -123,25 +124,35 @@ struct StateGeom {
     float opacity;
 };
 
-StateGeom GeometryFor(::yip::IndicatorState s) noexcept
+// Expanded is the largest state in either style, so it is also the window.
+constexpr float kExpandedW = 232.0f;
+constexpr float kExpandedH = 56.0f;
+constexpr float kPillW = 156.0f;
+constexpr float kPillH = 44.0f;
+// The dot style's disc: the 8 DIP lamp with enough glass round it to read on
+// any wallpaper and still take a click.
+constexpr float kDotSize = 24.0f;
+
+StateGeom GeometryFor(::yip::IndicatorState s, bool dot) noexcept
 {
     // Collapsed, the readout (dot, meter, clock: ~93 DIP) sits centred with room
     // for the capsule's round ends either side. Expanded, it centres in the
     // space left of the two 34 DIP buttons, whose outer circle is concentric
-    // with the capsule's end. The hidden states share the collapsed size so a
-    // take starting never resizes a window that is about to appear.
+    // with the capsule's end. The hidden states share the collapsed size.
     using S = ::yip::IndicatorState;
+    const float w = dot ? kDotSize : kPillW;
+    const float h = dot ? kDotSize : kPillH;
     switch (s) {
         case S::Idle:
         case S::Armed:
         case S::Recording:
-            return {156.0f, 44.0f, 1.00f};
+            return {w, h, 1.00f};
         case S::Saving:
-            return {156.0f, 44.0f, 0.85f};
+            return {w, h, 0.85f};
         case S::Expanded:
-            return {232.0f, 56.0f, 1.00f};
+            return {kExpandedW, kExpandedH, 1.00f};
     }
-    return {156.0f, 44.0f, 1.00f};
+    return {w, h, 1.00f};
 }
 
 bool IsShownState(::yip::IndicatorState s) noexcept
@@ -152,18 +163,8 @@ bool IsShownState(::yip::IndicatorState s) noexcept
     return s == S::Recording || s == S::Saving || s == S::Expanded;
 }
 
-/// Where in the pill its anchor sits, as fractions of width and height. The
-/// pill hangs from its top centre: that is the point that stays put when it
-/// changes size, and the point it grows out of when it appears.
-struct AnchorFraction {
-    float x;
-    float y;
-};
-
-constexpr AnchorFraction kAnchor{0.5f, 0.0f};
-
-/// Gap between the pill and the top of the work area, in physical pixels.
-constexpr int kHomeMarginPx = 12;
+/// Gap between the pill and the edge of the work area it sits against.
+constexpr float kHomeMarginDip = 12.0f;
 
 // The curves and animation helpers are templated over the compositor: the XAML
 // compositor draws the pill, the system compositor draws the blur behind it,
@@ -308,6 +309,12 @@ IndicatorWindow::IndicatorWindow()
     InitializeComponent();
 
     m_persisted = ::yip::IndicatorPersistence::Load();
+    {
+        const auto settings = ::yip::Settings::Load();
+        m_dotStyle = settings.pill_dot;
+        m_bottom = settings.pill_bottom;
+    }
+    m_contentPadding = PillContent().Padding();
 
     // Grab the HWND. Required for tool-window style + click-through flip.
     if (auto native = try_as<::IWindowNative>()) {
@@ -381,6 +388,14 @@ IndicatorWindow::IndicatorWindow()
     // {ThemeResource} bindings, they are colours copied at build time.
     m_themeToken = Root().ActualThemeChanged({this, &IndicatorWindow::OnActualThemeChanged});
 
+    // Posted rather than run inside Save(): the view model is still in the
+    // middle of applying the dialog when it saves.
+    ::yip::Settings::SetSavedHandler([weak = get_weak(), dq](::yip::Settings const& settings) {
+        dq.TryEnqueue([weak, dot = settings.pill_dot, bottom = settings.pill_bottom] {
+            if (auto self = weak.get()) self->ApplyPillSettings(dot, bottom);
+        });
+    });
+
     // Subscribe last: the first callback can transition straight into
     // Recording, which touches every timer created above.
     m_stateToken = ::yip::RecordingStateBus::Subscribe(dq, [weak = get_weak()](bool recording) {
@@ -395,6 +410,7 @@ IndicatorWindow::~IndicatorWindow()
 {
     ::yip::RecordingStateBus::Unsubscribe(m_stateToken);
     m_stateToken = 0;
+    ::yip::Settings::SetSavedHandler(nullptr);
     if (m_themeToken) {
         Root().ActualThemeChanged(m_themeToken);
         m_themeToken = {};
@@ -848,12 +864,6 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
     ++m_motionGen;
 
     const bool wantMeter = (s == S::Recording || s == S::Expanded || s == S::Saving);
-    // A pill on its way out keeps its last frame; blanking the readout
-    // mid-fade reads as a glitch.
-    if (show) {
-        MeterHost().Opacity(wantMeter ? 1.0 : 0.0);
-        ElapsedText().Opacity(wantMeter ? 1.0 : 0.0);
-    }
     UpdateDotForState(s);
 
     // Meter timer runs only while a meter is visible AND audio is live.
@@ -877,6 +887,9 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
         return;
     }
     if (!m_shown) {
+        // Placed while still hidden: this is the only time the HWND moves, so
+        // nothing on screen can catch it half done.
+        if (!m_windowVisible) PlacePillAtHome();
         // Size before show, or the first frame lands at the previous size.
         ApplyLayoutFor(s);
         ShowPill(animate);
@@ -887,7 +900,12 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
         return;
     }
     ApplyLayoutFor(s);
-    SetPillFade(GeometryFor(s).opacity, 1.0f);
+    SetPillFade(GeometryFor(s, m_dotStyle).opacity, 1.0f);
+}
+
+bool IndicatorWindow::DetailShownFor(::yip::IndicatorState s) const noexcept
+{
+    return !m_dotStyle || s == ::yip::IndicatorState::Expanded;
 }
 
 void IndicatorWindow::ApplyLayoutFor(::yip::IndicatorState s, ClipPolicy clip)
@@ -898,9 +916,18 @@ void IndicatorWindow::ApplyLayoutFor(::yip::IndicatorState s, ClipPolicy clip)
     ExpandedActions().Visibility(wantActions ? mux::Visibility::Visible : mux::Visibility::Collapsed);
     ExpandedActions().IsHitTestVisible(wantActions);
 
+    // The dot style's collapsed disc is narrower than the padding, so the
+    // padding goes with the meter and clock or the dot is pushed off centre.
+    const bool wantDetail = DetailShownFor(s);
+    ReadoutDetail().Visibility(wantDetail ? mux::Visibility::Visible : mux::Visibility::Collapsed);
+    PillContent().Padding(wantDetail ? m_contentPadding : mux::Thickness{});
+
     auto actions = muxh::ElementCompositionPreview::GetElementVisual(ExpandedActions());
     actions.StopAnimation(L"Opacity");
     actions.Opacity(1.0f);
+    auto detail = muxh::ElementCompositionPreview::GetElementVisual(ReadoutDetail());
+    detail.StopAnimation(L"Opacity");
+    detail.Opacity(1.0f);
     SetTranslation(ExpandedActions(), 0.0f, 0.0f);
     SetTranslation(ReadoutGroup(), 0.0f, 0.0f);
     if (clip == ClipPolicy::Clear) {
@@ -908,52 +935,61 @@ void IndicatorWindow::ApplyLayoutFor(::yip::IndicatorState s, ClipPolicy clip)
         m_morphing = false;
     }
 
-    SyncWindowToState(s, clip);
+    SyncFrameToState(s, clip);
 }
 
-void IndicatorWindow::SyncWindowToState(::yip::IndicatorState s, ClipPolicy clip)
+void IndicatorWindow::SyncFrameToState(::yip::IndicatorState s, ClipPolicy clip)
 {
-    const auto g = GeometryFor(s);
+    const auto g = GeometryFor(s, m_dotStyle);
 
-    // Border first, HWND last, always. MoveAndResize dispatches WM_SIZE
-    // synchronously and the XAML island can commit a frame off the back of it;
-    // everything that describes the new size has to be in place before that
-    // happens, or that one frame shows the old capsule in the new window.
-    //
-    // No window region either: it is aliased, so it chewed the Border's
-    // antialiased edge into a stepped rim, and with a transparent backdrop
-    // there is nothing outside the capsule for it to hide.
+    // Only the Border changes size. The HWND used to be resized with it, and
+    // that could never be made seamless: DWM applies a window's new rectangle
+    // on its own schedule while the island's content arrives a frame or more
+    // later, so every expand and collapse showed the old capsule jumping
+    // sideways in the new window for a frame. The window now stays at the
+    // expanded size for as long as it is on screen and layout moves the
+    // Border inside it, in the same frame as the clip that hides the change.
     const double radius = g.h * 0.5;
     PillFrame().Width(g.w);
     PillFrame().Height(g.h);
     PillFrame().CornerRadius({radius, radius, radius, radius});
 
     // Keep means a morph owns the mask's capsule right now: the surface still
-    // has to grow with the window, but the shape drawn into it is animating
-    // and must not be snapped to the new size under it.
+    // has to follow the Border, but the shape drawn into it is animating and
+    // must not be snapped to the new size under it.
     if (clip == ClipPolicy::Clear)
         ResetBackdropShape();
     else
         SyncBackdropSurface();
 
-    // The window is the pill. The HWND is sized in physical pixels while the
-    // geometry is DIPs: unscaled, a pill at 200% got half a window and lost
-    // its content off the right and bottom edges.
-    //
-    // It is sized around m_anchor rather than from its top-left corner, so a
-    // pill centred on the screen stays centred as it expands instead of
-    // growing off to the right.
-    if (m_hwnd) {
-        const double scale = DpiScale();
-        const int pw = static_cast<int>(std::lround(g.w * scale));
-        const int ph = static_cast<int>(std::lround(g.h * scale));
-        if (pw > 0 && ph > 0) {
-            const int x = static_cast<int>(m_anchor.x) - static_cast<int>(std::lround(pw * kAnchor.x));
-            const int y = static_cast<int>(m_anchor.y) - static_cast<int>(std::lround(ph * kAnchor.y));
-            auto appWindow = muw::AppWindow::GetFromWindowId(AppWindow().Id());
-            if (appWindow) appWindow.MoveAndResize({x, y, pw, ph});
-        }
+    // Growing now and shrinking only when a closing morph has finished is
+    // always safe: the region never cuts a pixel the capsule is drawing.
+    ApplyHitRegion(g.w, g.h);
+}
+
+void IndicatorWindow::ApplyPillSettings(bool dot, bool bottom)
+{
+    if (dot == m_dotStyle && bottom == m_bottom) return;
+    m_dotStyle = dot;
+    m_bottom = bottom;
+
+    // Orphan whatever motion is running: everything below lands in one step.
+    ++m_motionGen;
+    if (!m_shown && m_windowVisible) {
+        // A fade-out whose completion was just orphaned would never hide the
+        // window; finish it now instead.
+        HideWindow();
     }
+
+    if (m_windowVisible) {
+        PlacePillAtHome();
+        ApplyLayoutFor(m_state);
+        const auto g = GeometryFor(m_state, m_dotStyle);
+        const auto anchor = Anchor();
+        SetPillCentre(g.w * anchor.x, g.h * anchor.y);
+        SetPillFade(g.opacity, 1.0f);
+    }
+    // Hidden, the next show places and lays out the pill anyway.
 }
 
 // =========================================================== Motion
@@ -961,10 +997,11 @@ void IndicatorWindow::SyncWindowToState(::yip::IndicatorState s, ClipPolicy clip
 void IndicatorWindow::ShowPill(bool animate)
 {
     m_shown = true;
-    const auto g = GeometryFor(m_state);
-    // Grows out of its anchor — down from the top edge it is pinned to, not
+    const auto g = GeometryFor(m_state, m_dotStyle);
+    // Grows out of its anchor — away from the screen edge it is pinned to, not
     // outward from its middle.
-    SetPillCentre(g.w * kAnchor.x, g.h * kAnchor.y);
+    const auto anchor = Anchor();
+    SetPillCentre(g.w * anchor.x, g.h * anchor.y);
 
     if (!animate) {
         SetPillFade(g.opacity, 1.0f);
@@ -992,7 +1029,8 @@ void IndicatorWindow::HidePill(bool animate)
 
     const auto w = static_cast<float>(PillFrame().Width());
     const auto h = static_cast<float>(PillFrame().Height());
-    SetPillCentre(w * kAnchor.x, h * kAnchor.y);
+    const auto anchor = Anchor();
+    SetPillCentre(w * anchor.x, h * anchor.y);
 
     const auto gen = m_motionGen;
     auto batch = m_compositor.CreateScopedBatch(mucomp::CompositionBatchTypes::Animation);
@@ -1017,8 +1055,8 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
         PillFrame().UpdateLayout();
     }
 
-    const auto a = GeometryFor(from);
-    const auto b = GeometryFor(to);
+    const auto a = GeometryFor(from, m_dotStyle);
+    const auto b = GeometryFor(to, m_dotStyle);
 
     if (a.w == b.w && a.h == b.h) {
         ApplyLayoutFor(to);
@@ -1026,16 +1064,22 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
         return;
     }
 
-    // The HWND cannot be tweened, so the window jumps to whichever of the two
-    // sizes is larger and a rounded clip draws the capsule between them. Where
-    // the readout sits in each layout is measured, and the gap between the two
-    // is played out as a composition translation, so it glides rather than
-    // teleports. `kAnchor` says which part of the pill stays put on screen.
+    // The Border takes whichever of the two sizes is larger and a rounded clip
+    // draws the capsule between them. Where the tracked point sits in each
+    // layout is measured, and the gap between the two is played out as a
+    // composition translation, so the readout glides rather than teleports.
+    // `anchor` says which part of the pill stays put on screen: layout keeps
+    // the Border centred and flush with that edge, so a size change moves its
+    // origin by exactly the part of the change on the far side of the anchor.
+    const auto anchor = Anchor();
     const float dw = b.w - a.w;
     const float dh = b.h - a.h;
-    const auto before = ReadoutCentre();
+    const auto before = TrackedCentre();
     auto readout = muxh::ElementCompositionPreview::GetElementVisual(ReadoutGroup());
     auto actions = muxh::ElementCompositionPreview::GetElementVisual(ExpandedActions());
+    auto detail = muxh::ElementCompositionPreview::GetElementVisual(ReadoutDetail());
+    const bool detailArrives = !DetailShownFor(from) && DetailShownFor(to);
+    const bool detailLeaves = DetailShownFor(from) && !DetailShownFor(to);
     const auto gen = m_motionGen;
 
     auto batch = m_compositor.CreateScopedBatch(mucomp::CompositionBatchTypes::Animation);
@@ -1043,16 +1087,15 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
 
     if (dw >= 0.0f) {
         // Opening: hold the old outline first, *then* take the new layout, then
-        // let the outline go. Clipping before the resize is the whole point —
-        // the resize can render a frame on its own, and with no clip installed
-        // that frame is the full expanded capsule appearing out of nowhere.
-        SetClip(a.w, a.h, dw * kAnchor.x, dh * kAnchor.y);
+        // let the outline go. All of it lands in the same frame, so the larger
+        // Border is never seen unclipped.
+        SetClip(a.w, a.h, dw * anchor.x, dh * anchor.y);
         ApplyLayoutFor(to, ClipPolicy::Keep);
         PillFrame().UpdateLayout();
-        const auto after = ReadoutCentre();
+        const auto after = TrackedCentre();
 
-        SetTranslation(ReadoutGroup(), before.X - after.X + dw * kAnchor.x,
-                       before.Y - after.Y + dh * kAnchor.y);
+        SetTranslation(ReadoutGroup(), before.X - after.X + dw * anchor.x,
+                       before.Y - after.Y + dh * anchor.y);
         AnimateVector3(m_compositor, readout, L"Translation", {0.0f, 0.0f, 0.0f}, kMorphMs, m_easeMorph);
 
         AnimateClip(b.w, b.h, 0.0f, 0.0f);
@@ -1064,6 +1107,12 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
         AnimateScalar(m_compositor, actions, L"Opacity", 1.0f, kActionsInMs, m_easeOut, kActionsInDelayMs);
         AnimateVector3(m_compositor, actions, L"Translation", {0.0f, 0.0f, 0.0f}, kActionsInMs, m_easeOut,
                        kActionsInDelayMs);
+
+        // Out of a dot, the meter and clock unfold beside it on the same beat.
+        if (detailArrives) {
+            detail.Opacity(0.0f);
+            AnimateScalar(m_compositor, detail, L"Opacity", 1.0f, kActionsInMs, m_easeOut, kActionsInDelayMs);
+        }
 
         batch.End();
         batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
@@ -1077,19 +1126,21 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
     }
 
     // Closing: the buttons leave first, the outline closes over them, and only
-    // then does the window shrink and the layout change underneath. Hit
+    // then does the Border shrink and the layout change underneath. Hit
     // testing goes with the fade, not with the layout pass 170 ms later — a
     // button nobody can see must not still be a button.
     ExpandedActions().IsHitTestVisible(false);
     AnimateScalar(m_compositor, actions, L"Opacity", 0.0f, kActionsOutMs, m_easeOut);
+    if (detailLeaves) AnimateScalar(m_compositor, detail, L"Opacity", 0.0f, kActionsOutMs, m_easeOut);
 
-    // In the collapsed layout the readout is centred in the new outline.
-    const float tx = -dw * kAnchor.x + b.w * 0.5f - before.X;
-    const float ty = -dh * kAnchor.y + b.h * 0.5f - before.Y;
+    // In the collapsed layout the tracked point is centred in the new outline:
+    // the readout in the pill style, the lone dot in the dot style.
+    const float tx = -dw * anchor.x + b.w * 0.5f - before.X;
+    const float ty = -dh * anchor.y + b.h * 0.5f - before.Y;
     AnimateVector3(m_compositor, readout, L"Translation", {tx, ty, 0.0f}, kMorphMs, m_easeMorph);
 
     SetClip(a.w, a.h, 0.0f, 0.0f);
-    AnimateClip(b.w, b.h, -dw * kAnchor.x, -dh * kAnchor.y);
+    AnimateClip(b.w, b.h, -dw * anchor.x, -dh * anchor.y);
 
     batch.End();
     batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
@@ -1187,19 +1238,23 @@ void IndicatorWindow::SetBackdropShape(float w, float h, float x, float y)
 
 void IndicatorWindow::SyncBackdropSurface()
 {
-    if (!m_maskSurface) return;
+    if (!m_maskSurface || !m_hwnd) return;
     const auto w = static_cast<float>(PillFrame().Width());
     const auto h = static_cast<float>(PillFrame().Height());
-    if (!(w > 0.0f && h > 0.0f)) return; // NaN until the first SyncWindowToState
+    if (!(w > 0.0f && h > 0.0f)) return; // NaN until the first SyncFrameToState
+    RECT client{};
+    if (!::GetClientRect(m_hwnd, &client) || client.right <= 0 || client.bottom <= 0) return;
 
     // The surface is the window's size in physical pixels and the shape is in
-    // DIPs, scaled up by the DPI container. The brush's Fill stretch then maps
-    // the surface onto the window exactly, whatever units the backdrop is
-    // painted in.
+    // PillFrame DIPs: the DPI container scales it up and offsets it to where
+    // layout put the Border. The brush's Fill stretch then maps the surface
+    // onto the window exactly, whatever units the backdrop is painted in.
     const auto scale = static_cast<float>(DpiScale());
-    const float2 px{w * scale, h * scale};
+    const float2 px{static_cast<float>(client.right), static_cast<float>(client.bottom)};
+    const auto origin = FrameOrigin(w, h);
     m_maskSurface.SourceSize(px);
     m_maskRoot.Size(px);
+    m_maskDpi.Offset({origin.x * scale, origin.y * scale, 0.0f});
     m_maskDpi.Size({w, h});
     m_maskDpi.Scale({scale, scale, 1.0f});
     m_maskVisual.Size({w, h});
@@ -1215,13 +1270,17 @@ void IndicatorWindow::ResetBackdropShape()
     SetBackdropShape(w, h, 0.0f, 0.0f);
 }
 
-winrt::Windows::Foundation::Point IndicatorWindow::ReadoutCentre()
+winrt::Windows::Foundation::Point IndicatorWindow::TrackedCentre()
 {
-    auto group = ReadoutGroup();
+    // In the pill style the readout keeps its shape through a morph, so its
+    // centre will do. In the dot style it grows out of the dot and folds back
+    // into it, so the dot is what has to stay still.
+    const mux::FrameworkElement element =
+        m_dotStyle ? mux::FrameworkElement{DotHost()} : mux::FrameworkElement{ReadoutGroup()};
     const auto origin =
-        group.TransformToVisual(PillFrame()).TransformPoint(winrt::Windows::Foundation::Point{0.0f, 0.0f});
-    return {origin.X + static_cast<float>(group.ActualWidth()) * 0.5f,
-            origin.Y + static_cast<float>(group.ActualHeight()) * 0.5f};
+        element.TransformToVisual(PillFrame()).TransformPoint(winrt::Windows::Foundation::Point{0.0f, 0.0f});
+    return {origin.X + static_cast<float>(element.ActualWidth()) * 0.5f,
+            origin.Y + static_cast<float>(element.ActualHeight()) * 0.5f};
 }
 
 // ================================================================= Pointer
@@ -1245,7 +1304,10 @@ void IndicatorWindow::OnPillTapped(winrt::Windows::Foundation::IInspectable cons
 {
     if (m_state == ::yip::IndicatorState::Expanded) {
         TransitionTo(m_baseState, true);
-    } else {
+    } else if (m_recording) {
+        // Not while Saving: a finished take has nothing left to pause or stop,
+        // and a pill opened over Saving missed the one-shot timer that hides
+        // it, then collapsed back into Saving and stayed on screen for good.
         TransitionTo(::yip::IndicatorState::Expanded, true);
     }
 }
@@ -1288,28 +1350,74 @@ double IndicatorWindow::DpiScale() const noexcept
     return dpi > 0 ? static_cast<double>(dpi) / 96.0 : 1.0;
 }
 
+float2 IndicatorWindow::Anchor() const noexcept
+{
+    return {0.5f, m_bottom ? 1.0f : 0.0f};
+}
+
+float2 IndicatorWindow::FrameOrigin(float w, float h) const
+{
+    // Centred across the window and flush with the anchored edge, which is
+    // what the Border's alignment asks layout for. Snapped to whole physical
+    // pixels the way layout rounding places it, so the blur mask and the mouse
+    // region land on the Border's edge rather than half a pixel off it.
+    RECT client{};
+    if (!m_hwnd || !::GetClientRect(m_hwnd, &client)) return {0.0f, 0.0f};
+    const auto scale = static_cast<float>(DpiScale());
+    const float windowW = static_cast<float>(client.right) / scale;
+    const float windowH = static_cast<float>(client.bottom) / scale;
+    const auto snap = [scale](float v) { return std::round(v * scale) / scale; };
+    const auto anchor = Anchor();
+    return {snap((windowW - w) * anchor.x), snap((windowH - h) * anchor.y)};
+}
+
+void IndicatorWindow::ApplyHitRegion(float w, float h)
+{
+    if (!m_hwnd || !(w > 0.0f && h > 0.0f)) return;
+
+    // The window is sized for the expanded pill, so around a collapsed one it
+    // is mostly transparent pixels — which still take the mouse, because the
+    // window is not layered. A rectangle rather than the capsule: a region is
+    // aliased, and a rounded one once chewed the Border's antialiased edge
+    // into steps. A pixel of slack keeps that edge well inside it.
+    const double scale = DpiScale();
+    const auto origin = FrameOrigin(w, h);
+    const int left = static_cast<int>(std::floor(origin.x * scale)) - 1;
+    const int top = static_cast<int>(std::floor(origin.y * scale)) - 1;
+    const int right = static_cast<int>(std::ceil((origin.x + w) * scale)) + 1;
+    const int bottom = static_cast<int>(std::ceil((origin.y + h) * scale)) + 1;
+
+    HRGN region = ::CreateRectRgn(left, top, right, bottom);
+    if (!region) return;
+    // On success the window owns the region; only a refusal leaves it ours.
+    if (!::SetWindowRgn(m_hwnd, region, TRUE)) ::DeleteObject(region);
+}
+
 void IndicatorWindow::PlacePillAtHome()
 {
     if (!m_hwnd) return;
-
-    // WorkArea is physical pixels, so the pill's DIP size has to be scaled
-    // before it is used to centre against it. Placed at the size it will first
-    // appear at, so the anchor derived below is exact.
-    const auto g = GeometryFor(::yip::IndicatorState::Recording);
-    const int winW = static_cast<int>(std::lround(g.w * DpiScale()));
-    const int winH = static_cast<int>(std::lround(g.h * DpiScale()));
 
     auto appWindow = muw::AppWindow::GetFromWindowId(AppWindow().Id());
     auto primary = muw::DisplayArea::Primary();
     if (!appWindow || !primary) return;
 
-    const auto work = primary.WorkArea();
-    const int x = work.X + (work.Width - winW) / 2;
-    const int y = work.Y + kHomeMarginPx;
-    appWindow.MoveAndResize({x, y, winW, winH});
+    PillFrame().VerticalAlignment(m_bottom ? mux::VerticalAlignment::Bottom : mux::VerticalAlignment::Top);
 
-    m_anchor.x = x + static_cast<LONG>(std::lround(winW * kAnchor.x));
-    m_anchor.y = y + static_cast<LONG>(std::lround(winH * kAnchor.y));
+    // WorkArea is physical pixels, so the DIP sizes are scaled first. Rounded
+    // up, so the expanded Border always fits inside the window. Twice at most:
+    // the first move can carry the window onto a display with another DPI, and
+    // the size has to be worked out in that display's pixels.
+    const auto work = primary.WorkArea();
+    for (int pass = 0; pass < 2; ++pass) {
+        const double scale = DpiScale();
+        const int w = static_cast<int>(std::ceil(kExpandedW * scale));
+        const int h = static_cast<int>(std::ceil(kExpandedH * scale));
+        const int margin = static_cast<int>(std::lround(kHomeMarginDip * scale));
+        const int x = work.X + (work.Width - w) / 2;
+        const int y = m_bottom ? work.Y + work.Height - h - margin : work.Y + margin;
+        appWindow.MoveAndResize({x, y, w, h});
+        if (DpiScale() == scale) break;
+    }
 }
 
 // =========================================================== Visibility

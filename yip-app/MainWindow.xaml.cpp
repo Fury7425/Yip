@@ -676,6 +676,8 @@ winrt::fire_and_forget MainWindow::OnOpenSettings(winrt::Windows::Foundation::II
     dialog.Channels(strong->m_viewModel.Channels());
     dialog.HotkeyMods(strong->m_viewModel.HotkeyMods());
     dialog.HotkeyVk(strong->m_viewModel.HotkeyVk());
+    dialog.PillDot(strong->m_viewModel.PillDot());
+    dialog.PillBottom(strong->m_viewModel.PillBottom());
 
     // ContentDialog needs an XamlRoot in WinAppSDK.
     dialog.XamlRoot(strong->Content().XamlRoot());
@@ -683,7 +685,8 @@ winrt::fire_and_forget MainWindow::OnOpenSettings(winrt::Windows::Foundation::II
     const auto result = co_await dialog.ShowAsync();
     if (result == winrt::Microsoft::UI::Xaml::Controls::ContentDialogResult::Primary) {
         strong->m_viewModel.ApplySettings(dialog.OutputFolder(), dialog.SampleRate(), dialog.Channels(),
-                                          dialog.HotkeyMods(), dialog.HotkeyVk());
+                                          dialog.HotkeyMods(), dialog.HotkeyVk(), dialog.PillDot(),
+                                          dialog.PillBottom());
         // Re-grab the combo: the old registration is dropped inside Register().
         strong->ApplyHotkeyFromSettings();
         strong->UpdateEmptyState();

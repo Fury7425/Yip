@@ -71,12 +71,19 @@ private:
     // Driven by RecordingStateBus, not a timer: an idle pill costs nothing.
     void OnRecordingStateChanged(bool recording);
     void TransitionTo(::yip::IndicatorState s, bool animate = true);
-    // Land every layout property on `s` at once: actions, window, Border,
-    // readout translation and clip. Every motion path ends by calling this.
+    // Land every layout property on `s` at once: actions, readout detail,
+    // Border, readout translation and clip. Every motion path ends by calling
+    // this.
     void ApplyLayoutFor(::yip::IndicatorState s, ClipPolicy clip = ClipPolicy::Clear);
-    // Resize the HWND and the Border to match the state, around m_anchor.
-    // The window *is* the pill.
-    void SyncWindowToState(::yip::IndicatorState s, ClipPolicy clip = ClipPolicy::Clear);
+    // Size the Border, the blur mask and the mouse region to the state. Never
+    // the HWND: that is sized once per show, by PlacePillAtHome.
+    void SyncFrameToState(::yip::IndicatorState s, ClipPolicy clip = ClipPolicy::Clear);
+    // Settings saved from the main window: dot or pill, top or bottom. Lands
+    // on the spot, mid-take included.
+    void ApplyPillSettings(bool dot, bool bottom);
+    // Whether the meter and clock are laid out in `s`. Always in the pill
+    // style; only while expanded in the dot style.
+    bool DetailShownFor(::yip::IndicatorState s) const noexcept;
 
     // ----- Motion -----
     void ShowPill(bool animate);
@@ -102,15 +109,26 @@ private:
     void SyncBackdropSurface();
     // Surface *and* shape back to the whole PillFrame. The resting state.
     void ResetBackdropShape();
-    // Centre of the readout group in PillFrame coordinates (layout only; the
-    // composition translation is not included).
-    winrt::Windows::Foundation::Point ReadoutCentre();
+    // The point a morph keeps still, in PillFrame coordinates (layout only;
+    // the composition translation is not included): the readout's centre in
+    // the pill style, the dot's in the dot style.
+    winrt::Windows::Foundation::Point TrackedCentre();
 
     // ----- Placement -----
-    // The pill is not movable: it always sits at the top centre of the primary
-    // display's work area. Called once, before the first show.
+    // The pill is not movable: it always sits centred at the top or bottom of
+    // the primary display's work area. Run before every show, so a taskbar,
+    // resolution or DPI change between takes is picked up.
     void PlacePillAtHome();
     double DpiScale() const noexcept;
+    // The pill hangs from its top centre, or its bottom centre when it sits at
+    // the bottom of the screen, as fractions of its width and height. That
+    // point stays put when it changes size and is where it grows from.
+    winrt::Windows::Foundation::Numerics::float2 Anchor() const noexcept;
+    // Where layout puts a w x h PillFrame inside the window, in DIPs.
+    winrt::Windows::Foundation::Numerics::float2 FrameOrigin(float w, float h) const;
+    // Mouse input only over the capsule's bounding box, so the transparent
+    // rest of the window does not swallow clicks meant for what is beneath it.
+    void ApplyHitRegion(float w, float h);
 
     // ----- Visibility -----
     void ShowWindow();
@@ -143,9 +161,13 @@ private:
     ::yip::RecordingStateBus::Token m_stateToken{0};
     winrt::event_token m_themeToken{};
 
-    // The physical-pixel point the pill is sized around: its top centre.
-    // Resizing around it is what keeps a centred pill centred when it expands.
-    POINT m_anchor{};
+    // From settings.json. m_dotStyle: collapsed, the pill is the recording
+    // light alone. m_bottom: it sits at the bottom of the screen.
+    bool m_dotStyle{false};
+    bool m_bottom{false};
+    // YipIndicatorPadding as the XAML applied it. The dot style drops it while
+    // collapsed and needs it back to expand.
+    winrt::Microsoft::UI::Xaml::Thickness m_contentPadding{};
 
     // Bumped on every transition. A motion's completion handler only acts if
     // nothing has happened since it started.

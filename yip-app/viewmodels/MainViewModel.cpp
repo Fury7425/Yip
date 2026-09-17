@@ -496,7 +496,7 @@ void MainViewModel::ToggleRecording()
 }
 
 void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleRate, uint16_t channels,
-                                  uint32_t hotkeyMods, uint32_t hotkeyVk)
+                                  uint32_t hotkeyMods, uint32_t hotkeyVk, bool pillDot, bool pillBottom)
 {
     m_settings.output_folder = std::wstring{folder};
     m_settings.sample_rate = sampleRate;
@@ -505,6 +505,8 @@ void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleR
         m_settings.hotkey_mods = hotkeyMods;
         m_settings.hotkey_vk = hotkeyVk;
     }
+    m_settings.pill_dot = pillDot;
+    m_settings.pill_bottom = pillBottom;
 
     std::error_code ec;
     fs::create_directories(m_settings.output_folder, ec);
@@ -519,6 +521,8 @@ void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleR
     Raise(L"HotkeyMods");
     Raise(L"HotkeyVk");
     Raise(L"HotkeyLabel");
+    Raise(L"PillDot");
+    Raise(L"PillBottom");
     RefreshRecordings();
     if (!HasError()) SetStatus(L"Settings saved");
 }

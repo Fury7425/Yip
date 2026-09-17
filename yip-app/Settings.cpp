@@ -11,6 +11,12 @@ namespace fs = std::filesystem;
 namespace wdj = winrt::Windows::Data::Json;
 
 namespace {
+std::function<void(yip::Settings const&)>& SavedHandler()
+{
+    static std::function<void(yip::Settings const&)> handler;
+    return handler;
+}
+
 fs::path LocalAppData()
 {
     wchar_t* base = nullptr;
@@ -89,6 +95,14 @@ Settings Settings::Load()
     if (obj.HasKey(L"hotkey_vk")) {
         s.hotkey_vk = static_cast<uint32_t>(obj.GetNamedNumber(L"hotkey_vk", 82.0));
     }
+    // Strings rather than flags, so the file still reads right when a third
+    // style or edge turns up.
+    if (obj.HasKey(L"pill_style")) {
+        s.pill_dot = obj.GetNamedString(L"pill_style", L"pill") == L"dot";
+    }
+    if (obj.HasKey(L"pill_edge")) {
+        s.pill_bottom = obj.GetNamedString(L"pill_edge", L"top") == L"bottom";
+    }
     return s;
 }
 
@@ -101,6 +115,8 @@ bool Settings::Save() const
     obj.SetNamedValue(L"format", wdj::JsonValue::CreateNumberValue(static_cast<double>(format)));
     obj.SetNamedValue(L"hotkey_mods", wdj::JsonValue::CreateNumberValue(static_cast<double>(hotkey_mods)));
     obj.SetNamedValue(L"hotkey_vk", wdj::JsonValue::CreateNumberValue(static_cast<double>(hotkey_vk)));
+    obj.SetNamedValue(L"pill_style", wdj::JsonValue::CreateStringValue(pill_dot ? L"dot" : L"pill"));
+    obj.SetNamedValue(L"pill_edge", wdj::JsonValue::CreateStringValue(pill_bottom ? L"bottom" : L"top"));
 
     const auto path = SettingsPath();
     std::error_code ec;
@@ -120,6 +136,12 @@ bool Settings::Save() const
     if (!::MoveFileExW(tmpPath.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         return false;
     }
+    if (auto const& handler = SavedHandler()) handler(*this);
     return true;
+}
+
+void Settings::SetSavedHandler(std::function<void(Settings const&)> handler)
+{
+    SavedHandler() = std::move(handler);
 }
 } // namespace yip

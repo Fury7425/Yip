@@ -2,7 +2,8 @@
 
 // Persisted indicator state: click-through toggle, last expanded-or-collapsed
 // preference. JSON at %LOCALAPPDATA%\Yip\indicator.json. The pill's position
-// is not among them — it is pinned to the top centre of the primary display.
+// is not among them — it is pinned to the top or bottom centre of the primary
+// display, and which edge (like the dot style) is a user setting in Settings.h.
 
 #include <filesystem>
 #include <string>

@@ -106,6 +106,28 @@ void SettingsDialog::HotkeyVk(uint32_t v)
     ApplyHotkeyToControls();
 }
 
+bool SettingsDialog::PillDot() const noexcept
+{
+    ReadFromControls();
+    return m_pillDot;
+}
+void SettingsDialog::PillDot(bool v)
+{
+    m_pillDot = v;
+    ApplyToControls();
+}
+
+bool SettingsDialog::PillBottom() const noexcept
+{
+    ReadFromControls();
+    return m_pillBottom;
+}
+void SettingsDialog::PillBottom(bool v)
+{
+    m_pillBottom = v;
+    ApplyToControls();
+}
+
 void SettingsDialog::ApplyHotkeyToControls()
 {
     if (HotkeyBox()) {
@@ -176,6 +198,12 @@ void SettingsDialog::ApplyToControls()
     if (ChannelsCombo()) {
         ChannelsCombo().SelectedIndex(m_channels == 1 ? 0 : 1);
     }
+    if (PillStyleCombo()) {
+        PillStyleCombo().SelectedIndex(m_pillDot ? 1 : 0);
+    }
+    if (PillEdgeCombo()) {
+        PillEdgeCombo().SelectedIndex(m_pillBottom ? 1 : 0);
+    }
     ApplyHotkeyToControls();
 }
 
@@ -207,6 +235,12 @@ void SettingsDialog::ReadFromControls() const
     }
     if (self->ChannelsCombo()) {
         self->m_channels = (self->ChannelsCombo().SelectedIndex() == 0) ? 1 : 2;
+    }
+    if (self->PillStyleCombo()) {
+        self->m_pillDot = self->PillStyleCombo().SelectedIndex() == 1;
+    }
+    if (self->PillEdgeCombo()) {
+        self->m_pillBottom = self->PillEdgeCombo().SelectedIndex() == 1;
     }
 }
 

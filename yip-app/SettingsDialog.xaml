@@ -139,6 +139,54 @@
             </Grid>
         </Border>
 
+        <!-- ===================== Indicator ===================== -->
+        <TextBlock Text="INDICATOR" Style="{StaticResource SettingsSection}" />
+
+        <Border Style="{StaticResource SettingsGroup}">
+            <Grid RowSpacing="10" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <StackPanel Spacing="2" VerticalAlignment="Center">
+                    <TextBlock Text="Style" Style="{StaticResource SettingsLabel}" />
+                    <TextBlock Style="{StaticResource SettingsHint}"
+                               Text="Dot shows only the recording light. Click it for the timer and controls." />
+                </StackPanel>
+                <ComboBox x:Name="PillStyleCombo"
+                          Grid.Column="1"
+                          Width="128"
+                          VerticalAlignment="Center"
+                          SelectedIndex="0"
+                          CornerRadius="{StaticResource YipControlCornerRadius}"
+                          AutomationProperties.Name="Indicator style">
+                    <ComboBoxItem Content="Pill" />
+                    <ComboBoxItem Content="Dot" />
+                </ComboBox>
+
+                <Rectangle Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
+
+                <TextBlock Grid.Row="2" Text="Position" Style="{StaticResource SettingsLabel}" />
+                <ComboBox x:Name="PillEdgeCombo"
+                          Grid.Row="2"
+                          Grid.Column="1"
+                          Width="128"
+                          VerticalAlignment="Center"
+                          SelectedIndex="0"
+                          CornerRadius="{StaticResource YipControlCornerRadius}"
+                          AutomationProperties.Name="Indicator position">
+                    <ComboBoxItem Content="Top of screen" />
+                    <ComboBoxItem Content="Bottom of screen" />
+                </ComboBox>
+            </Grid>
+        </Border>
+
         <!-- ===================== Shortcut ===================== -->
         <TextBlock Text="SHORTCUT" Style="{StaticResource SettingsSection}" />
 

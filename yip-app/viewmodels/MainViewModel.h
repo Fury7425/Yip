@@ -120,6 +120,9 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     uint32_t HotkeyVk() const noexcept { return m_settings.hotkey_vk; }
     winrt::hstring HotkeyLabel() const;
 
+    bool PillDot() const noexcept { return m_settings.pill_dot; }
+    bool PillBottom() const noexcept { return m_settings.pill_bottom; }
+
     winrt::hstring FilterText() const noexcept { return m_filterText; }
     void FilterText(winrt::hstring const& v);
     bool IsEmpty() const noexcept { return m_recordings.Size() == 0; }
@@ -130,7 +133,7 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     void Tick();
     void ToggleRecording();
     void ApplySettings(winrt::hstring const& folder, uint32_t sampleRate, uint16_t channels,
-                       uint32_t hotkeyMods, uint32_t hotkeyVk);
+                       uint32_t hotkeyMods, uint32_t hotkeyVk, bool pillDot, bool pillBottom);
     void RevealRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
     void OpenRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
     bool DeleteRecording(winrt::yip::viewmodels::RecordingEntry const& entry);

@@ -66,6 +66,10 @@ namespace yip.viewmodels
         UInt32 HotkeyVk{ get; };
         String HotkeyLabel{ get; };
 
+        // Recording indicator: recording light only, and bottom-of-screen.
+        Boolean PillDot{ get; };
+        Boolean PillBottom{ get; };
+
         // Free-text filter over the recordings list. Setting it re-projects the
         // cached scan rather than re-reading the folder.
         String FilterText;
@@ -81,7 +85,7 @@ namespace yip.viewmodels
 
         void ToggleRecording();
         void ApplySettings(String folder, UInt32 sampleRate, UInt16 channels,
-                           UInt32 hotkeyMods, UInt32 hotkeyVk);
+                           UInt32 hotkeyMods, UInt32 hotkeyVk, Boolean pillDot, Boolean pillBottom);
 
         void RevealRecording(RecordingEntry entry);
         void OpenRecording(RecordingEntry entry);

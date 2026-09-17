@@ -5,6 +5,7 @@
 // reads/writes individual fields directly.
 
 #include <filesystem>
+#include <functional>
 #include <string>
 
 namespace yip {
@@ -22,6 +23,13 @@ struct Settings {
     uint32_t hotkey_mods{0x2 | 0x1};
     uint32_t hotkey_vk{0x52};  // 'R'
 
+    // Recording indicator. `pill_dot` shrinks the collapsed pill to the
+    // recording light alone (a tap still opens the full controls);
+    // `pill_bottom` hangs it above the bottom of the work area instead of
+    // below the top. Both follow a save live, mid-take included.
+    bool pill_dot{false};
+    bool pill_bottom{false};
+
     // Returns the path to the settings file, creating parent dirs.
     static std::filesystem::path SettingsPath();
 
@@ -34,5 +42,11 @@ struct Settings {
 
     // Atomic save (write tmp + rename). Returns false on failure.
     bool Save() const;
+
+    // One listener, told on the saving thread after every successful Save().
+    // The pill follows its settings through this, so MainWindow — which owns
+    // the dialog — never has to know the indicator exists. Pass nullptr to
+    // drop it.
+    static void SetSavedHandler(std::function<void(Settings const&)> handler);
 };
 } // namespace yip

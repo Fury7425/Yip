@@ -9,5 +9,7 @@ namespace yip
         UInt16 Channels;
         UInt32 HotkeyMods;
         UInt32 HotkeyVk;
+        Boolean PillDot;
+        Boolean PillBottom;
     }
 }

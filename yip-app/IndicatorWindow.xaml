@@ -9,10 +9,11 @@
 
     <Grid x:Name="Root" Background="Transparent">
         <!--
-            The window is the pill: IndicatorWindow::SyncWindowToState sizes the
-            HWND and this Border together, per state, around a fixed anchor so
-            the capsule stays centred where it was placed. Size and radius are
-            set from code before the first show.
+            The window is sized once, for the largest state, and never changes
+            while the pill is on screen: IndicatorWindow::SyncFrameToState sizes
+            this Border per state inside it. Centred across, flush with whichever
+            screen edge the pill hangs from (VerticalAlignment is set from code).
+            Size and radius are set from code before the first show.
         -->
         <Border
             x:Name="PillFrame"
@@ -20,7 +21,7 @@
             BorderBrush="{ThemeResource YipIndicatorStrokeQuietBrush}"
             BorderThickness="1"
             HorizontalAlignment="Center"
-            VerticalAlignment="Center"
+            VerticalAlignment="Top"
             PointerPressed="OnPillPointerPressed"
             Tapped="OnPillTapped">
 
@@ -32,7 +33,9 @@
 
                 <!-- Dot, meter and clock travel as one group. With the actions
                      collapsed the star column is the whole pill, so the group sits
-                     dead centre; expanded, it centres in the space left of them. -->
+                     dead centre; expanded, it centres in the space left of them.
+                     In the dot style the detail collapses and the dot is all
+                     there is. -->
                 <StackPanel x:Name="ReadoutGroup"
                             Orientation="Horizontal"
                             HorizontalAlignment="Center"
@@ -40,28 +43,30 @@
                     <!-- Dot host — its Visual receives a SpriteVisual fill. -->
                     <Border x:Name="DotHost"
                             Width="12" Height="12"
-                            Margin="0,0,8,0"
                             VerticalAlignment="Center" />
 
-                    <!-- Meter host — 4 bars appended as child visuals. Exactly as
-                         wide as the bars, or the group centres off to one side. -->
-                    <Border x:Name="MeterHost"
-                            Width="24" Height="22"
-                            VerticalAlignment="Center"
-                            Opacity="0" />
+                    <StackPanel x:Name="ReadoutDetail"
+                                Orientation="Horizontal"
+                                Margin="8,0,0,0"
+                                VerticalAlignment="Center">
+                        <!-- Meter host — 4 bars appended as child visuals. Exactly as
+                             wide as the bars, or the group centres off to one side. -->
+                        <Border x:Name="MeterHost"
+                                Width="24" Height="22"
+                                VerticalAlignment="Center" />
 
-                    <!-- Elapsed time. The pill is often the only thing on screen
-                         while recording, so it answers "how long has this been
-                         running" without opening the main window. -->
-                    <TextBlock x:Name="ElapsedText"
-                               Text="00:00"
-                               FontFamily="Cascadia Mono,Consolas,Courier New"
-                               FontSize="13"
-                               Foreground="{ThemeResource YipIndicatorTimerBrush}"
-                               VerticalAlignment="Center"
-                               Margin="10,0,0,0"
-                               Opacity="0"
-                               AutomationProperties.Name="Elapsed recording time" />
+                        <!-- Elapsed time. The pill is often the only thing on screen
+                             while recording, so it answers "how long has this been
+                             running" without opening the main window. -->
+                        <TextBlock x:Name="ElapsedText"
+                                   Text="00:00"
+                                   FontFamily="Cascadia Mono,Consolas,Courier New"
+                                   FontSize="13"
+                                   Foreground="{ThemeResource YipIndicatorTimerBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="10,0,0,0"
+                                   AutomationProperties.Name="Elapsed recording time" />
+                    </StackPanel>
                 </StackPanel>
 
                 <StackPanel x:Name="ExpandedActions"

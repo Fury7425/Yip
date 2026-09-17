@@ -21,6 +21,12 @@ struct SettingsDialog : SettingsDialogT<SettingsDialog> {
     uint32_t HotkeyVk() const noexcept { return m_hotkeyVk; }
     void HotkeyVk(uint32_t v);
 
+    bool PillDot() const noexcept;
+    void PillDot(bool v);
+
+    bool PillBottom() const noexcept;
+    void PillBottom(bool v);
+
     winrt::fire_and_forget OnPickFolder(winrt::Windows::Foundation::IInspectable const& sender,
                                         winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
 
@@ -40,6 +46,8 @@ private:
     uint16_t m_channels{2};
     uint32_t m_hotkeyMods{0x2 | 0x1}; // Ctrl+Alt
     uint32_t m_hotkeyVk{0x52};        // 'R'
+    bool m_pillDot{false};
+    bool m_pillBottom{false};
 };
 } // namespace winrt::yip::implementation
 
