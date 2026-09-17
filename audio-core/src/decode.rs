@@ -231,8 +231,13 @@ impl Decoder {
         // The null time format means 100-ns units, which is the only one every
         // source supports.
         let time_format = GUID::from_u128(0);
-        // SAFETY: live reader; both pointers outlive the call.
-        unsafe { self.reader.SetCurrentPosition(&time_format, &position) }.context("seek")
+        // SAFETY: live reader; both pointers outlive the call. Spelled as raw
+        // pointers outright, which is what the ABI takes.
+        unsafe {
+            self.reader
+                .SetCurrentPosition(&raw const time_format, &raw const position)
+        }
+        .context("seek")
     }
 }
 
@@ -286,7 +291,7 @@ fn hns_propvariant(hns: i64) -> PROPVARIANT {
     // the value union at offset 8. Both writes stay inside the struct.
     unsafe {
         let base = std::ptr::addr_of_mut!(pv).cast::<u8>();
-        base.cast::<u16>().write_unaligned(VT_I8.0 as u16);
+        base.cast::<u16>().write_unaligned(VT_I8.0);
         base.add(8).cast::<i64>().write_unaligned(hns);
     }
     pv
@@ -320,7 +325,7 @@ mod tests {
                 base.add(8).cast::<i64>().read_unaligned(),
             )
         };
-        assert_eq!(tag, VT_I8.0 as u16);
+        assert_eq!(tag, VT_I8.0);
         assert_eq!(value, 1_234_567);
     }
 
