@@ -334,29 +334,14 @@ impl Player {
 
     pub fn stop(mut self) -> Result<(), YipError> {
         self.shutdown();
-        let render = self
-            .render_thread
-            .take()
-            .map(|h| h.join())
-            .transpose()
-            .map_err(|_| YipError::Wasapi("render thread panicked".into()))?;
-        let decoder = self
-            .decoder_thread
-            .take()
-            .map(|h| h.join())
-            .transpose()
-            .map_err(|_| YipError::Decoder("decoder thread panicked".into()))?;
+        // Both are joined before either result is looked at: a render thread
+        // that failed must not leave the decoder running behind it.
+        let render = join_thread(self.render_thread.take());
+        let decoder = join_thread(self.decoder_thread.take());
         self.close_event();
-
-        // Report the render thread's failure first: it is the one that would
-        // have been audible.
-        if let Some(res) = render {
-            res?;
-        }
-        if let Some(res) = decoder {
-            res?;
-        }
-        Ok(())
+        // The render thread's failure is reported first: it is the one that
+        // would have been audible.
+        render.and(decoder)
     }
 
     /// Signal both threads. Split out so `Drop` and `stop` ask the same way.
@@ -374,6 +359,16 @@ impl Player {
             let _ = windows::Win32::Foundation::CloseHandle(self.stop_event.0);
         }
     }
+}
+
+/// Join a playback thread, turning a panic into an error rather than a hang.
+fn join_thread(handle: Option<JoinHandle<Result<(), YipError>>>) -> Result<(), YipError> {
+    let Some(handle) = handle else {
+        return Ok(());
+    };
+    handle
+        .join()
+        .unwrap_or_else(|_| Err(YipError::Wasapi("playback thread panicked".into())))
 }
 
 impl Drop for Player {
