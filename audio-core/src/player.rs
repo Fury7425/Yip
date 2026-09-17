@@ -536,7 +536,8 @@ fn flush_for_seek(producer: &mut rtrb::Producer<f32>, stop: &Arc<AtomicBool>) {
         }
         // Nothing left to drain and nobody is rendering: don't wait on an
         // acknowledgement that is not coming.
-        if !PLAYBACK.playing.load(Ordering::Acquire) && producer.slots() == producer.buffer().capacity() {
+        let empty = producer.slots() == producer.buffer().capacity();
+        if empty && !PLAYBACK.playing.load(Ordering::Acquire) {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(POLL_MS));
@@ -657,11 +658,11 @@ fn render_loop(
             Ok(p) => p,
             Err(e) => break Err(YipError::from(e)),
         };
+        let len = frames as usize * samples_per_frame;
         // SAFETY: between GetBuffer and ReleaseBuffer the endpoint buffer is
         // ours for `frames` frames, and the stream format was negotiated to
         // f32 above.
-        let dst: &mut [f32] =
-            unsafe { std::slice::from_raw_parts_mut(data.cast::<f32>(), frames as usize * samples_per_frame) };
+        let dst: &mut [f32] = unsafe { std::slice::from_raw_parts_mut(data.cast::<f32>(), len) };
 
         let flushing = PLAYBACK.flushing.load(Ordering::Acquire);
         let paused = PLAYBACK.paused.load(Ordering::Acquire);
@@ -734,7 +735,11 @@ fn render_loop(
 }
 
 /// Copy whole frames out of the ring. Returns samples written.
-fn pop_frames(consumer: &mut rtrb::Consumer<f32>, dst: &mut [f32], samples_per_frame: usize) -> usize {
+fn pop_frames(
+    consumer: &mut rtrb::Consumer<f32>,
+    dst: &mut [f32],
+    samples_per_frame: usize,
+) -> usize {
     let held = consumer.slots().min(dst.len());
     let readable = held - (held % samples_per_frame);
     if readable == 0 {

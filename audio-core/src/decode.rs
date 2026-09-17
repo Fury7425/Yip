@@ -90,8 +90,9 @@ impl Decoder {
         }
 
         // SAFETY: live reader; index 0 is the stream's own type.
-        let native = unsafe { reader.GetNativeMediaType(mf::MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0) }
-            .context("native media type")?;
+        let native =
+            unsafe { reader.GetNativeMediaType(mf::MF_SOURCE_READER_FIRST_AUDIO_STREAM, 0) }
+                .context("native media type")?;
         let sample_rate = get_u32(&native, &mf::MF_MT_AUDIO_SAMPLES_PER_SECOND).unwrap_or(0);
         let channels = get_u32(&native, &mf::MF_MT_AUDIO_NUM_CHANNELS).unwrap_or(0);
         if sample_rate == 0 || channels == 0 {
