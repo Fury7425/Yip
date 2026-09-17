@@ -32,7 +32,9 @@ use windows::Win32::Media::Audio::{
     AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, IAudioClient,
     IAudioRenderClient,
 };
-use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoInitializeEx, CoTaskMemFree};
+use windows::Win32::System::Com::{
+    CLSCTX_ALL, COINIT_MULTITHREADED, CoInitializeEx, CoTaskMemFree,
+};
 use windows::Win32::System::Threading::{
     AvSetMmThreadCharacteristicsW, CreateEventW, INFINITE, WaitForMultipleObjects,
 };
@@ -585,7 +587,9 @@ fn render_loop(
     };
 
     PLAYBACK.sample_rate.store(sample_rate, Ordering::Relaxed);
-    PLAYBACK.channels.store(u32::from(channels), Ordering::Relaxed);
+    PLAYBACK
+        .channels
+        .store(u32::from(channels), Ordering::Relaxed);
     if negotiated_tx.send((sample_rate, channels)).is_err() {
         return Ok(());
     }
