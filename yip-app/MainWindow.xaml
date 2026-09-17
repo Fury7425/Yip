@@ -16,6 +16,7 @@
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="R" Modifiers="Control" Invoked="OnRecordAccelerator" />
             <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnSearchAccelerator" />
+            <KeyboardAccelerator Key="P" Modifiers="Control" Invoked="OnPlayAccelerator" />
             <KeyboardAccelerator Key="F5" Invoked="OnRefreshAccelerator" />
         </Grid.KeyboardAccelerators>
 
@@ -24,6 +25,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
@@ -321,6 +323,8 @@
                         x:Name="RecordingsList"
                         ItemsSource="{x:Bind ViewModel.Recordings, Mode=OneWay}"
                         SelectionMode="Single"
+                        IsItemClickEnabled="True"
+                        ItemClick="OnRecordingClick"
                         Padding="6,0,6,8"
                         AutomationProperties.Name="Recordings">
                         <ListView.ItemContainerStyle>
@@ -333,13 +337,18 @@
                         </ListView.ItemContainerStyle>
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="vm:RecordingEntry">
-                                <Grid ColumnSpacing="12" Background="Transparent"
-                                      DoubleTapped="OnRecordingActivated">
+                                <Grid ColumnSpacing="12" Background="Transparent">
                                     <Grid.ContextFlyout>
                                         <MenuFlyout>
                                             <MenuFlyoutItem Text="Play" Click="OnPlayItem">
                                                 <MenuFlyoutItem.Icon>
                                                     <FontIcon Glyph="&#xE768;" />
+                                                </MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                            <MenuFlyoutItem Text="Open with default app"
+                                                            Click="OnOpenExternallyItem">
+                                                <MenuFlyoutItem.Icon>
+                                                    <FontIcon Glyph="&#xE8E5;" />
                                                 </MenuFlyoutItem.Icon>
                                             </MenuFlyoutItem>
                                             <MenuFlyoutItem Text="Show in Explorer" Click="OnRevealItem">
@@ -363,6 +372,7 @@
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
 
                                     <StackPanel Spacing="2">
@@ -375,7 +385,24 @@
                                                    Foreground="{ThemeResource YipTextTertiaryBrush}" />
                                     </StackPanel>
 
-                                    <StackPanel Grid.Column="1" Spacing="2" MinWidth="86">
+                                    <!-- Which row you are hearing. It keeps its
+                                         width whether or not it is lit, so
+                                         starting playback never reflows the
+                                         list under the pointer. -->
+                                    <FontIcon Grid.Column="1"
+                                              FontFamily="Segoe Fluent Icons"
+                                              Glyph="{x:Bind PlayGlyph, Mode=OneWay}"
+                                              FontSize="11"
+                                              Width="12"
+                                              VerticalAlignment="Center"
+                                              Opacity="{x:Bind PlayingOpacity, Mode=OneWay}"
+                                              Foreground="{ThemeResource YipTextSecondaryBrush}">
+                                        <FontIcon.OpacityTransition>
+                                            <ScalarTransition Duration="0:0:0.15" />
+                                        </FontIcon.OpacityTransition>
+                                    </FontIcon>
+
+                                    <StackPanel Grid.Column="2" Spacing="2" MinWidth="86">
                                         <TextBlock Text="{x:Bind Duration}"
                                                    FontFamily="Cascadia Mono,Consolas,Courier New"
                                                    FontSize="{StaticResource YipFontCaption}"
@@ -414,8 +441,113 @@
             </Grid>
         </Border>
 
+        <!-- ===================== Playback ===================== -->
+        <!-- Shown only while a take is loaded (MainWindow::UpdatePlaybackBar).
+             Playback is native: this drives audio-core's play_* surface, not a
+             shell handler. -->
+        <Border x:Name="PlaybackBar"
+                Grid.Row="4"
+                Visibility="Collapsed"
+                Margin="16,10,16,0"
+                Padding="10,8,12,10"
+                CornerRadius="{StaticResource YipCardCornerRadius}"
+                Background="{ThemeResource YipCardBrush}"
+                BorderBrush="{ThemeResource YipCardStrokeBrush}"
+                BorderThickness="1">
+            <Grid ColumnSpacing="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Button x:Name="PlayPauseButton"
+                        Grid.Column="0"
+                        Width="34" Height="34"
+                        CornerRadius="17"
+                        Padding="0"
+                        Click="OnTogglePlayback"
+                        Background="{ThemeResource YipControlFillBrush}"
+                        BorderBrush="{ThemeResource YipControlStrokeBrush}"
+                        BorderThickness="1"
+                        VerticalAlignment="Center"
+                        AutomationProperties.Name="Play or pause"
+                        ToolTipService.ToolTip="Play / pause (Ctrl+P)">
+                    <FontIcon x:Name="PlayPauseGlyph"
+                              FontFamily="Segoe Fluent Icons"
+                              Glyph="&#xE769;"
+                              FontSize="13" />
+                </Button>
+
+                <StackPanel Grid.Column="1" Spacing="1" VerticalAlignment="Center">
+                    <Grid ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{x:Bind ViewModel.PlayingFileName, Mode=OneWay}"
+                                   FontSize="{StaticResource YipFontCaption}"
+                                   TextTrimming="CharacterEllipsis"
+                                   VerticalAlignment="Center"
+                                   Foreground="{ThemeResource YipTextPrimaryBrush}" />
+                        <!-- Output level. The same ramp the capture meter uses,
+                             so a take reads the same going out as it did
+                             coming in. -->
+                        <ProgressBar Grid.Column="1"
+                                     Width="44" Height="3"
+                                     Minimum="0" Maximum="100"
+                                     Value="{x:Bind ViewModel.PlaybackLevelPercent, Mode=OneWay}"
+                                     Foreground="{ThemeResource YipMeterGradientBrush}"
+                                     Background="{ThemeResource YipMeterTrackQuietBrush}"
+                                     VerticalAlignment="Center"
+                                     IsHitTestVisible="False"
+                                     AutomationProperties.Name="Playback level" />
+                    </Grid>
+
+                    <Slider x:Name="SeekSlider"
+                            Minimum="0"
+                            Maximum="100"
+                            StepFrequency="100"
+                            Margin="0,-4,0,-8"
+                            IsThumbToolTipEnabled="False"
+                            ValueChanged="OnSeekChanged"
+                            AutomationProperties.Name="Playback position" />
+                </StackPanel>
+
+                <!-- Three blocks rather than Runs: Run.Text is not a
+                     dependency property, so x:Bind cannot reach it. -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{x:Bind ViewModel.PlaybackPositionText, Mode=OneWay}"
+                               FontFamily="Cascadia Mono,Consolas,Courier New"
+                               FontSize="{StaticResource YipFontCaption}"
+                               Foreground="{ThemeResource YipTextSecondaryBrush}" />
+                    <TextBlock Text=" / "
+                               FontFamily="Cascadia Mono,Consolas,Courier New"
+                               FontSize="{StaticResource YipFontCaption}"
+                               Foreground="{ThemeResource YipTextTertiaryBrush}" />
+                    <TextBlock Text="{x:Bind ViewModel.PlaybackDurationText, Mode=OneWay}"
+                               FontFamily="Cascadia Mono,Consolas,Courier New"
+                               FontSize="{StaticResource YipFontCaption}"
+                               Foreground="{ThemeResource YipTextTertiaryBrush}" />
+                </StackPanel>
+
+                <Button x:Name="StopPlaybackButton"
+                        Grid.Column="3"
+                        Click="OnStopPlayback"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        Padding="7,6"
+                        VerticalAlignment="Center"
+                        AutomationProperties.Name="Stop playback"
+                        ToolTipService.ToolTip="Stop playback">
+                    <FontIcon FontFamily="Segoe Fluent Icons" Glyph="&#xE711;" FontSize="12" />
+                </Button>
+            </Grid>
+        </Border>
+
         <!-- ===================== Status bar ===================== -->
-        <Grid Grid.Row="4" Padding="20,9,20,11">
+        <Grid Grid.Row="5" Padding="20,9,20,11">
             <TextBlock
                 x:Name="StatusLine"
                 Text="{x:Bind ViewModel.StatusText, Mode=OneWay}"

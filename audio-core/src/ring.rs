@@ -13,6 +13,11 @@ use rtrb::{Consumer, Producer, RingBuffer};
 /// samples (1.9 MiB at f32). Plenty of headroom for slow disks.
 pub const RING_CAPACITY_SAMPLES: usize = 480_000;
 
+/// Frames the playback ring holds between the decoder and the render thread.
+/// 48 kHz stereo x 2 s. Shorter than the capture ring on purpose: every sample
+/// buffered here is one a seek has to throw away.
+pub const PLAY_RING_CAPACITY_SAMPLES: usize = 192_000;
+
 /// Meter release time: a peak decays to silence in roughly this long once the
 /// source stops. Classic "fast attack, slow release" ballistics, applied on the
 /// capture thread as two flops per block — no `exp()` in the audio path.

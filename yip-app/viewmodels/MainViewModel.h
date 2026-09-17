@@ -61,12 +61,34 @@ struct RecordingEntry : RecordingEntryT<RecordingEntry> {
     winrt::hstring Subtitle() const noexcept { return m_subtitle; }
     void Subtitle(winrt::hstring const& v) { m_subtitle = v; }
 
+    bool IsPlaying() const noexcept { return m_isPlaying; }
+    void IsPlaying(bool v);
+    // Play while running, pause while held. Empty when this row is not the one
+    // loaded, so nothing is drawn under a zero opacity either.
+    winrt::hstring PlayGlyph() const noexcept { return m_playGlyph; }
+    double PlayingOpacity() const noexcept { return m_isPlaying ? 1.0 : 0.0; }
+    // Paused rows show the pause glyph. Separate from IsPlaying because the
+    // row stays marked while the take is held.
+    void SetPlaybackGlyph(bool paused);
+
+    winrt::event_token PropertyChanged(
+        winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler const& handler)
+    {
+        return m_propertyChanged.add(handler);
+    }
+    void PropertyChanged(winrt::event_token const& token) noexcept { m_propertyChanged.remove(token); }
+
 private:
+    void Raise(winrt::hstring const& name);
+
     winrt::hstring m_fullPath;
     winrt::hstring m_fileName;
     winrt::hstring m_duration;
     winrt::hstring m_modifiedAt;
     winrt::hstring m_subtitle;
+    winrt::hstring m_playGlyph{L""};
+    bool m_isPlaying{false};
+    winrt::event<winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventHandler> m_propertyChanged;
 };
 
 // ----- MainViewModel -----
@@ -139,9 +161,26 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
                        uint16_t bitDepth, uint16_t bitrateKbps, uint32_t hotkeyMods, uint32_t hotkeyVk,
                        bool pillDot, bool pillBottom);
     void RevealRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
-    void OpenRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
+    void OpenRecordingExternally(winrt::yip::viewmodels::RecordingEntry const& entry);
     bool DeleteRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
     void CopyRecordingPath(winrt::yip::viewmodels::RecordingEntry const& entry);
+
+    // ----- playback -----
+    void ActivateRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
+    void PlayRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
+    void TogglePlayback();
+    void StopPlayback();
+    void SeekPlayback(uint64_t positionMs);
+    void PlaybackTick();
+
+    bool IsPlaybackLoaded() const noexcept { return m_playbackLoaded; }
+    bool IsPlaybackPlaying() const noexcept { return m_playbackLoaded && !m_playbackPaused; }
+    winrt::hstring PlayingFileName() const noexcept { return m_playingFileName; }
+    winrt::hstring PlaybackPositionText() const noexcept { return m_positionText; }
+    winrt::hstring PlaybackDurationText() const noexcept { return m_durationText; }
+    double PlaybackPositionMs() const noexcept { return static_cast<double>(m_positionMs); }
+    double PlaybackDurationMs() const noexcept { return static_cast<double>(m_durationMs); }
+    double PlaybackLevelPercent() const noexcept { return m_playbackLevel * 100.0; }
     void SyncRecordingState(bool recording);
     void ReportHotkeyConflict();
     void InvalidateThemeBrushes();
@@ -173,6 +212,14 @@ private:
     static winrt::hstring LastCoreError(wchar_t const* fallback);
     // Rebuild the observable list from m_rows + m_filterText.
     void ProjectRecordings();
+    // Mark the row whose file is loaded, and clear every other. Re-applied
+    // after a re-projection, which builds fresh entries.
+    void MarkPlayingRow();
+    // Raise the whole transport at once. Playback moves as a unit — a position
+    // without its label, or a label without its scrubber, is never useful.
+    void RaisePlaybackProps();
+    // Drop the transport back to its resting state and tell the view.
+    void ClearPlaybackState();
 
     winrt::Windows::Foundation::Collections::IObservableVector<winrt::yip::viewmodels::DeviceEntry> m_devices{
         winrt::single_threaded_observable_vector<winrt::yip::viewmodels::DeviceEntry>()};
@@ -210,6 +257,18 @@ private:
     mutable winrt::Microsoft::UI::Xaml::Media::Brush m_recordBrush{nullptr};
 
     std::optional<std::filesystem::path> m_activeRecordingPath;
+
+    // Playback. `m_playingPath` is the one loaded take; everything else is the
+    // last snapshot audio-core handed back on a tick.
+    std::optional<std::filesystem::path> m_playingPath;
+    bool m_playbackLoaded{false};
+    bool m_playbackPaused{false};
+    uint64_t m_positionMs{0};
+    uint64_t m_durationMs{0};
+    float m_playbackLevel{0.0f};
+    winrt::hstring m_playingFileName{L""};
+    winrt::hstring m_positionText{L"00:00"};
+    winrt::hstring m_durationText{L"00:00"};
     ::yip::Settings m_settings{::yip::Settings::Load()};
 };
 } // namespace winrt::yip::viewmodels::implementation

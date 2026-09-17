@@ -70,6 +70,20 @@ constexpr uint32_t kWavePaletteSteps = 16;
 // second copy of the palette, so a miss is visible instead of plausible.
 constexpr winrt::Windows::UI::Color kMissingToken{0xFF, 0x80, 0x80, 0x80};
 
+// Playback poll. Fast enough that the scrubber and the level read as
+// continuous, and it only runs while a take is loaded.
+constexpr int kPlaybackTickFocusedMs = 50;
+constexpr int kPlaybackTickBlurredMs = 200;
+
+// Ticks the scrubber is left alone for after a seek, so the thumb is not
+// dragged back by a position that has not caught up yet.
+constexpr int kSeekHoldTicks = 6;
+
+// Transport glyphs. Play while held, pause while running: a transport button
+// shows what it will do, not what it is doing.
+constexpr wchar_t kPlayGlyph[] = L"\uE768";
+constexpr wchar_t kPauseGlyph[] = L"\uE769";
+
 // The elapsed clock is dimmed until there is something to count.
 constexpr double kIdleClockOpacity = 0.55;
 
@@ -223,12 +237,16 @@ MainWindow::~MainWindow()
         m_themeToken = {};
     }
     StopMeterPolling();
+    StopPlaybackPolling();
     TeardownBackdrop();
     m_hotkey.reset();
     m_deviceWatcher.reset();
     if (rec_is_recording()) {
         (void)rec_stop();
     }
+    // The decoder holds the file open, so it has to let go before the process
+    // does — otherwise the take cannot be moved or deleted until Yip exits.
+    (void)play_stop();
 }
 
 winrt::yip::viewmodels::MainViewModel MainWindow::ViewModel()
@@ -512,6 +530,10 @@ void MainWindow::OnActivated(winrt::Windows::Foundation::IInspectable const& /*s
     if (m_meterTimer) {
         m_meterTimer.Interval(m_focused ? std::chrono::milliseconds(16) : std::chrono::milliseconds(100));
     }
+    if (m_playbackTimer) {
+        m_playbackTimer.Interval(m_focused ? std::chrono::milliseconds(kPlaybackTickFocusedMs)
+                                           : std::chrono::milliseconds(kPlaybackTickBlurredMs));
+    }
 }
 
 // ============================================================ View model
@@ -532,6 +554,10 @@ void MainWindow::OnViewModelPropertyChanged(
         ClipLamp().Opacity(m_viewModel.HasClipped() ? 1.0 : 0.18);
     } else if (name == L"IsEmpty") {
         UpdateEmptyState();
+    } else if (name == L"IsPlaybackLoaded") {
+        UpdatePlaybackBar();
+    } else if (name == L"IsPlaybackPlaying") {
+        UpdatePlayPauseGlyph();
     }
 }
 
@@ -656,6 +682,106 @@ void MainWindow::StopMeterPolling()
     }
 }
 
+// ============================================================ Playback
+
+void MainWindow::StartPlaybackPolling()
+{
+    if (m_playbackTimer) return;
+    auto queue = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
+    m_playbackTimer = queue.CreateTimer();
+    m_playbackTimer.Interval(m_focused ? std::chrono::milliseconds(kPlaybackTickFocusedMs)
+                                       : std::chrono::milliseconds(kPlaybackTickBlurredMs));
+    m_playbackTimer.IsRepeating(true);
+    m_playbackTimer.Tick([weak = get_weak()](auto&&, auto&&) {
+        if (auto self = weak.get()) {
+            if (self->m_viewModel) {
+                // The tick is what notices the take ending, so the bar can go
+                // away on its own the moment the file runs out.
+                self->m_viewModel.PlaybackTick();
+                self->UpdateSeekSlider();
+            }
+        }
+    });
+    m_playbackTimer.Start();
+}
+
+void MainWindow::StopPlaybackPolling()
+{
+    if (m_playbackTimer) {
+        m_playbackTimer.Stop();
+        m_playbackTimer = nullptr;
+    }
+}
+
+void MainWindow::UpdatePlaybackBar()
+{
+    if (!m_viewModel) return;
+    const bool loaded = m_viewModel.IsPlaybackLoaded();
+    PlaybackBar().Visibility(loaded ? winrt::Microsoft::UI::Xaml::Visibility::Visible
+                                    : winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
+    UpdatePlayPauseGlyph();
+
+    if (loaded) {
+        StartPlaybackPolling();
+        UpdateSeekSlider();
+        return;
+    }
+    StopPlaybackPolling();
+    m_seekHoldTicks = 0;
+    m_suppressSeek = true;
+    SeekSlider().Value(0.0);
+    m_suppressSeek = false;
+}
+
+void MainWindow::UpdatePlayPauseGlyph()
+{
+    if (!m_viewModel) return;
+    PlayPauseGlyph().Glyph(m_viewModel.IsPlaybackPlaying() ? kPauseGlyph : kPlayGlyph);
+}
+
+void MainWindow::UpdateSeekSlider()
+{
+    if (!m_viewModel) return;
+    const double duration = m_viewModel.PlaybackDurationMs();
+    const bool seekable = duration > 0.0;
+
+    // A container that does not declare a duration still plays; there is just
+    // nothing for the thumb to span.
+    SeekSlider().IsEnabled(seekable);
+
+    m_suppressSeek = true;
+    SeekSlider().Maximum(seekable ? duration : 100.0);
+    if (m_seekHoldTicks > 0) {
+        --m_seekHoldTicks;
+    } else {
+        SeekSlider().Value(std::clamp(m_viewModel.PlaybackPositionMs(), 0.0, SeekSlider().Maximum()));
+    }
+    m_suppressSeek = false;
+}
+
+void MainWindow::OnTogglePlayback(winrt::Windows::Foundation::IInspectable const& /*sender*/,
+                                  winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
+{
+    m_viewModel.TogglePlayback();
+}
+
+void MainWindow::OnStopPlayback(winrt::Windows::Foundation::IInspectable const& /*sender*/,
+                                winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
+{
+    m_viewModel.StopPlayback();
+}
+
+void MainWindow::OnSeekChanged(
+    winrt::Windows::Foundation::IInspectable const& /*sender*/,
+    winrt::Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const& args)
+{
+    // Coercions from setting Maximum come through here too; only a value the
+    // user put there is a seek.
+    if (m_suppressSeek || !m_viewModel) return;
+    m_viewModel.SeekPlayback(static_cast<uint64_t>(std::max(0.0, args.NewValue())));
+    m_seekHoldTicks = kSeekHoldTicks;
+}
+
 // ============================================================ Commands
 
 void MainWindow::OnRecordToggle(winrt::Windows::Foundation::IInspectable const& /*sender*/,
@@ -712,21 +838,27 @@ void MainWindow::OnFilterChanged(winrt::Windows::Foundation::IInspectable const&
     UpdateEmptyState();
 }
 
-void MainWindow::OnRecordingActivated(
-    winrt::Windows::Foundation::IInspectable const& sender,
-    winrt::Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const& /*args*/)
+void MainWindow::OnRecordingClick(winrt::Windows::Foundation::IInspectable const& /*sender*/,
+                                  winrt::Microsoft::UI::Xaml::Controls::ItemClickEventArgs const& args)
 {
-    // Double-click plays. Single click used to fire Explorer, which is a
-    // surprising amount of window for picking a row.
-    if (auto entry = EntryFrom(sender)) {
-        m_viewModel.OpenRecording(entry);
+    // One click plays, and a click on the row already playing holds it. Nothing
+    // here launches another app: playback is Yip's own.
+    if (auto entry = args.ClickedItem().try_as<winrt::yip::viewmodels::RecordingEntry>()) {
+        m_viewModel.ActivateRecording(entry);
     }
 }
 
 void MainWindow::OnPlayItem(winrt::Windows::Foundation::IInspectable const& sender,
                             winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
 {
-    if (auto entry = EntryFrom(sender)) m_viewModel.OpenRecording(entry);
+    // From the menu, Play means play this one from the top, whatever is loaded.
+    if (auto entry = EntryFrom(sender)) m_viewModel.PlayRecording(entry);
+}
+
+void MainWindow::OnOpenExternallyItem(winrt::Windows::Foundation::IInspectable const& sender,
+                                      winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
+{
+    if (auto entry = EntryFrom(sender)) m_viewModel.OpenRecordingExternally(entry);
 }
 
 void MainWindow::OnRevealItem(winrt::Windows::Foundation::IInspectable const& sender,
@@ -788,5 +920,22 @@ void MainWindow::OnRefreshAccelerator(
 {
     args.Handled(true);
     OnRefreshList(nullptr, nullptr);
+}
+
+void MainWindow::OnPlayAccelerator(
+    winrt::Microsoft::UI::Xaml::Input::KeyboardAccelerator const& /*sender*/,
+    winrt::Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
+{
+    args.Handled(true);
+    if (!m_viewModel) return;
+    // With nothing loaded, Ctrl+P plays whatever is selected — which is what
+    // the shortcut is for when the list has focus.
+    if (!m_viewModel.IsPlaybackLoaded()) {
+        if (auto entry = RecordingsList().SelectedItem().try_as<winrt::yip::viewmodels::RecordingEntry>()) {
+            m_viewModel.PlayRecording(entry);
+        }
+        return;
+    }
+    m_viewModel.TogglePlayback();
 }
 } // namespace winrt::yip::implementation

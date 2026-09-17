@@ -32,6 +32,8 @@ namespace {
 
 constexpr wchar_t kMicGlyph[] = L"\uE720";     // microphone
 constexpr wchar_t kSpeakerGlyph[] = L"\uE7F5"; // speaker
+constexpr wchar_t kPlayGlyph[] = L"\uE768";    // play, on the row being heard
+constexpr wchar_t kPauseGlyph[] = L"\uE769";   // pause, on the row being held
 constexpr wchar_t kDot[] = L" \u00B7 ";        // separator used in list subtitles
 
 // Bottom of the meter scale, in dBFS. Matches YipMeterFloorDb in App.xaml —
@@ -206,6 +208,36 @@ std::wstring Utf8ToWide(const char* utf8)
 } // namespace
 
 namespace winrt::yip::viewmodels::implementation {
+// ============================================================ RecordingEntry
+
+void RecordingEntry::IsPlaying(bool v)
+{
+    if (m_isPlaying == v) return;
+    m_isPlaying = v;
+    // The glyph is cleared rather than left behind a zero opacity: a row that
+    // is not playing has nothing to say, not something invisible to say.
+    m_playGlyph = v ? winrt::hstring{kPlayGlyph} : winrt::hstring{L""};
+    Raise(L"IsPlaying");
+    Raise(L"PlayGlyph");
+    Raise(L"PlayingOpacity");
+}
+
+void RecordingEntry::SetPlaybackGlyph(bool paused)
+{
+    if (!m_isPlaying) return;
+    const winrt::hstring glyph{paused ? kPauseGlyph : kPlayGlyph};
+    if (m_playGlyph == glyph) return;
+    m_playGlyph = glyph;
+    Raise(L"PlayGlyph");
+}
+
+void RecordingEntry::Raise(winrt::hstring const& name)
+{
+    m_propertyChanged(*this, winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs{name});
+}
+
+// ============================================================ MainViewModel
+
 MainViewModel::MainViewModel()
 {
     // Ensure output folder exists.
@@ -368,6 +400,11 @@ void MainViewModel::ProjectRecordings()
     }
     m_recordingsSummary = winrt::hstring{summary};
 
+    // Fresh entries, so the marker has to be put back on whichever row is
+    // loaded — filtering must not silence the list's account of what is
+    // playing.
+    MarkPlayingRow();
+
     // Not Raise(L"Recordings"): the observable vector already published one
     // Reset above, and re-setting ItemsSource would rebuild the list twice.
     Raise(L"IsEmpty");
@@ -461,6 +498,9 @@ void MainViewModel::ToggleRecording()
         SetError(L"Pick an input device first");
         return;
     }
+    // A take being recorded and one playing out loud do not belong in the same
+    // room: the microphone would hear it.
+    StopPlayback();
     auto dev = m_devices.GetAt(static_cast<uint32_t>(m_selectedDeviceIndex));
     const auto path = NextRecordingPath();
 
@@ -606,7 +646,7 @@ void MainViewModel::RevealRecording(winrt::yip::viewmodels::RecordingEntry const
     ::ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
-void MainViewModel::OpenRecording(winrt::yip::viewmodels::RecordingEntry const& entry)
+void MainViewModel::OpenRecordingExternally(winrt::yip::viewmodels::RecordingEntry const& entry)
 {
     if (!entry) return;
     ::ShellExecuteW(nullptr, L"open", entry.FullPath().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
@@ -616,6 +656,10 @@ bool MainViewModel::DeleteRecording(winrt::yip::viewmodels::RecordingEntry const
 {
     if (!entry) return false;
     const fs::path path{std::wstring{entry.FullPath()}};
+
+    // Windows will not delete a file the decoder still has open, and a take
+    // that is playing is one the user is deleting on purpose.
+    if (m_playingPath && *m_playingPath == path) StopPlayback();
 
     std::error_code ec;
     if (!fs::remove(path, ec) || ec) {
@@ -640,6 +684,184 @@ void MainViewModel::CopyRecordingPath(winrt::yip::viewmodels::RecordingEntry con
     package.SetText(entry.FullPath());
     winrt::Windows::ApplicationModel::DataTransfer::Clipboard::SetContent(package);
     SetStatus(L"Path copied");
+}
+
+// ============================================================ Playback
+
+void MainViewModel::ActivateRecording(winrt::yip::viewmodels::RecordingEntry const& entry)
+{
+    if (!entry) return;
+    const fs::path path{std::wstring{entry.FullPath()}};
+    // Clicking the row you are already hearing holds it, rather than starting
+    // it over: the second click on a thing is never a request to repeat it.
+    if (m_playbackLoaded && m_playingPath && *m_playingPath == path) {
+        TogglePlayback();
+        return;
+    }
+    PlayRecording(entry);
+}
+
+void MainViewModel::PlayRecording(winrt::yip::viewmodels::RecordingEntry const& entry)
+{
+    if (!entry) return;
+    const fs::path path{std::wstring{entry.FullPath()}};
+    // Not path.string(): that encodes with the ANSI codepage and hands
+    // audio-core bytes it rejects as invalid UTF-8 for any non-ASCII folder.
+    const auto pathUtf8 = ::yip::ToUtf8(path.wstring());
+
+    if (play_start(pathUtf8.c_str()) != REC_STATUS_OK) {
+        SetError(LastCoreError(L"Could not play that recording"));
+        ClearPlaybackState();
+        return;
+    }
+
+    DismissError();
+    m_playingPath = path;
+    m_playbackLoaded = true;
+    m_playbackPaused = false;
+    m_positionMs = 0;
+    m_durationMs = 0;
+    m_playbackLevel = 0.0f;
+    m_playingFileName = entry.FileName();
+    m_positionText = L"00:00";
+    m_durationText = L"00:00";
+    SetStatus(winrt::hstring{L"Playing " + path.filename().wstring()});
+    MarkPlayingRow();
+    RaisePlaybackProps();
+}
+
+void MainViewModel::TogglePlayback()
+{
+    if (!m_playbackLoaded) return;
+    const auto status = m_playbackPaused ? play_resume() : play_pause();
+    if (status != REC_STATUS_OK) {
+        SetError(LastCoreError(L"Playback could not be held"));
+        return;
+    }
+    m_playbackPaused = !m_playbackPaused;
+    SetStatus(m_playbackPaused ? L"Paused" : L"Playing");
+    MarkPlayingRow();
+    Raise(L"IsPlaybackPlaying");
+}
+
+void MainViewModel::StopPlayback()
+{
+    // Ask audio-core too: a take that ran out has already released its threads
+    // on one side and still needs joining on the other.
+    if (!m_playbackLoaded && play_is_playing() == 0) return;
+    const auto status = play_stop();
+    ClearPlaybackState();
+    if (status != REC_STATUS_OK) {
+        SetError(LastCoreError(L"Playback failed"));
+    }
+}
+
+void MainViewModel::SeekPlayback(uint64_t positionMs)
+{
+    if (!m_playbackLoaded) return;
+    if (play_seek_ms(positionMs) != REC_STATUS_OK) return;
+
+    // Report the target straight away. audio-core coalesces seeks, so the
+    // position it reports lags the drag by a tick or two and the scrubber
+    // would fight the thumb.
+    m_positionMs = positionMs;
+    m_positionText =
+        winrt::hstring{FormatDuration(std::chrono::milliseconds{static_cast<long long>(positionMs)})};
+    Raise(L"PlaybackPositionMs");
+    Raise(L"PlaybackPositionText");
+}
+
+void MainViewModel::PlaybackTick()
+{
+    PlayState snapshot{};
+    if (play_state(&snapshot) != REC_STATUS_OK) return;
+
+    if (snapshot.playing == 0) {
+        // The file ran out, or the endpoint gave up. Either way the threads are
+        // done and want joining; `finished` tells the two apart.
+        const bool finished = snapshot.finished != 0;
+        const auto status = play_stop();
+        ClearPlaybackState();
+        if (status != REC_STATUS_OK) {
+            SetError(LastCoreError(L"Playback stopped"));
+        } else if (finished) {
+            SetStatus(L"Played to the end");
+        }
+        return;
+    }
+
+    const bool paused = snapshot.paused != 0;
+    if (paused != m_playbackPaused) {
+        m_playbackPaused = paused;
+        MarkPlayingRow();
+        Raise(L"IsPlaybackPlaying");
+    }
+
+    if (snapshot.duration_ms != m_durationMs) {
+        m_durationMs = snapshot.duration_ms;
+        m_durationText = winrt::hstring{
+            FormatDuration(std::chrono::milliseconds{static_cast<long long>(m_durationMs)})};
+        Raise(L"PlaybackDurationMs");
+        Raise(L"PlaybackDurationText");
+    }
+
+    if (snapshot.position_ms != m_positionMs) {
+        // The label only moves in whole seconds; re-formatting every tick would
+        // churn the binding nine times out of ten for no visible change.
+        const bool secondRolled = snapshot.position_ms / 1000 != m_positionMs / 1000;
+        m_positionMs = snapshot.position_ms;
+        Raise(L"PlaybackPositionMs");
+        if (secondRolled) {
+            m_positionText = winrt::hstring{
+                FormatDuration(std::chrono::milliseconds{static_cast<long long>(m_positionMs)})};
+            Raise(L"PlaybackPositionText");
+        }
+    }
+
+    const float level = MeterNorm(snapshot.level);
+    if (std::abs(level - m_playbackLevel) >= kMeterEpsilon) {
+        m_playbackLevel = level;
+        Raise(L"PlaybackLevelPercent");
+    }
+}
+
+void MainViewModel::MarkPlayingRow()
+{
+    const bool loaded = m_playbackLoaded && m_playingPath.has_value();
+    for (uint32_t i = 0; i < m_recordings.Size(); ++i) {
+        auto entry = m_recordings.GetAt(i);
+        auto row = winrt::get_self<RecordingEntry>(entry);
+        const bool isThisOne = loaded && fs::path{std::wstring{entry.FullPath()}} == *m_playingPath;
+        row->IsPlaying(isThisOne);
+        if (isThisOne) row->SetPlaybackGlyph(m_playbackPaused);
+    }
+}
+
+void MainViewModel::ClearPlaybackState()
+{
+    m_playingPath.reset();
+    m_playbackLoaded = false;
+    m_playbackPaused = false;
+    m_positionMs = 0;
+    m_durationMs = 0;
+    m_playbackLevel = 0.0f;
+    m_playingFileName = L"";
+    m_positionText = L"00:00";
+    m_durationText = L"00:00";
+    MarkPlayingRow();
+    RaisePlaybackProps();
+}
+
+void MainViewModel::RaisePlaybackProps()
+{
+    Raise(L"IsPlaybackLoaded");
+    Raise(L"IsPlaybackPlaying");
+    Raise(L"PlayingFileName");
+    Raise(L"PlaybackPositionText");
+    Raise(L"PlaybackDurationText");
+    Raise(L"PlaybackPositionMs");
+    Raise(L"PlaybackDurationMs");
+    Raise(L"PlaybackLevelPercent");
 }
 
 winrt::event_token MainViewModel::PropertyChanged(

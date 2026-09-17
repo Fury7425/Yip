@@ -163,6 +163,8 @@ void App::Quit(bool windowAlreadyClosing)
     if (::rec_is_recording()) {
         (void)::rec_stop();
     }
+    // And playback lets go of its file, for the same reason.
+    (void)::play_stop();
 
     TeardownTray();
 

@@ -21,15 +21,18 @@
     clippy::unreadable_literal
 )]
 
-//! audio-core: WASAPI capture, lock-free ring, WAV / FLAC / MP3 / M4A writer.
+//! audio-core: WASAPI capture, lock-free ring, WAV / FLAC / MP3 / M4A writer,
+//! and WASAPI playback of the takes it wrote.
 //! Public surface lives in [`ffi`]. All other modules are internal.
 
 pub mod capture;
+mod decode;
 pub mod devices;
 mod error;
 pub mod ffi;
 pub mod format;
 mod mf;
+pub mod player;
 pub mod ring;
 pub mod writer;
 

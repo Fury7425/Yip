@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use crate::capture::Recorder;
 use crate::devices::{Device, list_devices};
 use crate::error::YipError;
+use crate::player::{PLAYBACK, Player};
 use crate::ring::METER;
 
 /// Integer status returned across FFI. 0 == success.
@@ -32,6 +33,7 @@ pub enum RecStatus {
     Overrun = 7,
     Panic = 8,
     Encoder = 9,
+    Decoder = 10,
     Unknown = 99,
 }
 
@@ -46,6 +48,7 @@ impl From<&YipError> for RecStatus {
             YipError::UnsupportedFormat(_) => Self::UnsupportedFormat,
             YipError::Overrun => Self::Overrun,
             YipError::Encoder(_) => Self::Encoder,
+            YipError::Decoder(_) => Self::Decoder,
         }
     }
 }
@@ -132,6 +135,35 @@ pub struct RecMeter {
     pub elapsed_ms: u64,
 }
 
+/// One-call snapshot of playback, filled by [`play_state`].
+///
+/// Every field is an atomic read, so the UI's scrubber costs one FFI call and
+/// takes no lock — a decoder stuck on a slow disk can never stall the poll.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PlayState {
+    /// 1 while a take is loaded and reaching the endpoint. Stays 1 across a
+    /// pause, which holds the stream rather than ending it.
+    pub playing: u8,
+    /// 1 while playback is held. `position_ms` is frozen.
+    pub paused: u8,
+    /// 1 once the file played through to its end on its own. The host should
+    /// call [`play_stop`] to release the threads.
+    pub finished: u8,
+    /// Reserved; keeps the fields below naturally aligned.
+    pub reserved: [u8; 1],
+    /// Rate and channel count the endpoint opened with, not necessarily the
+    /// file's: shared mode converts. 0 before playback starts.
+    pub sample_rate: u32,
+    pub channels: u32,
+    /// Decaying peak envelope of what is being rendered, 0.0..=1.0.
+    pub level: f32,
+    /// How far playback has reached, in ms.
+    pub position_ms: u64,
+    /// File length in ms, or 0 when the container does not declare one.
+    pub duration_ms: u64,
+}
+
 /// C-visible device record. Strings are UTF-8, null-terminated, owned by the
 /// returned array and freed via [`rec_free_devices`].
 #[repr(C)]
@@ -206,6 +238,14 @@ fn session_elapsed_ms() -> u64 {
 fn singleton() -> &'static parking_lot::Mutex<Option<Recorder>> {
     static REC: OnceLock<parking_lot::Mutex<Option<Recorder>>> = OnceLock::new();
     REC.get_or_init(|| parking_lot::Mutex::new(None))
+}
+
+/// Playback runs beside capture and never with it: the app stops a take
+/// before starting one. Its own singleton all the same, so neither lock is
+/// ever taken for the other's sake.
+fn player_singleton() -> &'static parking_lot::Mutex<Option<Player>> {
+    static PLAYER: OnceLock<parking_lot::Mutex<Option<Player>>> = OnceLock::new();
+    PLAYER.get_or_init(|| parking_lot::Mutex::new(None))
 }
 
 /// Callback invoked whenever the recording state flips. `recording` is 1 while
@@ -506,6 +546,157 @@ pub extern "C" fn rec_current_path() -> *const c_char {
 #[unsafe(no_mangle)]
 pub extern "C" fn rec_last_error() -> *const c_char {
     LAST_ERROR.with(|cell| cell.borrow().as_ref().map_or(ptr::null(), |s| s.as_ptr()))
+}
+
+// ----------------------------------------------------------------------------
+// Playback
+// ----------------------------------------------------------------------------
+
+/// Start playing `path` on the default render endpoint. Replaces whatever was
+/// playing. `path` is a null-terminated UTF-8 string.
+///
+/// Returns once audio is flowing, so a file that cannot be decoded — or an
+/// endpoint that refuses it — fails here rather than playing silence.
+///
+/// # Safety
+/// `path` must point to valid, null-terminated UTF-8.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn play_start(path: *const c_char) -> RecStatus {
+    run(|| {
+        if path.is_null() {
+            return Err(YipError::InvalidArgument("path was null"));
+        }
+        // SAFETY: caller contract: pointer is valid null-terminated UTF-8.
+        let p = unsafe { CStr::from_ptr(path) }
+            .to_str()
+            .map_err(|_| YipError::InvalidArgument("path not utf-8"))?;
+
+        let mut guard = player_singleton().lock();
+        // Switching takes ends the old one first: one endpoint, one take.
+        if let Some(previous) = guard.take() {
+            let _ = previous.stop();
+        }
+        *guard = Some(Player::start(std::path::Path::new(p))?);
+        Ok(())
+    })
+}
+
+/// Stop playback and release the file. Idempotent.
+///
+/// Reports whatever failed the session: a device that disappeared mid-take
+/// surfaces here, because this is where the threads are joined.
+#[unsafe(no_mangle)]
+pub extern "C" fn play_stop() -> RecStatus {
+    let status = run(|| {
+        let mut guard = player_singleton().lock();
+        if let Some(player) = guard.take() {
+            player.stop()?;
+        }
+        Ok(())
+    });
+    // The session is gone either way, so the state block follows it out.
+    PLAYBACK.reset();
+    status
+}
+
+/// Hold playback without releasing the file. Idempotent; returns
+/// `InvalidState` when nothing is playing.
+#[unsafe(no_mangle)]
+pub extern "C" fn play_pause() -> RecStatus {
+    run(|| {
+        let guard = player_singleton().lock();
+        let Some(player) = guard.as_ref() else {
+            return Err(YipError::InvalidState("not playing"));
+        };
+        player.set_paused(true);
+        Ok(())
+    })
+}
+
+/// Resume held playback. Idempotent; returns `InvalidState` when nothing is
+/// playing.
+#[unsafe(no_mangle)]
+pub extern "C" fn play_resume() -> RecStatus {
+    run(|| {
+        let guard = player_singleton().lock();
+        let Some(player) = guard.as_ref() else {
+            return Err(YipError::InvalidState("not playing"));
+        };
+        player.set_paused(false);
+        Ok(())
+    })
+}
+
+/// Jump to `ms`, clamped to the file's length.
+///
+/// Cheap and coalescing: the decoder acts on the latest target it sees, so a
+/// dragged scrubber costs one seek rather than one per pixel. Returns
+/// `InvalidState` when nothing is playing.
+#[unsafe(no_mangle)]
+pub extern "C" fn play_seek_ms(ms: u64) -> RecStatus {
+    run(|| {
+        let guard = player_singleton().lock();
+        let Some(player) = guard.as_ref() else {
+            return Err(YipError::InvalidState("not playing"));
+        };
+        player.seek(ms);
+        Ok(())
+    })
+}
+
+/// Fill `out` with the whole playback state in one lock-free call.
+///
+/// # Safety
+/// `out` must point at a writable [`PlayState`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn play_state(out: *mut PlayState) -> RecStatus {
+    run(|| {
+        if out.is_null() {
+            return Err(YipError::InvalidArgument("out was null"));
+        }
+        let playing = PLAYBACK.is_playing();
+        let snapshot = PlayState {
+            playing: u8::from(playing),
+            paused: u8::from(playing && PLAYBACK.is_paused()),
+            finished: u8::from(PLAYBACK.is_finished()),
+            reserved: [0; 1],
+            sample_rate: PLAYBACK.sample_rate(),
+            channels: PLAYBACK.channels(),
+            level: PLAYBACK.peak(),
+            position_ms: PLAYBACK.position_ms(),
+            duration_ms: PLAYBACK.duration_ms(),
+        };
+        // SAFETY: caller guarantees `out` is a valid writable PlayState.
+        unsafe { ptr::write(out, snapshot) };
+        Ok(())
+    })
+}
+
+/// 1 while a take is playing, paused or not. Lock-free.
+#[unsafe(no_mangle)]
+pub extern "C" fn play_is_playing() -> u8 {
+    u8::from(PLAYBACK.is_playing())
+}
+
+/// Thread-local copy of the path being played. Pointer valid until the next
+/// FFI call on this thread. Returns null when nothing is loaded.
+#[unsafe(no_mangle)]
+pub extern "C" fn play_current_path() -> *const c_char {
+    thread_local! {
+        static PATH: RefCell<Option<CString>> = const { RefCell::new(None) };
+    }
+    let guard = player_singleton().lock();
+    let Some(player) = guard.as_ref() else {
+        PATH.with(|cell| *cell.borrow_mut() = None);
+        return ptr::null();
+    };
+    let s = player.path().to_string_lossy().into_owned();
+    PATH.with(|cell| {
+        let owned = CString::new(s).unwrap_or_default();
+        let ptr = owned.as_ptr();
+        *cell.borrow_mut() = Some(owned);
+        ptr
+    })
 }
 
 // ----------------------------------------------------------------------------
