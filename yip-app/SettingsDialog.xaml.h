@@ -15,6 +15,15 @@ struct SettingsDialog : SettingsDialogT<SettingsDialog> {
     uint16_t Channels() const noexcept;
     void Channels(uint16_t v);
 
+    uint16_t Format() const noexcept;
+    void Format(uint16_t v);
+
+    uint16_t BitDepth() const noexcept;
+    void BitDepth(uint16_t v);
+
+    uint16_t BitrateKbps() const noexcept;
+    void BitrateKbps(uint16_t v);
+
     uint32_t HotkeyMods() const noexcept { return m_hotkeyMods; }
     void HotkeyMods(uint32_t v);
 
@@ -35,15 +44,25 @@ struct SettingsDialog : SettingsDialogT<SettingsDialog> {
     void OnResetHotkey(winrt::Windows::Foundation::IInspectable const& sender,
                        winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
 
+    void OnFormatChanged(winrt::Windows::Foundation::IInspectable const& sender,
+                         winrt::Microsoft::UI::Xaml::Controls::SelectionChangedEventArgs const& args);
+
 private:
     void ApplyToControls();
     void ReadFromControls() const;
 
     void ApplyHotkeyToControls();
 
+    // Show the picker that matches the chosen format, and pull every
+    // selection back inside what that codec accepts.
+    void SyncFormatControls();
+
     winrt::hstring m_outputFolder;
     uint32_t m_sampleRate{48000};
     uint16_t m_channels{2};
+    uint16_t m_format{0};
+    uint16_t m_bitDepth{32};
+    uint16_t m_bitrateKbps{192};
     uint32_t m_hotkeyMods{0x2 | 0x1}; // Ctrl+Alt
     uint32_t m_hotkeyVk{0x52};        // 'R'
     bool m_pillDot{false};

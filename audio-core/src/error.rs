@@ -14,6 +14,8 @@ pub enum YipError {
     Io(String),
     /// Unsupported wave format reported by device.
     UnsupportedFormat(String),
+    /// Media Foundation could not set up or feed the FLAC / MP3 / M4A encoder.
+    Encoder(String),
     /// Ring buffer overrun — writer thread couldn't keep up.
     Overrun,
     /// FFI input pointer was null or invalid UTF-8.
@@ -28,6 +30,7 @@ impl fmt::Display for YipError {
             Self::Wasapi(s) => write!(f, "wasapi: {s}"),
             Self::Io(s) => write!(f, "io: {s}"),
             Self::UnsupportedFormat(s) => write!(f, "unsupported format: {s}"),
+            Self::Encoder(s) => write!(f, "encoder: {s}"),
             Self::Overrun => write!(f, "ring overrun"),
             Self::InvalidArgument(s) => write!(f, "invalid argument: {s}"),
         }

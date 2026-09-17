@@ -674,6 +674,9 @@ winrt::fire_and_forget MainWindow::OnOpenSettings(winrt::Windows::Foundation::II
     dialog.OutputFolder(strong->m_viewModel.OutputFolder());
     dialog.SampleRate(strong->m_viewModel.SampleRate());
     dialog.Channels(strong->m_viewModel.Channels());
+    dialog.Format(strong->m_viewModel.Format());
+    dialog.BitDepth(strong->m_viewModel.BitDepth());
+    dialog.BitrateKbps(strong->m_viewModel.BitrateKbps());
     dialog.HotkeyMods(strong->m_viewModel.HotkeyMods());
     dialog.HotkeyVk(strong->m_viewModel.HotkeyVk());
     dialog.PillDot(strong->m_viewModel.PillDot());
@@ -685,6 +688,7 @@ winrt::fire_and_forget MainWindow::OnOpenSettings(winrt::Windows::Foundation::II
     const auto result = co_await dialog.ShowAsync();
     if (result == winrt::Microsoft::UI::Xaml::Controls::ContentDialogResult::Primary) {
         strong->m_viewModel.ApplySettings(dialog.OutputFolder(), dialog.SampleRate(), dialog.Channels(),
+                                          dialog.Format(), dialog.BitDepth(), dialog.BitrateKbps(),
                                           dialog.HotkeyMods(), dialog.HotkeyVk(), dialog.PillDot(),
                                           dialog.PillBottom());
         // Re-grab the combo: the old registration is dropped inside Register().

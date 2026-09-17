@@ -6,7 +6,7 @@
 //!     each packet into the SPSC ring and folds one pass of statistics into the
 //!     meter. **Zero allocs, zero locks, zero logs** inside the buffer loop.
 //!   * **writer thread** — Rust, normal priority. Drains the ring into
-//!     `hound`. Allowed to block on disk.
+//!     `hound` or a Media Foundation encoder. Allowed to block on disk.
 //!   * **caller** — owns `Recorder`. `start()` and `stop()` only.
 
 use std::path::{Path, PathBuf};
@@ -36,6 +36,7 @@ use windows::core::Interface;
 use crate::devices::find_device;
 use crate::error::YipError;
 use crate::ffi::RecConfig;
+use crate::format::Encoding;
 use crate::ring::{METER, RING_CAPACITY_SAMPLES, analyse, split};
 use crate::writer::{WriterConfig, run_writer};
 
@@ -63,6 +64,9 @@ unsafe impl Sync for SendHandle {}
 
 impl Recorder {
     pub fn start(device_id: &str, path: &Path, cfg: RecConfig) -> Result<Self, YipError> {
+        // Refuse a bad format before any thread or device is touched.
+        let encoding = Encoding::from_config(&cfg)?;
+
         let stop = Arc::new(AtomicBool::new(false));
         let paused = Arc::new(AtomicBool::new(false));
         let writer_stop = Arc::new(AtomicBool::new(false));
@@ -89,6 +93,7 @@ impl Recorder {
                     &device_id_owned,
                     &path_owned,
                     cfg,
+                    encoding,
                     &mut producer,
                     &stop_for_capture,
                     &paused_for_capture,
@@ -99,27 +104,39 @@ impl Recorder {
             })
             .map_err(|e| YipError::Wasapi(format!("spawn capture: {e}")))?;
 
-        // Wait for capture thread to negotiate the format and report ready.
-        let wcfg = ready_rx
-            .recv()
-            .map_err(|_| YipError::Wasapi("capture thread died before ready".into()))??;
-
-        let writer_stop_for_writer = writer_stop.clone();
-        let writer_thread = std::thread::Builder::new()
-            .name("yip-writer".into())
-            .spawn(move || run_writer(consumer, wcfg, writer_stop_for_writer))
-            .map_err(|e| YipError::Io(format!("spawn writer: {e}")))?;
-
-        Ok(Self {
+        // Own the capture thread from here on: every early return below drops
+        // `rec`, and Drop stops and joins whatever has been started.
+        let mut rec = Self {
             stop,
             paused,
             writer_stop,
             stop_event,
             capture_thread: Some(capture_thread),
-            writer_thread: Some(writer_thread),
+            writer_thread: None,
             started_at: std::time::Instant::now(),
             path: path.to_path_buf(),
-        })
+        };
+
+        // Wait for capture thread to negotiate the format and report ready.
+        let wcfg = ready_rx
+            .recv()
+            .map_err(|_| YipError::Wasapi("capture thread died before ready".into()))??;
+
+        let writer_stop_for_writer = rec.writer_stop.clone();
+        let (writer_ready_tx, writer_ready_rx) = channel::<Result<(), YipError>>();
+        let writer_thread = std::thread::Builder::new()
+            .name("yip-writer".into())
+            .spawn(move || run_writer(consumer, wcfg, writer_stop_for_writer, writer_ready_tx))
+            .map_err(|e| YipError::Io(format!("spawn writer: {e}")))?;
+        rec.writer_thread = Some(writer_thread);
+
+        // Wait for the file and encoder to open, so a refused format fails the
+        // start instead of surfacing at stop with nothing written.
+        writer_ready_rx
+            .recv()
+            .map_err(|_| YipError::Io("writer thread died before ready".into()))??;
+
+        Ok(rec)
     }
 
     /// Wall-clock ms since `start()` returned. Monotonic; unaffected by clock changes.
@@ -198,6 +215,7 @@ fn capture_loop(
     device_id: &str,
     path: &Path,
     cfg: RecConfig,
+    encoding: Encoding,
     producer: &mut rtrb::Producer<f32>,
     stop: &Arc<AtomicBool>,
     paused: &Arc<AtomicBool>,
@@ -257,6 +275,10 @@ fn capture_loop(
     } else {
         cfg.channels
     };
+    // Encoders take fewer rates and channel counts than WAV. Asking WASAPI to
+    // convert on the way in beats an encoder refusing the take.
+    let want_rate = encoding.capture_rate(want_rate);
+    let want_channels = encoding.capture_channels(want_channels);
 
     // First choice: the caller's format. WASAPI resamples/remixes behind
     // AUTOCONVERTPCM. A device that refuses it leaves the client unusable, so
@@ -318,6 +340,7 @@ fn capture_loop(
         path: path.to_path_buf(),
         sample_rate,
         channels,
+        encoding,
     };
 
     // SAFETY: client live; handle live.

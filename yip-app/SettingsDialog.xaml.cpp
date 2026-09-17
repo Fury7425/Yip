@@ -6,6 +6,7 @@
 #endif
 
 #include "HotkeyManager.h"
+#include "RecordingFormat.h"
 
 #include <microsoft.ui.xaml.window.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
@@ -16,10 +17,64 @@
 
 #include <shobjidl.h>
 
+#include <algorithm>
+#include <cwchar>
+
 using namespace winrt;
 using namespace winrt::Microsoft::UI::Xaml::Controls;
 
+namespace audiofmt = ::yip::audiofmt;
+
 namespace {
+// Numeric Tag of a ComboBoxItem ("24", "192"), or 0 when it has none.
+uint32_t TagValue(winrt::Windows::Foundation::IInspectable const& item)
+{
+    const auto cbi = item ? item.try_as<ComboBoxItem>() : nullptr;
+    if (!cbi) return 0;
+    const auto text = winrt::unbox_value_or<winrt::hstring>(cbi.Tag(), L"");
+    return static_cast<uint32_t>(std::wcstoul(text.c_str(), nullptr, 10));
+}
+
+int32_t IndexOfTag(ComboBox const& combo, uint32_t tag)
+{
+    const auto items = combo.Items();
+    for (uint32_t i = 0; i < items.Size(); ++i) {
+        if (TagValue(items.GetAt(i)) == tag) return static_cast<int32_t>(i);
+    }
+    return -1;
+}
+
+// Enable each item `allowed` accepts. If that strands the selection, move it
+// to `fallback`.
+template <class Allowed>
+void RestrictItems(ComboBox const& combo, Allowed allowed, uint32_t fallback)
+{
+    const auto items = combo.Items();
+    for (uint32_t i = 0; i < items.Size(); ++i) {
+        if (const auto cbi = items.GetAt(i).try_as<ComboBoxItem>()) {
+            cbi.IsEnabled(allowed(TagValue(cbi)));
+        }
+    }
+    const auto selected = combo.SelectedItem();
+    if (!selected || !allowed(TagValue(selected))) {
+        combo.SelectedIndex(std::max(0, IndexOfTag(combo, fallback)));
+    }
+}
+
+const wchar_t* FormatHintText(uint16_t format)
+{
+    switch (format) {
+        case audiofmt::kFlac:
+            return L"Lossless, and about half the size of WAV.";
+        case audiofmt::kMp3:
+            return L"Lossy. Plays anywhere. Records at 44.1 or 48 kHz.";
+        case audiofmt::kM4a:
+            return L"Lossy, smaller than MP3 at the same quality. Records at 44.1 or 48 kHz.";
+        default:
+            return L"Uncompressed. The only format Process can open.";
+    }
+}
+
 HWND TryFindForegroundHwnd()
 {
     // ContentDialog runs against the active XamlRoot, but FolderPicker
@@ -91,6 +146,39 @@ uint16_t SettingsDialog::Channels() const noexcept
 void SettingsDialog::Channels(uint16_t v)
 {
     m_channels = v;
+    ApplyToControls();
+}
+
+uint16_t SettingsDialog::Format() const noexcept
+{
+    ReadFromControls();
+    return m_format;
+}
+void SettingsDialog::Format(uint16_t v)
+{
+    m_format = v;
+    ApplyToControls();
+}
+
+uint16_t SettingsDialog::BitDepth() const noexcept
+{
+    ReadFromControls();
+    return m_bitDepth;
+}
+void SettingsDialog::BitDepth(uint16_t v)
+{
+    m_bitDepth = v;
+    ApplyToControls();
+}
+
+uint16_t SettingsDialog::BitrateKbps() const noexcept
+{
+    ReadFromControls();
+    return m_bitrateKbps;
+}
+void SettingsDialog::BitrateKbps(uint16_t v)
+{
+    m_bitrateKbps = v;
     ApplyToControls();
 }
 
@@ -170,6 +258,54 @@ void SettingsDialog::OnResetHotkey(winrt::Windows::Foundation::IInspectable cons
     ApplyHotkeyToControls();
 }
 
+void SettingsDialog::OnFormatChanged(winrt::Windows::Foundation::IInspectable const& /*sender*/,
+                                     SelectionChangedEventArgs const& /*args*/)
+{
+    SyncFormatControls();
+}
+
+void SettingsDialog::SyncFormatControls()
+{
+    // SelectionChanged can fire from InitializeComponent before every named
+    // control is connected.
+    if (!FormatCombo() || !BitDepthCombo() || !BitrateCombo() || !SampleRateCombo() || !FormatHint() ||
+        !QualityLabel()) {
+        return;
+    }
+
+    const auto format = static_cast<uint16_t>(std::max(0, FormatCombo().SelectedIndex()));
+    const bool lossy = audiofmt::IsLossy(format);
+    const auto shown = winrt::Microsoft::UI::Xaml::Visibility::Visible;
+    const auto hidden = winrt::Microsoft::UI::Xaml::Visibility::Collapsed;
+
+    FormatHint().Text(FormatHintText(format));
+    QualityLabel().Text(lossy ? L"Bitrate" : L"Bit depth");
+    BitDepthCombo().Visibility(lossy ? hidden : shown);
+    BitrateCombo().Visibility(lossy ? shown : hidden);
+
+    // FLAC has no float mode.
+    RestrictItems(
+        BitDepthCombo(), [format](uint32_t bits) { return bits != 32 || format != audiofmt::kFlac; }, 24);
+
+    // Each lossy codec has its own bitrate ladder. Leave everything enabled
+    // while hidden, so switching back to a lossy format never finds a
+    // stranded selection.
+    RestrictItems(
+        BitrateCombo(),
+        [format](uint32_t kbps) {
+            const auto k = static_cast<uint16_t>(kbps);
+            if (format == audiofmt::kMp3) return audiofmt::IsMp3Bitrate(k);
+            if (format == audiofmt::kM4a) return audiofmt::IsAacBitrate(k);
+            return true;
+        },
+        audiofmt::kDefaultKbps);
+
+    // The MP3 and AAC encoders only take 44.1 and 48 kHz.
+    RestrictItems(
+        SampleRateCombo(), [lossy](uint32_t rate) { return !lossy || rate == 44100 || rate == 48000; },
+        48000);
+}
+
 void SettingsDialog::ApplyToControls()
 {
     if (FolderBox()) {
@@ -197,6 +333,18 @@ void SettingsDialog::ApplyToControls()
     }
     if (ChannelsCombo()) {
         ChannelsCombo().SelectedIndex(m_channels == 1 ? 0 : 1);
+    }
+    if (FormatCombo() && BitDepthCombo() && BitrateCombo()) {
+        auto format = m_format;
+        auto bits = m_bitDepth;
+        auto kbps = m_bitrateKbps;
+        audiofmt::Normalize(format, bits, kbps);
+        // Format first, so the item restrictions match before the quality
+        // selections land; then sync once more for the final state.
+        FormatCombo().SelectedIndex(format);
+        BitDepthCombo().SelectedIndex(std::max(0, IndexOfTag(BitDepthCombo(), bits)));
+        BitrateCombo().SelectedIndex(std::max(0, IndexOfTag(BitrateCombo(), kbps)));
+        SyncFormatControls();
     }
     if (PillStyleCombo()) {
         PillStyleCombo().SelectedIndex(m_pillDot ? 1 : 0);
@@ -235,6 +383,19 @@ void SettingsDialog::ReadFromControls() const
     }
     if (self->ChannelsCombo()) {
         self->m_channels = (self->ChannelsCombo().SelectedIndex() == 0) ? 1 : 2;
+    }
+    if (self->FormatCombo() && self->FormatCombo().SelectedIndex() >= 0) {
+        self->m_format = static_cast<uint16_t>(self->FormatCombo().SelectedIndex());
+    }
+    if (self->BitDepthCombo()) {
+        if (const auto bits = TagValue(self->BitDepthCombo().SelectedItem())) {
+            self->m_bitDepth = static_cast<uint16_t>(bits);
+        }
+    }
+    if (self->BitrateCombo()) {
+        if (const auto kbps = TagValue(self->BitrateCombo().SelectedItem())) {
+            self->m_bitrateKbps = static_cast<uint16_t>(kbps);
+        }
     }
     if (self->PillStyleCombo()) {
         self->m_pillDot = self->PillStyleCombo().SelectedIndex() == 1;

@@ -14,8 +14,12 @@ struct Settings {
     uint32_t sample_rate{48000};
     uint16_t channels{2};
 
-    // 0 = PCM float32 (only format in v1; reserved for future expansion).
+    // Container, as yip::audiofmt::kWav / kFlac / kMp3 / kM4a.
     uint16_t format{0};
+    // WAV: 16, 24 or 32 (float). FLAC: 16 or 24. Unused by MP3 and M4A.
+    uint16_t bit_depth{32};
+    // MP3 and M4A bitrate. Unused by WAV and FLAC.
+    uint16_t bitrate_kbps{192};
 
     // Global start/stop hotkey. Modifiers are the Win32 MOD_* bitmask
     // (MOD_ALT=0x1, MOD_CONTROL=0x2, MOD_SHIFT=0x4, MOD_WIN=0x8); vk is a

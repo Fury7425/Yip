@@ -58,7 +58,13 @@ namespace yip.viewmodels
         UInt32 SampleRate{ get; };
         UInt16 Channels{ get; };
 
-        // "48 kHz · stereo · 32-bit float" - what the next take will be.
+        // Recording format: 0 WAV, 1 FLAC, 2 MP3, 3 M4A (audio-core's REC_FORMAT_*).
+        // BitDepth applies to WAV and FLAC, BitrateKbps to MP3 and M4A.
+        UInt16 Format{ get; };
+        UInt16 BitDepth{ get; };
+        UInt16 BitrateKbps{ get; };
+
+        // "48 kHz · stereo · WAV 32-bit float" - what the next take will be.
         String FormatLabel{ get; };
 
         // Win32 MOD_* bitmask + virtual-key code for the global record hotkey.
@@ -85,6 +91,7 @@ namespace yip.viewmodels
 
         void ToggleRecording();
         void ApplySettings(String folder, UInt32 sampleRate, UInt16 channels,
+                           UInt16 format, UInt16 bitDepth, UInt16 bitrateKbps,
                            UInt32 hotkeyMods, UInt32 hotkeyVk, Boolean pillDot, Boolean pillBottom);
 
         void RevealRecording(RecordingEntry entry);

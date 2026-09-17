@@ -10,7 +10,7 @@ documentation = true
 parse_deps = false
 
 [export]
-include = ["RecStatus", "RecConfig", "RecMeter", "DeviceInfo", "RecStateCallback"]
+include = ["RecStatus", "RecFormat", "RecConfig", "RecMeter", "DeviceInfo", "RecStateCallback"]
 prefix = ""
 
 [export.rename]

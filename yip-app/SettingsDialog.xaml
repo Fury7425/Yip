@@ -86,6 +86,8 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <StackPanel Spacing="2" VerticalAlignment="Center">
@@ -123,19 +125,65 @@
 
                 <Rectangle Grid.Row="3" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
 
+                <!-- Item order is the format value (audio-core's REC_FORMAT_*). -->
                 <StackPanel Grid.Row="4" Spacing="2" VerticalAlignment="Center">
                     <TextBlock Text="Format" Style="{StaticResource SettingsLabel}" />
-                    <TextBlock Style="{StaticResource SettingsHint}"
-                               Text="Other formats are reserved for a future release." />
+                    <TextBlock x:Name="FormatHint"
+                               Style="{StaticResource SettingsHint}"
+                               Text="Uncompressed. The only format Process can open." />
                 </StackPanel>
-                <TextBlock Grid.Row="4"
-                           Grid.Column="1"
-                           Text="32-bit float"
-                           FontFamily="Cascadia Mono,Consolas,Courier New"
-                           FontSize="12"
-                           VerticalAlignment="Center"
-                           HorizontalAlignment="Right"
-                           Foreground="{ThemeResource YipTextSecondaryBrush}" />
+                <ComboBox x:Name="FormatCombo"
+                          Grid.Row="4"
+                          Grid.Column="1"
+                          Width="128"
+                          VerticalAlignment="Center"
+                          SelectedIndex="0"
+                          SelectionChanged="OnFormatChanged"
+                          CornerRadius="{StaticResource YipControlCornerRadius}"
+                          AutomationProperties.Name="Format">
+                    <ComboBoxItem Content="WAV" />
+                    <ComboBoxItem Content="FLAC" />
+                    <ComboBoxItem Content="MP3" />
+                    <ComboBoxItem Content="M4A (AAC)" />
+                </ComboBox>
+
+                <Rectangle Grid.Row="5" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
+
+                <!-- One cell, two pickers: bit depth for WAV and FLAC, bitrate for
+                     MP3 and M4A. The code-behind swaps them and disables what the
+                     chosen codec cannot do. -->
+                <TextBlock x:Name="QualityLabel"
+                           Grid.Row="6"
+                           Text="Bit depth"
+                           Style="{StaticResource SettingsLabel}" />
+                <ComboBox x:Name="BitDepthCombo"
+                          Grid.Row="6"
+                          Grid.Column="1"
+                          Width="128"
+                          VerticalAlignment="Center"
+                          SelectedIndex="2"
+                          CornerRadius="{StaticResource YipControlCornerRadius}"
+                          AutomationProperties.Name="Bit depth">
+                    <ComboBoxItem Content="16-bit" Tag="16" />
+                    <ComboBoxItem Content="24-bit" Tag="24" />
+                    <ComboBoxItem Content="32-bit float" Tag="32" />
+                </ComboBox>
+                <ComboBox x:Name="BitrateCombo"
+                          Grid.Row="6"
+                          Grid.Column="1"
+                          Width="128"
+                          VerticalAlignment="Center"
+                          SelectedIndex="3"
+                          Visibility="Collapsed"
+                          CornerRadius="{StaticResource YipControlCornerRadius}"
+                          AutomationProperties.Name="Bitrate">
+                    <ComboBoxItem Content="96 kbps" Tag="96" />
+                    <ComboBoxItem Content="128 kbps" Tag="128" />
+                    <ComboBoxItem Content="160 kbps" Tag="160" />
+                    <ComboBoxItem Content="192 kbps" Tag="192" />
+                    <ComboBoxItem Content="256 kbps" Tag="256" />
+                    <ComboBoxItem Content="320 kbps" Tag="320" />
+                </ComboBox>
             </Grid>
         </Border>
 

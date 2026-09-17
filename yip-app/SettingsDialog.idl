@@ -7,6 +7,10 @@ namespace yip
         String OutputFolder;
         UInt32 SampleRate;
         UInt16 Channels;
+        // 0 WAV, 1 FLAC, 2 MP3, 3 M4A. BitDepth is for WAV/FLAC, BitrateKbps for MP3/M4A.
+        UInt16 Format;
+        UInt16 BitDepth;
+        UInt16 BitrateKbps;
         UInt32 HotkeyMods;
         UInt32 HotkeyVk;
         Boolean PillDot;

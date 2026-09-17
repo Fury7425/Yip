@@ -7,6 +7,7 @@
 #include "AudioCoreInterop.h"
 #include "HotkeyManager.h"
 #include "Markers.h"
+#include "RecordingFormat.h"
 #include "ThemeColors.h"
 #include "WavProbe.h"
 
@@ -150,9 +151,9 @@ std::wstring FormatModified(const fs::file_time_type& t)
     return buf;
 }
 
-/// "48 kHz · stereo · 32-bit float · 6.2 MB" — the facts you need before
+/// "48 kHz · stereo · WAV 32-bit float · 6.2 MB" — the facts you need before
 /// handing a take to a plugin chain.
-std::wstring FormatSubtitle(const std::optional<::yip::WavInfo>& info, uint64_t sizeBytes)
+std::wstring FormatSubtitle(const std::optional<::yip::AudioInfo>& info, uint64_t sizeBytes)
 {
     std::wstring out;
     if (info && info->sample_rate > 0) {
@@ -174,12 +175,10 @@ std::wstring FormatSubtitle(const std::optional<::yip::WavInfo>& info, uint64_t 
             out += buf;
         }
 
-        out += kDot;
-        // audio-core only ever writes IEEE float; anything else came from
-        // elsewhere, so report the width without claiming a format.
-        swprintf_s(buf, info->bits_per_sample == 32 ? L"%u-bit float" : L"%u-bit",
-                   static_cast<unsigned>(info->bits_per_sample));
-        out += buf;
+        if (!info->quality.empty()) {
+            out += kDot;
+            out += info->quality;
+        }
         out += kDot;
     }
     out += FormatSize(sizeBytes);
@@ -303,7 +302,7 @@ void MainViewModel::RefreshRecordings()
             if (ec) break;
             if (!it.is_regular_file()) continue;
             const auto& p = it.path();
-            if (p.extension() != L".wav") continue;
+            if (!::yip::audiofmt::IsRecordingExtension(ToLower(p.extension().wstring()))) continue;
 
             Row r;
             r.path = p;
@@ -315,11 +314,11 @@ void MainViewModel::RefreshRecordings()
             r.modified = fs::last_write_time(p, ec);
             r.modifiedAt = ec ? std::wstring{} : FormatModified(r.modified);
 
-            // Read the real fmt/data chunks. Deriving duration from file size
-            // and an assumed 48 kHz stereo float32 is wrong for every other
-            // format, and the format is user-selectable.
-            const auto info = ::yip::ProbeWav(p);
-            r.duration = FormatDuration(info ? info->Duration() : std::chrono::milliseconds{0});
+            // Read the real headers. Deriving duration from file size and an
+            // assumed 48 kHz stereo float32 is wrong for every other format,
+            // and the format is user-selectable.
+            const auto info = ::yip::ProbeAudio(p);
+            r.duration = FormatDuration(info ? info->duration : std::chrono::milliseconds{0});
             r.subtitle = FormatSubtitle(info, r.sizeBytes);
             m_rows.push_back(std::move(r));
         }
@@ -474,6 +473,8 @@ void MainViewModel::ToggleRecording()
     cfg.sample_rate = m_settings.sample_rate;
     cfg.channels = m_settings.channels;
     cfg.format = m_settings.format;
+    cfg.bit_depth = m_settings.bit_depth;
+    cfg.bitrate_kbps = m_settings.bitrate_kbps;
 
     const auto status = rec_start(idUtf8.c_str(), pathUtf8.c_str(), cfg);
     if (status != REC_STATUS_OK) {
@@ -496,11 +497,16 @@ void MainViewModel::ToggleRecording()
 }
 
 void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleRate, uint16_t channels,
+                                  uint16_t format, uint16_t bitDepth, uint16_t bitrateKbps,
                                   uint32_t hotkeyMods, uint32_t hotkeyVk, bool pillDot, bool pillBottom)
 {
     m_settings.output_folder = std::wstring{folder};
     m_settings.sample_rate = sampleRate;
     m_settings.channels = channels;
+    ::yip::audiofmt::Normalize(format, bitDepth, bitrateKbps);
+    m_settings.format = format;
+    m_settings.bit_depth = bitDepth;
+    m_settings.bitrate_kbps = bitrateKbps;
     if (::yip::IsValidHotkey(hotkeyMods, hotkeyVk)) {
         m_settings.hotkey_mods = hotkeyMods;
         m_settings.hotkey_vk = hotkeyVk;
@@ -517,6 +523,9 @@ void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleR
     Raise(L"OutputFolder");
     Raise(L"SampleRate");
     Raise(L"Channels");
+    Raise(L"Format");
+    Raise(L"BitDepth");
+    Raise(L"BitrateKbps");
     Raise(L"FormatLabel");
     Raise(L"HotkeyMods");
     Raise(L"HotkeyVk");
@@ -529,17 +538,20 @@ void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleR
 
 winrt::hstring MainViewModel::FormatLabel() const
 {
-    // audio-core always writes IEEE float32; only the rate and channel count
-    // are the user's to choose.
+    // The rate shown is the one the take will really have: MP3 and M4A record
+    // 88.2 and 96 kHz settings at 48 kHz.
     wchar_t const* channels = m_settings.channels == 1   ? L"mono"
                               : m_settings.channels == 2 ? L"stereo"
                                                          : L"multi";
+    const auto rate = ::yip::audiofmt::CaptureRate(m_settings.format, m_settings.sample_rate);
+    const auto quality =
+        ::yip::audiofmt::Describe(m_settings.format, m_settings.bit_depth, m_settings.bitrate_kbps);
     wchar_t buf[96];
-    if (m_settings.sample_rate % 1000 == 0) {
-        swprintf_s(buf, L"%u kHz \u00B7 %s \u00B7 32-bit float", m_settings.sample_rate / 1000, channels);
+    if (rate % 1000 == 0) {
+        swprintf_s(buf, L"%u kHz \u00B7 %s \u00B7 %s", rate / 1000, channels, quality.c_str());
     } else {
-        swprintf_s(buf, L"%.1f kHz \u00B7 %s \u00B7 32-bit float",
-                   static_cast<double>(m_settings.sample_rate) / 1000.0, channels);
+        swprintf_s(buf, L"%.1f kHz \u00B7 %s \u00B7 %s", static_cast<double>(rate) / 1000.0, channels,
+                   quality.c_str());
     }
     return winrt::hstring{buf};
 }
@@ -653,8 +665,8 @@ std::filesystem::path MainViewModel::NextRecordingPath() const
     std::tm tm{};
     localtime_s(&tm, &tt);
     wchar_t name[64];
-    wcsftime(name, std::size(name), L"yip-%Y%m%d-%H%M%S.wav", &tm);
-    return m_settings.output_folder / name;
+    wcsftime(name, std::size(name), L"yip-%Y%m%d-%H%M%S", &tm);
+    return m_settings.output_folder / (std::wstring{name} + ::yip::audiofmt::Extension(m_settings.format));
 }
 
 void MainViewModel::SetStatus(winrt::hstring const& s)

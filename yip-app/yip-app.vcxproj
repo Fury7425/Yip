@@ -127,6 +127,10 @@
         oleaut32.lib;
         avrt.lib;
         propsys.lib;
+        mfplat.lib;
+        mfreadwrite.lib;
+        mf.lib;
+        delayimp.lib;
         comctl32.lib;
         shell32.lib;
         user32.lib;
@@ -137,6 +141,10 @@
         windowsapp.lib;
         %(AdditionalDependencies)
       </AdditionalDependencies>
+      <!-- Windows N and KN editions ship without Media Foundation. Delay-loading
+           keeps the app launching there; audio-core probes for the DLLs before
+           its first FLAC/MP3/M4A call and reports them missing instead. -->
+      <DelayLoadDLLs>mfplat.dll;mfreadwrite.dll;mf.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
       <EnableCOMDATFolding Condition="'$(Configuration)'=='Release'">true</EnableCOMDATFolding>
       <OptimizeReferences Condition="'$(Configuration)'=='Release'">true</OptimizeReferences>
     </Link>
@@ -208,6 +216,7 @@
     <ClInclude Include="TrayIcon.h" />
     <ClInclude Include="SingleInstance.h" />
     <ClInclude Include="WavProbe.h" />
+    <ClInclude Include="RecordingFormat.h" />
     <ClInclude Include="ThemeColors.h" />
   </ItemGroup>
 

@@ -31,6 +31,7 @@ pub enum RecStatus {
     UnsupportedFormat = 6,
     Overrun = 7,
     Panic = 8,
+    Encoder = 9,
     Unknown = 99,
 }
 
@@ -44,18 +45,42 @@ impl From<&YipError> for RecStatus {
             YipError::Io(_) => Self::Io,
             YipError::UnsupportedFormat(_) => Self::UnsupportedFormat,
             YipError::Overrun => Self::Overrun,
+            YipError::Encoder(_) => Self::Encoder,
         }
     }
+}
+
+/// Container / codec for [`RecConfig::format`]. Carried across the ABI as a
+/// plain `u16` so an out-of-range value from C is a validation error, not UB.
+#[repr(u16)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecFormat {
+    /// RIFF/WAVE. `bit_depth` 16 or 24 (integer PCM) or 32 (float).
+    Wav = 0,
+    /// Lossless. `bit_depth` 16 or 24.
+    Flac = 1,
+    /// MPEG-1 Layer III. `bitrate_kbps`.
+    Mp3 = 2,
+    /// AAC in an MPEG-4 container. `bitrate_kbps`.
+    M4a = 3,
 }
 
 /// C-visible config struct passed to `rec_start`.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct RecConfig {
+    /// 0 = follow the device. MP3 and M4A only encode 44.1 or 48 kHz, so any
+    /// other rate records at 48 kHz for them.
     pub sample_rate: u32,
+    /// 0 = follow the device. Encoded formats cap this at stereo.
     pub channels: u16,
-    /// 0 = PCM float32 (only format in v1).
+    /// A [`RecFormat`].
     pub format: u16,
+    /// WAV and FLAC: 16, 24, or (WAV only) 32 for float. 0 = the format's
+    /// default (32-bit float WAV, 24-bit FLAC). Ignored by lossy formats.
+    pub bit_depth: u16,
+    /// MP3 and M4A: kbps. 0 = 192. Ignored by lossless formats.
+    pub bitrate_kbps: u16,
 }
 
 impl Default for RecConfig {
@@ -63,7 +88,9 @@ impl Default for RecConfig {
         Self {
             sample_rate: 48_000,
             channels: 2,
-            format: 0,
+            format: RecFormat::Wav as u16,
+            bit_depth: 0,
+            bitrate_kbps: 0,
         }
     }
 }

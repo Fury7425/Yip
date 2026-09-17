@@ -114,6 +114,9 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     }
     uint32_t SampleRate() const noexcept { return m_settings.sample_rate; }
     uint16_t Channels() const noexcept { return m_settings.channels; }
+    uint16_t Format() const noexcept { return m_settings.format; }
+    uint16_t BitDepth() const noexcept { return m_settings.bit_depth; }
+    uint16_t BitrateKbps() const noexcept { return m_settings.bitrate_kbps; }
     winrt::hstring FormatLabel() const;
 
     uint32_t HotkeyMods() const noexcept { return m_settings.hotkey_mods; }
@@ -132,8 +135,9 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     void RefreshRecordings();
     void Tick();
     void ToggleRecording();
-    void ApplySettings(winrt::hstring const& folder, uint32_t sampleRate, uint16_t channels,
-                       uint32_t hotkeyMods, uint32_t hotkeyVk, bool pillDot, bool pillBottom);
+    void ApplySettings(winrt::hstring const& folder, uint32_t sampleRate, uint16_t channels, uint16_t format,
+                       uint16_t bitDepth, uint16_t bitrateKbps, uint32_t hotkeyMods, uint32_t hotkeyVk,
+                       bool pillDot, bool pillBottom);
     void RevealRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
     void OpenRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
     bool DeleteRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
@@ -149,7 +153,7 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     void PropertyChanged(winrt::event_token const& token) noexcept;
 
 private:
-    // One scanned WAV. Cached so filtering never re-reads the folder.
+    // One scanned recording. Cached so filtering never re-reads the folder.
     struct Row {
         std::filesystem::path path;
         std::wstring fileName;

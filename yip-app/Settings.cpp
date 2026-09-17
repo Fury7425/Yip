@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "Settings.h"
+#include "RecordingFormat.h"
 
 #include <winrt/Windows.Data.Json.h>
 
@@ -55,7 +56,9 @@ Settings Settings::Defaults()
     s.output_folder = DefaultOutputFolder();
     s.sample_rate = 48000;
     s.channels = 2;
-    s.format = 0;
+    s.format = audiofmt::kWav;
+    s.bit_depth = audiofmt::kDefaultBitDepth;
+    s.bitrate_kbps = audiofmt::kDefaultKbps;
     return s;
 }
 
@@ -89,6 +92,13 @@ Settings Settings::Load()
     if (obj.HasKey(L"format")) {
         s.format = static_cast<uint16_t>(obj.GetNamedNumber(L"format", 0.0));
     }
+    if (obj.HasKey(L"bit_depth")) {
+        s.bit_depth = static_cast<uint16_t>(obj.GetNamedNumber(L"bit_depth", 32.0));
+    }
+    if (obj.HasKey(L"bitrate_kbps")) {
+        s.bitrate_kbps = static_cast<uint16_t>(obj.GetNamedNumber(L"bitrate_kbps", 192.0));
+    }
+    audiofmt::Normalize(s.format, s.bit_depth, s.bitrate_kbps);
     if (obj.HasKey(L"hotkey_mods")) {
         s.hotkey_mods = static_cast<uint32_t>(obj.GetNamedNumber(L"hotkey_mods", 3.0));
     }
@@ -113,6 +123,8 @@ bool Settings::Save() const
     obj.SetNamedValue(L"sample_rate", wdj::JsonValue::CreateNumberValue(static_cast<double>(sample_rate)));
     obj.SetNamedValue(L"channels", wdj::JsonValue::CreateNumberValue(static_cast<double>(channels)));
     obj.SetNamedValue(L"format", wdj::JsonValue::CreateNumberValue(static_cast<double>(format)));
+    obj.SetNamedValue(L"bit_depth", wdj::JsonValue::CreateNumberValue(static_cast<double>(bit_depth)));
+    obj.SetNamedValue(L"bitrate_kbps", wdj::JsonValue::CreateNumberValue(static_cast<double>(bitrate_kbps)));
     obj.SetNamedValue(L"hotkey_mods", wdj::JsonValue::CreateNumberValue(static_cast<double>(hotkey_mods)));
     obj.SetNamedValue(L"hotkey_vk", wdj::JsonValue::CreateNumberValue(static_cast<double>(hotkey_vk)));
     obj.SetNamedValue(L"pill_style", wdj::JsonValue::CreateStringValue(pill_dot ? L"dot" : L"pill"));
