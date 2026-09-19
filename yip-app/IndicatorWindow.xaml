@@ -76,7 +76,8 @@
                             Margin="8,0,0,0"
                             VerticalAlignment="Center"
                             Visibility="Collapsed"
-                            IsHitTestVisible="False">
+                            IsHitTestVisible="False"
+                            Tapped="OnActionsTapped">
                     <StackPanel.Resources>
                         <!-- Round glass buttons, as drawn in .design/Pill.dc.html. -->
                         <Style x:Key="PillActionButton" TargetType="Button">
