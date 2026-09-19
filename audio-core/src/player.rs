@@ -211,12 +211,23 @@ struct SourceFormat {
 }
 
 impl Player {
-    /// Open `path`, negotiate an endpoint format and start rendering.
+    /// Open `path`, negotiate an endpoint format and start rendering from
+    /// `start_ms`.
     ///
     /// Returns once audio is flowing, so a file the decoder cannot open fails
     /// the call instead of surfacing as silence.
-    pub fn start(path: &Path) -> Result<Self, YipError> {
+    ///
+    /// Starting part-way is not a start followed by a seek: that would play the
+    /// opening of the file for as long as the flush took. The decoder moves
+    /// before it produces its first sample, so the first thing heard is the
+    /// position asked for.
+    pub fn start(path: &Path, start_ms: u64) -> Result<Self, YipError> {
         PLAYBACK.reset();
+        // Before any thread exists, so both see it without a handshake: the
+        // render thread reads its base once it is running, and the UI's first
+        // poll must not report zero for a take resumed half-way through.
+        PLAYBACK.seek_base_ms.store(start_ms, Ordering::Relaxed);
+        PLAYBACK.position_ms.store(start_ms, Ordering::Relaxed);
 
         let stop = Arc::new(AtomicBool::new(false));
         let (mut producer, mut consumer) = split(PLAY_RING_CAPACITY_SAMPLES);
@@ -240,6 +251,7 @@ impl Player {
             .spawn(move || -> Result<(), YipError> {
                 let result = decoder_loop(
                     &path_owned,
+                    start_ms,
                     &mut producer,
                     &stop_for_decoder,
                     &source_tx,
@@ -391,6 +403,7 @@ impl Drop for Player {
 
 fn decoder_loop(
     path: &Path,
+    start_ms: u64,
     producer: &mut rtrb::Producer<f32>,
     stop: &Arc<AtomicBool>,
     source_tx: &Sender<Result<SourceFormat, YipError>>,
@@ -420,7 +433,11 @@ fn decoder_loop(
     let Ok((rate, channels)) = negotiated_rx.recv() else {
         return Ok(());
     };
-    if let Err(e) = decoder.set_output(rate, channels) {
+    let prepared = match decoder.set_output(rate, channels) {
+        Ok(()) if start_ms > 0 => decoder.seek(start_ms),
+        other => other,
+    };
+    if let Err(e) = prepared {
         let _ = ready_tx.send(Err(e.clone()));
         return Err(e);
     }

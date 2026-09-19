@@ -113,6 +113,13 @@ void App::WireCloseToTray()
 void App::HideMainWindow()
 {
     if (!m_window) return;
+    // A take being recorded carries on behind a closed window — that is the
+    // point of closing to the tray. Playback does not: it is something you
+    // are listening to in the window, and it stops with it. The transport
+    // keeps the take and position, so the window comes back as it left.
+    if (auto window = m_window.try_as<winrt::yip::MainWindow>()) {
+        if (auto viewModel = window.ViewModel()) viewModel.SuspendPlayback();
+    }
     if (auto appWindow = m_window.AppWindow()) {
         appWindow.Hide();
     }

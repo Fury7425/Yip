@@ -499,8 +499,9 @@ void MainViewModel::ToggleRecording()
         return;
     }
     // A take being recorded and one playing out loud do not belong in the same
-    // room: the microphone would hear it.
-    StopPlayback();
+    // room: the microphone would hear it. A take held by a closed window is
+    // silent and holds no file, so it stays where the window left it.
+    if (IsPlaybackLive()) StopPlayback();
     auto dev = m_devices.GetAt(static_cast<uint32_t>(m_selectedDeviceIndex));
     const auto path = NextRecordingPath();
 
@@ -712,20 +713,13 @@ void MainViewModel::PlayRecording(winrt::yip::viewmodels::RecordingEntry const& 
         return;
     }
     const fs::path path{std::wstring{entry.FullPath()}};
-    // Not path.string(): that encodes with the ANSI codepage and hands
-    // audio-core bytes it rejects as invalid UTF-8 for any non-ASCII folder.
-    const auto pathUtf8 = ::yip::ToUtf8(path.wstring());
-
-    if (play_start(pathUtf8.c_str()) != REC_STATUS_OK) {
-        SetError(LastCoreError(L"Could not play that recording"));
-        ClearPlaybackState();
-        return;
-    }
+    if (!StartPlayer(path, 0)) return;
 
     DismissError();
     m_playingPath = path;
     m_playbackLoaded = true;
     m_playbackPaused = false;
+    m_playbackSuspended = false;
     m_positionMs = 0;
     m_durationMs = 0;
     m_playbackLevel = 0.0f;
@@ -737,9 +731,43 @@ void MainViewModel::PlayRecording(winrt::yip::viewmodels::RecordingEntry const& 
     RaisePlaybackProps();
 }
 
+bool MainViewModel::StartPlayer(fs::path const& path, uint64_t startMs)
+{
+    // Not path.string(): that encodes with the ANSI codepage and hands
+    // audio-core bytes it rejects as invalid UTF-8 for any non-ASCII folder.
+    const auto pathUtf8 = ::yip::ToUtf8(path.wstring());
+    if (play_start(pathUtf8.c_str(), startMs) == REC_STATUS_OK) return true;
+
+    SetError(LastCoreError(L"Could not play that recording"));
+    ClearPlaybackState();
+    return false;
+}
+
 void MainViewModel::TogglePlayback()
 {
     if (!m_playbackLoaded) return;
+
+    if (m_playbackSuspended) {
+        // Nothing is open: the window was closed with this take loaded. Reopen
+        // it at the held position rather than from the top — pressing play on
+        // a transport that reads 01:23 means 01:23.
+        if (m_isRecording) {
+            SetError(L"Stop the take first \u2014 playing one back would end up in the recording");
+            return;
+        }
+        // A take held at its very end has nothing left to play; start it over.
+        const uint64_t from = (m_durationMs > 0 && m_positionMs >= m_durationMs) ? 0 : m_positionMs;
+        if (!StartPlayer(*m_playingPath, from)) return;
+        DismissError();
+        m_playbackSuspended = false;
+        m_playbackPaused = false;
+        SetStatus(L"Playing");
+        MarkPlayingRow();
+        Raise(L"IsPlaybackLive");
+        Raise(L"IsPlaybackPlaying");
+        return;
+    }
+
     const auto status = m_playbackPaused ? play_resume() : play_pause();
     if (status != REC_STATUS_OK) {
         SetError(LastCoreError(L"Playback could not be held"));
@@ -766,7 +794,13 @@ void MainViewModel::StopPlayback()
 void MainViewModel::SeekPlayback(uint64_t positionMs)
 {
     if (!m_playbackLoaded) return;
-    if (play_seek_ms(positionMs) != REC_STATUS_OK) return;
+    if (m_playbackSuspended) {
+        // No player to move. The held position is the whole state, and play
+        // will open the file there.
+        if (m_durationMs > 0) positionMs = std::min(positionMs, m_durationMs);
+    } else if (play_seek_ms(positionMs) != REC_STATUS_OK) {
+        return;
+    }
 
     // Report the target straight away. audio-core coalesces seeks, so the
     // position it reports lags the drag by a tick or two and the scrubber
@@ -778,8 +812,39 @@ void MainViewModel::SeekPlayback(uint64_t positionMs)
     Raise(L"PlaybackPositionText");
 }
 
+void MainViewModel::SuspendPlayback()
+{
+    if (!m_playbackLoaded || m_playbackSuspended) return;
+
+    // Take the last word on position before the player goes: the tick that
+    // would have reported it is not coming.
+    PlayState snapshot{};
+    if (play_state(&snapshot) == REC_STATUS_OK && snapshot.playing != 0) {
+        m_positionMs = snapshot.position_ms;
+        if (snapshot.duration_ms > 0) m_durationMs = snapshot.duration_ms;
+    }
+    // Stop, not pause: a held player keeps the endpoint running on silence and
+    // the file open, and a hidden window has no business doing either.
+    (void)play_stop();
+
+    m_playbackSuspended = true;
+    m_playbackPaused = true;
+    m_playbackLevel = 0.0f;
+    m_positionText =
+        winrt::hstring{FormatDuration(std::chrono::milliseconds{static_cast<long long>(m_positionMs)})};
+    m_durationText =
+        winrt::hstring{FormatDuration(std::chrono::milliseconds{static_cast<long long>(m_durationMs)})};
+    SetStatus(L"Paused");
+    MarkPlayingRow();
+    RaisePlaybackProps();
+}
+
 void MainViewModel::PlaybackTick()
 {
+    // A suspended take has no player behind it; a snapshot would read "not
+    // playing" and clear the transport the window is meant to come back to.
+    if (m_playbackSuspended) return;
+
     PlayState snapshot{};
     if (play_state(&snapshot) != REC_STATUS_OK) return;
 
@@ -849,6 +914,7 @@ void MainViewModel::ClearPlaybackState()
     m_playingPath.reset();
     m_playbackLoaded = false;
     m_playbackPaused = false;
+    m_playbackSuspended = false;
     m_positionMs = 0;
     m_durationMs = 0;
     m_playbackLevel = 0.0f;
@@ -862,6 +928,7 @@ void MainViewModel::ClearPlaybackState()
 void MainViewModel::RaisePlaybackProps()
 {
     Raise(L"IsPlaybackLoaded");
+    Raise(L"IsPlaybackLive");
     Raise(L"IsPlaybackPlaying");
     Raise(L"PlayingFileName");
     Raise(L"PlaybackPositionText");

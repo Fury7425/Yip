@@ -171,9 +171,11 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     void TogglePlayback();
     void StopPlayback();
     void SeekPlayback(uint64_t positionMs);
+    void SuspendPlayback();
     void PlaybackTick();
 
     bool IsPlaybackLoaded() const noexcept { return m_playbackLoaded; }
+    bool IsPlaybackLive() const noexcept { return m_playbackLoaded && !m_playbackSuspended; }
     bool IsPlaybackPlaying() const noexcept { return m_playbackLoaded && !m_playbackPaused; }
     winrt::hstring PlayingFileName() const noexcept { return m_playingFileName; }
     winrt::hstring PlaybackPositionText() const noexcept { return m_positionText; }
@@ -220,6 +222,9 @@ private:
     void RaisePlaybackProps();
     // Drop the transport back to its resting state and tell the view.
     void ClearPlaybackState();
+    // Open `path` in audio-core from `startMs`. False, with the error shown and
+    // the transport cleared, when it cannot be played.
+    bool StartPlayer(std::filesystem::path const& path, uint64_t startMs);
 
     winrt::Windows::Foundation::Collections::IObservableVector<winrt::yip::viewmodels::DeviceEntry> m_devices{
         winrt::single_threaded_observable_vector<winrt::yip::viewmodels::DeviceEntry>()};
@@ -263,6 +268,9 @@ private:
     std::optional<std::filesystem::path> m_playingPath;
     bool m_playbackLoaded{false};
     bool m_playbackPaused{false};
+    // Loaded, but released by SuspendPlayback: the transport is the only record
+    // of the take until play is pressed again.
+    bool m_playbackSuspended{false};
     uint64_t m_positionMs{0};
     uint64_t m_durationMs{0};
     float m_playbackLevel{0.0f};

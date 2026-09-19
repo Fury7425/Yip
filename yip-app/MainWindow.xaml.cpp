@@ -554,7 +554,7 @@ void MainWindow::OnViewModelPropertyChanged(
         ClipLamp().Opacity(m_viewModel.HasClipped() ? 1.0 : 0.18);
     } else if (name == L"IsEmpty") {
         UpdateEmptyState();
-    } else if (name == L"IsPlaybackLoaded") {
+    } else if (name == L"IsPlaybackLoaded" || name == L"IsPlaybackLive") {
         UpdatePlaybackBar();
     } else if (name == L"IsPlaybackPlaying") {
         UpdatePlayPauseGlyph();
@@ -722,7 +722,14 @@ void MainWindow::UpdatePlaybackBar()
     UpdatePlayPauseGlyph();
 
     if (loaded) {
-        StartPlaybackPolling();
+        // Poll only a take with a player behind it. One kept by
+        // SuspendPlayback is shown, held, and costs nothing until play.
+        if (m_viewModel.IsPlaybackLive()) {
+            StartPlaybackPolling();
+        } else {
+            StopPlaybackPolling();
+            m_seekHoldTicks = 0;
+        }
         UpdateSeekSlider();
         return;
     }

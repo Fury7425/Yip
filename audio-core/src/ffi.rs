@@ -552,16 +552,18 @@ pub extern "C" fn rec_last_error() -> *const c_char {
 // Playback
 // ----------------------------------------------------------------------------
 
-/// Start playing `path` on the default render endpoint. Replaces whatever was
-/// playing. `path` is a null-terminated UTF-8 string.
+/// Start playing `path` on the default render endpoint, from `start_ms` in.
+/// Replaces whatever was playing. `path` is a null-terminated UTF-8 string.
 ///
 /// Returns once audio is flowing, so a file that cannot be decoded — or an
-/// endpoint that refuses it — fails here rather than playing silence.
+/// endpoint that refuses it — fails here rather than playing silence. A
+/// non-zero `start_ms` is where the first sample comes from, not a seek after
+/// the fact, so resuming a released take does not blip its opening.
 ///
 /// # Safety
 /// `path` must point to valid, null-terminated UTF-8.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn play_start(path: *const c_char) -> RecStatus {
+pub unsafe extern "C" fn play_start(path: *const c_char, start_ms: u64) -> RecStatus {
     run(|| {
         if path.is_null() {
             return Err(YipError::InvalidArgument("path was null"));
@@ -576,7 +578,7 @@ pub unsafe extern "C" fn play_start(path: *const c_char) -> RecStatus {
         if let Some(previous) = guard.take() {
             let _ = previous.stop();
         }
-        *guard = Some(Player::start(std::path::Path::new(p))?);
+        *guard = Some(Player::start(std::path::Path::new(p), start_ms)?);
         Ok(())
     })
 }

@@ -120,12 +120,21 @@ namespace yip.viewmodels
         void StopPlayback();
         void SeekPlayback(UInt64 positionMs);
 
+        // The window is going away (closed to the tray). Audio stops and the
+        // file is released, but the transport keeps the take, its position and
+        // its duration, held — so the window comes back exactly as it left,
+        // and play picks up from there.
+        void SuspendPlayback();
+
         // One poll of audio-core's playback snapshot. Only runs while a take is
         // loaded; an idle Yip still ticks nothing.
         void PlaybackTick();
 
         // A take is loaded — playing or held. The transport is shown for this.
         Boolean IsPlaybackLoaded{ get; };
+        // Loaded *and* backed by a running audio-core player. False for a take
+        // kept by SuspendPlayback: nothing is open, so nothing needs polling.
+        Boolean IsPlaybackLive{ get; };
         // Loaded and not held.
         Boolean IsPlaybackPlaying{ get; };
         String PlayingFileName{ get; };
