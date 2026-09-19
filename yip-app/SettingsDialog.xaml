@@ -236,8 +236,8 @@
                               SelectedIndex="0"
                               CornerRadius="{StaticResource YipControlCornerRadius}"
                               AutomationProperties.Name="Indicator position">
-                        <ComboBoxItem Content="Top of screen" />
-                        <ComboBoxItem Content="Bottom of screen" />
+                        <ComboBoxItem Content="Top" />
+                        <ComboBoxItem Content="Bottom" />
                     </ComboBox>
                 </Grid>
             </Border>

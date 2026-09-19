@@ -105,8 +105,16 @@ private:
     winrt::Microsoft::UI::Composition::Visual PillVisual();
     void SetPillCentre(float x, float y);
     void SetPillFade(float opacity, float scale);
-    void AnimatePillOpacity(float to, int ms);
-    void AnimatePillScale(float to, int ms);
+    // `soft` takes the standard in-out curve instead of the strong ease-out.
+    // A fade *to nothing* on the strong curve loses most of its opacity in the
+    // first frame and reads as the pill blinking off.
+    void AnimatePillOpacity(float to, int ms, bool soft = false);
+    void AnimatePillScale(float to, int ms, bool soft = false);
+    // Starts the show fade once XAML is actually drawing the window. Started at
+    // Show() it ran against the DWM's first-present stall, and the capsule sat
+    // as a pale empty ghost for ~100 ms before snapping in.
+    void StartShowFadeOnFirstFrame();
+    void RevokeFirstFrame();
     // Cut the blur to a capsule of w x h at (x, y), in PillFrame DIPs.
     void SetBackdropShape(float w, float h, float x, float y);
     // Re-rasterise the mask at the window's current size and DPI, leaving the
@@ -157,6 +165,7 @@ private:
     winrt::Windows::UI::Composition::CompositionRoundedRectangleGeometry m_maskShape{nullptr};
     winrt::Windows::UI::Composition::CompositionEasingFunction m_backdropEaseOut{nullptr};
     winrt::Windows::UI::Composition::CompositionEasingFunction m_backdropEaseMorph{nullptr};
+    winrt::Windows::UI::Composition::CompositionEasingFunction m_backdropEase{nullptr};
     winrt::Windows::UI::ViewManagement::UISettings m_uiSettings;
     winrt::event_token m_effectsToken{};
     bool m_blurActive{false};
@@ -193,6 +202,9 @@ private:
     // differ while the pill is fading out.
     bool m_shown{false};
     bool m_windowVisible{false};
+    // One-shot CompositionTarget::Rendering hook for the show fade; empty
+    // when none is pending.
+    winrt::event_token m_firstFrameToken{};
 
     // Composition
     winrt::Microsoft::UI::Composition::Compositor m_compositor{nullptr};
