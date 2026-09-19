@@ -23,6 +23,8 @@ struct IndicatorWindow : IndicatorWindowT<IndicatorWindow> {
                               winrt::Microsoft::UI::Xaml::Input::PointerRoutedEventArgs const& args);
     void OnPillTapped(winrt::Windows::Foundation::IInspectable const& sender,
                       winrt::Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const& args);
+    void OnActionsTapped(winrt::Windows::Foundation::IInspectable const& sender,
+                         winrt::Microsoft::UI::Xaml::Input::TappedRoutedEventArgs const& args);
 
     void OnStopClicked(winrt::Windows::Foundation::IInspectable const& sender,
                        winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
@@ -90,6 +92,9 @@ private:
     void HidePill(bool animate);
     // Size change between two visible states: a clip draws the capsule from
     // the old size to the new while the readout glides to its new spot.
+    // True while morph `id` is the latest and no transition since has moved
+    // on without taking it over.
+    bool OwnsMorph(uint32_t id) const noexcept { return m_morphId == id && m_morphOwner == m_motionGen; }
     void MorphPill(::yip::IndicatorState from, ::yip::IndicatorState to);
     void SetClip(float w, float h, float x, float y);
     void AnimateClip(float w, float h, float x, float y);
@@ -176,6 +181,14 @@ private:
     // it. A second morph starting inside that window has to land the first one
     // before it measures, or it reads a size the pill never actually had.
     bool m_morphing{false};
+    // Which morph is in flight, and the motion generation allowed to finish
+    // it. A transition to a state of the same size (Recording -> Saving) takes
+    // the running morph over instead of landing it: landing a closing morph
+    // early drops the clip and shrinks the window region before XAML has
+    // redrawn the smaller Border, and for a few frames the expanded pill shows
+    // through a hard-cornered rectangle.
+    uint32_t m_morphId{0};
+    uint32_t m_morphOwner{0};
     // m_shown is the state machine's intent; m_windowVisible is the HWND. They
     // differ while the pill is fading out.
     bool m_shown{false};

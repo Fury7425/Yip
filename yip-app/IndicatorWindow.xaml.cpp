@@ -1050,15 +1050,28 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
     // somewhere between two others. Land it before anything below measures:
     // `a` has to be a size the pill actually has, or the capsule jumps to a
     // width it never had and morphs out of that.
+    const auto a = GeometryFor(from, m_dotStyle);
+    const auto b = GeometryFor(to, m_dotStyle);
+    const bool sameSize = a.w == b.w && a.h == b.h;
+
+    // Unless the new state is the same size as the one the morph is heading
+    // for (Recording -> Saving as a take stops mid-collapse): then the morph
+    // is already going to the right place. Landing it here would drop the clip
+    // and shrink the window region at once, while XAML still draws the old
+    // layout for a few frames — seen as the expanded pill cut square to the
+    // collapsed width. Hand the morph to this transition instead; its
+    // completion lays out `m_state`, which is now `to`.
+    if (m_morphing && sameSize) {
+        m_morphOwner = m_motionGen;
+        AnimatePillOpacity(b.opacity, kFadeMs);
+        return;
+    }
     if (m_morphing) {
         ApplyLayoutFor(from);
         PillFrame().UpdateLayout();
     }
 
-    const auto a = GeometryFor(from, m_dotStyle);
-    const auto b = GeometryFor(to, m_dotStyle);
-
-    if (a.w == b.w && a.h == b.h) {
+    if (sameSize) {
         ApplyLayoutFor(to);
         AnimatePillOpacity(b.opacity, kFadeMs);
         return;
@@ -1080,7 +1093,8 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
     auto detail = muxh::ElementCompositionPreview::GetElementVisual(ReadoutDetail());
     const bool detailArrives = !DetailShownFor(from) && DetailShownFor(to);
     const bool detailLeaves = DetailShownFor(from) && !DetailShownFor(to);
-    const auto gen = m_motionGen;
+    const auto id = ++m_morphId;
+    m_morphOwner = m_motionGen;
 
     auto batch = m_compositor.CreateScopedBatch(mucomp::CompositionBatchTypes::Animation);
     AnimatePillOpacity(b.opacity, kFadeMs);
@@ -1115,8 +1129,8 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
         }
 
         batch.End();
-        batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
-            if (auto self = weak.get(); self && self->m_motionGen == gen) {
+        batch.Completed([weak = get_weak(), id](auto&&, auto&&) {
+            if (auto self = weak.get(); self && self->OwnsMorph(id)) {
                 self->ClearClip();
                 self->m_morphing = false;
             }
@@ -1143,8 +1157,8 @@ void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorStat
     AnimateClip(b.w, b.h, -dw * anchor.x, -dh * anchor.y);
 
     batch.End();
-    batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
-        if (auto self = weak.get(); self && self->m_motionGen == gen) self->ApplyLayoutFor(self->m_state);
+    batch.Completed([weak = get_weak(), id](auto&&, auto&&) {
+        if (auto self = weak.get(); self && self->OwnsMorph(id)) self->ApplyLayoutFor(self->m_state);
     });
     m_morphing = true;
 }
@@ -1297,6 +1311,16 @@ void IndicatorWindow::OnPillPointerPressed(winrt::Windows::Foundation::IInspecta
         ApplyClickThrough(!m_persisted.click_through);
         (void)m_persisted.Save();
     }
+}
+
+void IndicatorWindow::OnActionsTapped(winrt::Windows::Foundation::IInspectable const& /*sender*/,
+                                      muxi::TappedRoutedEventArgs const& args)
+{
+    // A Button raises Click and does not mark the Tapped gesture handled, so a
+    // press on Pause or Stop still bubbled up to PillFrame and collapsed the
+    // pill on the same frame. The buttons answer through Click; the tap ends
+    // here.
+    args.Handled(true);
 }
 
 void IndicatorWindow::OnPillTapped(winrt::Windows::Foundation::IInspectable const& /*sender*/,
