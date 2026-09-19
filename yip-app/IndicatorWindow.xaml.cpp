@@ -1046,14 +1046,15 @@ void IndicatorWindow::HidePill(bool animate)
 
 void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorState to)
 {
-    // A morph already in flight left the HWND at one size and the clip
-    // somewhere between two others. Land it before anything below measures:
-    // `a` has to be a size the pill actually has, or the capsule jumps to a
-    // width it never had and morphs out of that.
     const auto a = GeometryFor(from, m_dotStyle);
     const auto b = GeometryFor(to, m_dotStyle);
     const bool sameSize = a.w == b.w && a.h == b.h;
 
+    // A morph already in flight left the HWND at one size and the clip
+    // somewhere between two others. Land it before anything below measures:
+    // `a` has to be a size the pill actually has, or the capsule jumps to a
+    // width it never had and morphs out of that.
+    //
     // Unless the new state is the same size as the one the morph is heading
     // for (Recording -> Saving as a take stops mid-collapse): then the morph
     // is already going to the right place. Landing it here would drop the clip

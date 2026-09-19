@@ -90,11 +90,11 @@ private:
     // ----- Motion -----
     void ShowPill(bool animate);
     void HidePill(bool animate);
-    // Size change between two visible states: a clip draws the capsule from
-    // the old size to the new while the readout glides to its new spot.
     // True while morph `id` is the latest and no transition since has moved
     // on without taking it over.
     bool OwnsMorph(uint32_t id) const noexcept { return m_morphId == id && m_morphOwner == m_motionGen; }
+    // Size change between two visible states: a clip draws the capsule from
+    // the old size to the new while the readout glides to its new spot.
     void MorphPill(::yip::IndicatorState from, ::yip::IndicatorState to);
     void SetClip(float w, float h, float x, float y);
     void AnimateClip(float w, float h, float x, float y);
