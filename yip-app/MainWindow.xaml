@@ -12,7 +12,10 @@
          where Mica is unsupported). Nothing here paints an opaque fill: every
          surface is a tint over that backdrop, so the desktop reads through and
          the extended title bar is continuous with the content. -->
-    <Grid x:Name="Root">
+    <!-- Placement Hidden: these are window-wide shortcuts, but WinUI hangs the
+         first one's key tip ("Ctrl+R") off whatever element owns them, so it
+         popped up over any bare stretch of the window, caption buttons included. -->
+    <Grid x:Name="Root" KeyboardAcceleratorPlacementMode="Hidden">
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="R" Modifiers="Control" Invoked="OnRecordAccelerator" />
             <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnSearchAccelerator" />
@@ -87,15 +90,19 @@
                 </Grid.RowDefinitions>
 
                 <!-- Device + format -->
+                <!-- The device name gives way, not the format: a long
+                     endpoint name already ellipsizes inside the picker, but a
+                     clipped "MP3 320…" hides the setting it reports. -->
                 <Grid Grid.Row="0" ColumnSpacing="10">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <ComboBox
                         x:Name="DeviceCombo"
                         PlaceholderText="Select input device"
-                        MaxWidth="248"
+                        HorizontalAlignment="Left"
+                        MaxWidth="420"
                         Height="{StaticResource YipPillHeight}"
                         CornerRadius="{StaticResource YipPillCornerRadius}"
                         Background="{ThemeResource YipControlFillBrush}"
@@ -521,7 +528,10 @@
                                FontFamily="Cascadia Mono,Consolas,Courier New"
                                FontSize="{StaticResource YipFontCaption}"
                                Foreground="{ThemeResource YipTextSecondaryBrush}" />
-                    <TextBlock Text=" / "
+                    <!-- Margin, not spaces: layout drops trailing
+                         whitespace, which left "00:06 /00:56". -->
+                    <TextBlock Text="/"
+                               Margin="5,0"
                                FontFamily="Cascadia Mono,Consolas,Courier New"
                                FontSize="{StaticResource YipFontCaption}"
                                Foreground="{ThemeResource YipTextTertiaryBrush}" />

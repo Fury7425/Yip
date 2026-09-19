@@ -609,6 +609,10 @@ void MainViewModel::SyncRecordingState(bool recording)
     if (!recording) {
         m_activeRecordingPath.reset();
         RefreshRecordings();
+        // A take stopped from the pill or the tray lands here, not in
+        // ToggleRecording; without this the status line went on reading
+        // "Recording to …" over an idle window.
+        SetStatus(L"Saved");
     }
     Raise(L"IsRecording");
     Raise(L"RecordButtonText");
@@ -788,6 +792,11 @@ void MainViewModel::StopPlayback()
     ClearPlaybackState();
     if (status != REC_STATUS_OK) {
         SetError(LastCoreError(L"Playback failed"));
+    } else {
+        // Otherwise the status line kept saying "Playing" over an empty
+        // transport. Callers that go on to do something else (a take starting,
+        // a file deleted) set their own line straight after.
+        SetStatus(L"Ready");
     }
 }
 
