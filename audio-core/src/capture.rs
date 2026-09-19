@@ -56,7 +56,7 @@ pub struct Recorder {
 
 /// `HANDLE` wrapper. Win32 handles are integers and safe to `Send` between
 /// threads; the COM interfaces they refer to are not (and we never send those).
-struct SendHandle(HANDLE);
+pub(crate) struct SendHandle(pub(crate) HANDLE);
 // SAFETY: HANDLE is an opaque integer; ownership is tracked by the kernel.
 unsafe impl Send for SendHandle {}
 // SAFETY: same.
@@ -503,7 +503,7 @@ fn capture_loop(
 
 /// Build a plain float32 `WAVEFORMATEX`. Valid without the EXTENSIBLE tail for
 /// mono and stereo, which is all the settings dialog offers.
-fn float_wfx(sample_rate: u32, channels: u16) -> WAVEFORMATEX {
+pub(crate) fn float_wfx(sample_rate: u32, channels: u16) -> WAVEFORMATEX {
     let block_align = channels.saturating_mul(4);
     WAVEFORMATEX {
         wFormatTag: WAVE_FORMAT_IEEE_FLOAT as u16,
@@ -516,7 +516,7 @@ fn float_wfx(sample_rate: u32, channels: u16) -> WAVEFORMATEX {
     }
 }
 
-fn parse_format(fmt_ptr: *const WAVEFORMATEX) -> Result<(u32, u16), YipError> {
+pub(crate) fn parse_format(fmt_ptr: *const WAVEFORMATEX) -> Result<(u32, u16), YipError> {
     if fmt_ptr.is_null() {
         return Err(YipError::UnsupportedFormat("null mix format".into()));
     }
@@ -560,7 +560,7 @@ fn parse_format(fmt_ptr: *const WAVEFORMATEX) -> Result<(u32, u16), YipError> {
 
 // ---------- RAII guards ----------
 
-struct ComGuard;
+pub(crate) struct ComGuard;
 impl Drop for ComGuard {
     fn drop(&mut self) {
         // SAFETY: balances CoInitializeEx earlier on the same thread.
@@ -568,7 +568,7 @@ impl Drop for ComGuard {
     }
 }
 
-struct MmcssGuard(HANDLE);
+pub(crate) struct MmcssGuard(pub(crate) HANDLE);
 impl Drop for MmcssGuard {
     fn drop(&mut self) {
         // SAFETY: handle obtained from AvSetMmThreadCharacteristicsW above.

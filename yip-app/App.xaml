@@ -82,6 +82,11 @@
                     <SolidColorBrush x:Key="YipWaveRestBrush"        Color="#000000" Opacity="0.16" />
                     <SolidColorBrush x:Key="YipWaveBaselineBrush"    Color="#000000" Opacity="0.14" />
                     <SolidColorBrush x:Key="YipClipLitBrush"         Color="#E5484D" />
+                    <!-- Playback level. The quiet end of the meter ramp, held
+                         solid: a take being played back has no headroom left to
+                         warn about, and a gradient would stretch across the
+                         indicator rather than travel along it. -->
+                    <SolidColorBrush x:Key="YipPlaybackLevelBrush"   Color="#2FA84F" />
 
                     <!-- Meter gradient. Green until it matters, amber where
                          headroom gets thin, red at the top. Code reads these
@@ -154,6 +159,7 @@
                     <SolidColorBrush x:Key="YipWaveRestBrush"        Color="#FFFFFF" Opacity="0.13" />
                     <SolidColorBrush x:Key="YipWaveBaselineBrush"    Color="#FFFFFF" Opacity="0.11" />
                     <SolidColorBrush x:Key="YipClipLitBrush"         Color="#FF6B70" />
+                    <SolidColorBrush x:Key="YipPlaybackLevelBrush"   Color="#35C46A" />
 
                     <LinearGradientBrush x:Key="YipMeterGradientBrush" StartPoint="0,0" EndPoint="1,0">
                         <GradientStop Color="#35C46A" Offset="0.00" />

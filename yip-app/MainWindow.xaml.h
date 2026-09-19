@@ -41,16 +41,29 @@ struct MainWindow : MainWindowT<MainWindow> {
     // ----- recordings list -----
     void OnFilterChanged(winrt::Windows::Foundation::IInspectable const& sender,
                          winrt::Microsoft::UI::Xaml::Controls::TextChangedEventArgs const& args);
-    void OnRecordingActivated(winrt::Windows::Foundation::IInspectable const& sender,
-                              winrt::Microsoft::UI::Xaml::Input::DoubleTappedRoutedEventArgs const& args);
+    // One click plays. ListView raises this for the pointer and for Enter or
+    // Space on a focused row, so the keyboard gets the same behaviour free.
+    void OnRecordingClick(winrt::Windows::Foundation::IInspectable const& sender,
+                          winrt::Microsoft::UI::Xaml::Controls::ItemClickEventArgs const& args);
     void OnPlayItem(winrt::Windows::Foundation::IInspectable const& sender,
                     winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+    void OnOpenExternallyItem(winrt::Windows::Foundation::IInspectable const& sender,
+                              winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     void OnRevealItem(winrt::Windows::Foundation::IInspectable const& sender,
                       winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     void OnCopyPathItem(winrt::Windows::Foundation::IInspectable const& sender,
                         winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     winrt::fire_and_forget OnDeleteItem(winrt::Windows::Foundation::IInspectable const& sender,
                                         winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+
+    // ----- playback transport -----
+    void OnTogglePlayback(winrt::Windows::Foundation::IInspectable const& sender,
+                          winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+    void OnStopPlayback(winrt::Windows::Foundation::IInspectable const& sender,
+                        winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+    void OnSeekChanged(
+        winrt::Windows::Foundation::IInspectable const& sender,
+        winrt::Microsoft::UI::Xaml::Controls::Primitives::RangeBaseValueChangedEventArgs const& args);
 
     // ----- accelerators -----
     void OnRecordAccelerator(
@@ -62,10 +75,22 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnRefreshAccelerator(
         winrt::Microsoft::UI::Xaml::Input::KeyboardAccelerator const& sender,
         winrt::Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+    void OnPlayAccelerator(
+        winrt::Microsoft::UI::Xaml::Input::KeyboardAccelerator const& sender,
+        winrt::Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
 
 private:
     winrt::yip::viewmodels::MainViewModel m_viewModel{nullptr};
     winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_meterTimer{nullptr};
+    // Runs only while a take is loaded for playback, for the same reason the
+    // meter timer only runs while capture is live.
+    winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_playbackTimer{nullptr};
+    // Set while the code, rather than the user, is moving the scrubber.
+    bool m_suppressSeek{false};
+    // Ticks left before the scrubber follows audio-core again. A seek is
+    // coalesced downstream, so its position lags the thumb by a tick or two and
+    // writing it back would drag the thumb backwards under the pointer.
+    int m_seekHoldTicks{0};
     std::unique_ptr<::yip::interop::DeviceWatcher> m_deviceWatcher;
     std::unique_ptr<::yip::HotkeyManager> m_hotkey;
     ::yip::RecordingStateBus::Token m_stateToken{0};
@@ -108,6 +133,12 @@ private:
     // Meter polling only runs while capture is live — see OnRecordingStateChanged.
     void StartMeterPolling();
     void StopMeterPolling();
+    void StartPlaybackPolling();
+    void StopPlaybackPolling();
+    // Show or hide the transport, and start or stop its timer with it.
+    void UpdatePlaybackBar();
+    void UpdatePlayPauseGlyph();
+    void UpdateSeekSlider();
     void OnRecordingStateChanged(bool recording);
     void ApplyHotkeyFromSettings();
     void OnActivated(winrt::Windows::Foundation::IInspectable const& sender,

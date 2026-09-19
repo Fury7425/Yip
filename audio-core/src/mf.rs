@@ -48,11 +48,12 @@ impl<T> Context<T> for WinResult<T> {
 }
 
 /// COM (MTA) and Media Foundation, started for this thread. Declared last in
-/// [`MfSink`] so it drops after every Media Foundation object.
-struct Runtime;
+/// [`MfSink`] so it drops after every Media Foundation object; the decoder
+/// side ([`crate::decode`]) holds one the same way.
+pub(crate) struct Runtime;
 
 impl Runtime {
-    fn start() -> Result<Self, YipError> {
+    pub(crate) fn start() -> Result<Self, YipError> {
         media_foundation_present()?;
         // SAFETY: per-thread COM init on the writer thread, which nothing else
         // has initialised; balanced in Drop.

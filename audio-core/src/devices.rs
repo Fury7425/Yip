@@ -144,6 +144,17 @@ pub fn list_devices() -> Result<Vec<Device>, YipError> {
 }
 
 /// Look up an endpoint by stable id.
+/// The endpoint playback renders to. Always the system default: Yip picks the
+/// input device, and following the user's chosen output everywhere else is the
+/// shell's job.
+pub fn default_render_device() -> Result<IMMDevice, YipError> {
+    let e = enumerator()?;
+    // SAFETY: live enumerator; a machine with no render endpoint returns an
+    // HRESULT rather than a null.
+    let dev = unsafe { e.GetDefaultAudioEndpoint(eRender, eConsole)? };
+    Ok(dev)
+}
+
 pub fn find_device(id: &str) -> Result<IMMDevice, YipError> {
     let e = enumerator()?;
     let wide: Vec<u16> = id.encode_utf16().chain(std::iter::once(0)).collect();

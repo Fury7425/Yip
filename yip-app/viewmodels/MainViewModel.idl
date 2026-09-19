@@ -10,7 +10,8 @@ namespace yip.viewmodels
         Boolean IsDefault;
     }
 
-    runtimeclass RecordingEntry
+    [default_interface]
+    runtimeclass RecordingEntry : Microsoft.UI.Xaml.Data.INotifyPropertyChanged
     {
         RecordingEntry();
         String FullPath;
@@ -19,6 +20,15 @@ namespace yip.viewmodels
         String ModifiedAt;
         // "48 kHz · stereo · 32-bit float · 6.2 MB", read from the WAV header.
         String Subtitle;
+
+        // Set by the view model on the one row that is loaded for playback, so
+        // a filtered or scrolled list still says which take you are hearing.
+        Boolean IsPlaying;
+        // Play or pause glyph for that row, and 0 or 1 for its opacity. The
+        // glyph keeps its space either way, so a row does not reflow when
+        // playback starts.
+        String PlayGlyph{ get; };
+        Double PlayingOpacity{ get; };
     }
 
     [default_interface]
@@ -95,9 +105,48 @@ namespace yip.viewmodels
                            UInt32 hotkeyMods, UInt32 hotkeyVk, Boolean pillDot, Boolean pillBottom);
 
         void RevealRecording(RecordingEntry entry);
-        void OpenRecording(RecordingEntry entry);
+        // Hand the take to whatever the shell has registered for it. Playback
+        // itself is native — this is the escape hatch, not the main path.
+        void OpenRecordingExternally(RecordingEntry entry);
         Boolean DeleteRecording(RecordingEntry entry);
         void CopyRecordingPath(RecordingEntry entry);
+
+        // ----- playback -----
+        // Clicking a row: start this take, or hold and release the one already
+        // loaded. Everything below drives audio-core's play_* surface.
+        void ActivateRecording(RecordingEntry entry);
+        void PlayRecording(RecordingEntry entry);
+        void TogglePlayback();
+        void StopPlayback();
+        void SeekPlayback(UInt64 positionMs);
+
+        // The window is going away (closed to the tray). Audio stops and the
+        // file is released, but the transport keeps the take, its position and
+        // its duration, held — so the window comes back exactly as it left,
+        // and play picks up from there.
+        void SuspendPlayback();
+
+        // One poll of audio-core's playback snapshot. Only runs while a take is
+        // loaded; an idle Yip still ticks nothing.
+        void PlaybackTick();
+
+        // A take is loaded — playing or held. The transport is shown for this.
+        Boolean IsPlaybackLoaded{ get; };
+        // Loaded *and* backed by a running audio-core player. False for a take
+        // kept by SuspendPlayback: nothing is open, so nothing needs polling.
+        Boolean IsPlaybackLive{ get; };
+        // Loaded and not held.
+        Boolean IsPlaybackPlaying{ get; };
+        String PlayingFileName{ get; };
+        // "01:23" either side of the scrubber.
+        String PlaybackPositionText{ get; };
+        String PlaybackDurationText{ get; };
+        // Milliseconds, as Double because that is what a Slider takes.
+        Double PlaybackPositionMs{ get; };
+        Double PlaybackDurationMs{ get; };
+        // Render level on the capture meter's own logarithmic scale, as a
+        // percentage because that is what a ProgressBar takes.
+        Double PlaybackLevelPercent{ get; };
 
         // Reconcile the view model with audio-core's own state, for the paths
         // that end a session without going through ToggleRecording.

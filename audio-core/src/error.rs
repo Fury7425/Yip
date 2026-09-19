@@ -16,6 +16,9 @@ pub enum YipError {
     UnsupportedFormat(String),
     /// Media Foundation could not set up or feed the FLAC / MP3 / M4A encoder.
     Encoder(String),
+    /// Media Foundation could not open or decode a file for playback, or the
+    /// render endpoint would not take what came out of it.
+    Decoder(String),
     /// Ring buffer overrun — writer thread couldn't keep up.
     Overrun,
     /// FFI input pointer was null or invalid UTF-8.
@@ -31,6 +34,7 @@ impl fmt::Display for YipError {
             Self::Io(s) => write!(f, "io: {s}"),
             Self::UnsupportedFormat(s) => write!(f, "unsupported format: {s}"),
             Self::Encoder(s) => write!(f, "encoder: {s}"),
+            Self::Decoder(s) => write!(f, "decoder: {s}"),
             Self::Overrun => write!(f, "ring overrun"),
             Self::InvalidArgument(s) => write!(f, "invalid argument: {s}"),
         }
