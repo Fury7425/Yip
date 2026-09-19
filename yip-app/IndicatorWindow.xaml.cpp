@@ -65,7 +65,7 @@ constexpr int kSavingHoldMs = 350; // how long the Saving frame stays up
 // is waiting to watch something leave.
 constexpr int kFadeMs = 180;          // opacity settle between two visible states
 constexpr int kShowMs = 220;          // hidden -> visible
-constexpr int kHideMs = 160;          // visible -> hidden
+constexpr int kHideMs = 220;          // visible -> hidden, on the soft curve
 constexpr int kMorphMs = 260;         // collapsed <-> expanded
 constexpr int kActionsInMs = 180;     // buttons arriving, after the capsule has started to open
 constexpr int kActionsInDelayMs = 70;
@@ -82,6 +82,12 @@ constexpr float kSilenceFloor = 1e-7f;
 // Resting scale of a bar. Small enough to read as a dash, not a zero-height
 // glitch.
 constexpr float kBarRestScale = 0.06f;
+
+/// A bar's height, in DIPs, for a fraction of the full travel.
+constexpr float BarHeight(float fraction) noexcept
+{
+    return kBarMaxHeight * fraction;
+}
 
 // Per-bar weighting. The pair in the middle run tallest, which reads as a
 // level meter rather than four identical sticks.
@@ -411,6 +417,7 @@ IndicatorWindow::~IndicatorWindow()
     ::yip::RecordingStateBus::Unsubscribe(m_stateToken);
     m_stateToken = 0;
     ::yip::Settings::SetSavedHandler(nullptr);
+    RevokeFirstFrame();
     if (m_themeToken) {
         Root().ActualThemeChanged(m_themeToken);
         m_themeToken = {};
@@ -450,11 +457,17 @@ void IndicatorWindow::ApplyFrameless()
     // SetBorderAndTitleBar(false, false) still leaves WS_DLGFRAME and
     // WS_SYSMENU on the window, and with per-pixel alpha on that frame shows
     // as a 1px white rectangle around the capsule. Strip every frame bit.
-    LONG_PTR style = ::GetWindowLongPtrW(m_hwnd, GWL_STYLE);
-    style &= ~static_cast<LONG_PTR>(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU);
-    ::SetWindowLongPtrW(m_hwnd, GWL_STYLE, style);
-    ::SetWindowPos(m_hwnd, nullptr, 0, 0, 0, 0,
-                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    //
+    // Only when a bit is actually back: this runs on every show, and a
+    // SWP_FRAMECHANGED there made DWM rebuild the frame just as the fade-in
+    // started.
+    constexpr auto kFrameBits = static_cast<LONG_PTR>(WS_CAPTION | WS_THICKFRAME | WS_SYSMENU);
+    const LONG_PTR style = ::GetWindowLongPtrW(m_hwnd, GWL_STYLE);
+    if (style & kFrameBits) {
+        ::SetWindowLongPtrW(m_hwnd, GWL_STYLE, style & ~kFrameBits);
+        ::SetWindowPos(m_hwnd, nullptr, 0, 0, 0, 0,
+                       SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
 
     // Windows 11 rounds top-level windows to 8px and strokes a 1px frame along
     // the rectangle; around a capsule both read as stray corners. Neither
@@ -552,6 +565,7 @@ void IndicatorWindow::BuildBackdropBrush()
         m_maskRoot = root;
         m_maskSurface = surface;
         m_backdropEaseOut = StrongEaseOut(c);
+        m_backdropEase = StandardEase(c);
         m_backdropEaseMorph = MorphEase(c);
         m_blurBrush = brush;
         ResetBackdropShape();
@@ -622,18 +636,29 @@ void IndicatorWindow::BuildCompositionLayer()
     meterContainer.Size({kBarCount * (kBarWidth + kBarGap) - kBarGap, kBarMaxHeight + 4});
     muxh::ElementCompositionPreview::SetElementChildVisual(MeterHost(), meterContainer);
 
-    // 4 vertical bars, anchored center-Y, with idle scale ~ 0.06 (a thin
-    // resting glyph). Live updates drive Scale.Y via composition anims.
+    // 4 vertical bars, anchored center-Y, resting at ~6% height (a thin
+    // glyph). Live updates animate Size.Y, not Scale.Y: a scale would squash
+    // the round ends along with the bar. The clip follows the size on the
+    // compositor, its radius half the narrower side, so every height from the
+    // resting dash to full travel keeps fully round ends.
     for (int i = 0; i < kBarCount; ++i) {
         auto bar = m_compositor.CreateSpriteVisual();
-        bar.Size({kBarWidth, kBarMaxHeight});
+        bar.Size({kBarWidth, BarHeight(kBarRestScale)});
         bar.AnchorPoint({0.5f, 0.5f});
         bar.Offset({
             static_cast<float>(i) * (kBarWidth + kBarGap) + kBarWidth * 0.5f,
             (kBarMaxHeight + 4) * 0.5f,
             0.0f,
         });
-        bar.Scale({1.0f, kBarRestScale, 1.0f});
+        auto round = m_compositor.CreateRoundedRectangleGeometry();
+        auto follow = m_compositor.CreateExpressionAnimation(L"bar.Size");
+        follow.SetReferenceParameter(L"bar", bar);
+        round.StartAnimation(L"Size", follow);
+        auto radius = m_compositor.CreateExpressionAnimation(
+            L"Vector2(Min(bar.Size.X, bar.Size.Y), Min(bar.Size.X, bar.Size.Y)) * 0.5");
+        radius.SetReferenceParameter(L"bar", bar);
+        round.StartAnimation(L"CornerRadius", radius);
+        bar.Clip(m_compositor.CreateGeometricClip(round));
         bar.Brush(m_barIdleBrush);
         meterContainer.Children().InsertAtTop(bar);
         m_barVisuals[static_cast<size_t>(i)] = bar;
@@ -707,11 +732,11 @@ void IndicatorWindow::UpdateMeterBars(float level, bool hot)
         if (!bar) continue;
         if (brush) bar.Brush(brush);
 
-        const float target = std::max(kBarRestScale, clamped * kBarWeights[i]);
+        const float target = BarHeight(std::max(kBarRestScale, clamped * kBarWeights[i]));
         auto anim = m_compositor.CreateScalarKeyFrameAnimation();
         anim.InsertKeyFrame(1.0f, target, m_ease);
         anim.Duration(dur);
-        bar.StartAnimation(L"Scale.Y", anim);
+        bar.StartAnimation(L"Size.Y", anim);
     }
 }
 
@@ -753,6 +778,9 @@ void IndicatorWindow::ApplyPausedVisuals()
     muxc::ToolTipService::SetToolTip(PauseButton(), winrt::box_value(label));
 
     UpdateDotForState(m_state);
+    // The bars go quiet with the lamp. Left to the next meter tick they kept
+    // showing a live level for two frames after the lamp had gone grey.
+    if (m_paused) UpdateMeterBars(0.0f, false);
 }
 
 void IndicatorWindow::StopMeterAnimations()
@@ -761,12 +789,12 @@ void IndicatorWindow::StopMeterAnimations()
     // bars fall back, so the pill does not blank out mid-fade.
     for (auto& bar : m_barVisuals) {
         if (!bar) continue;
-        bar.StopAnimation(L"Scale.Y");
-        // Snap back to idle resting scale.
+        bar.StopAnimation(L"Size.Y");
+        // Fall back to the resting height.
         auto anim = m_compositor.CreateScalarKeyFrameAnimation();
-        anim.InsertKeyFrame(1.0f, kBarRestScale, m_ease);
+        anim.InsertKeyFrame(1.0f, BarHeight(kBarRestScale), m_ease);
         anim.Duration(std::chrono::milliseconds(kFadeMs));
-        bar.StartAnimation(L"Scale.Y", anim);
+        bar.StartAnimation(L"Size.Y", anim);
     }
 }
 
@@ -1004,6 +1032,7 @@ void IndicatorWindow::ShowPill(bool animate)
     SetPillCentre(g.w * anchor.x, g.h * anchor.y);
 
     if (!animate) {
+        RevokeFirstFrame();
         SetPillFade(g.opacity, 1.0f);
         if (!m_windowVisible) ShowWindow();
         return;
@@ -1013,14 +1042,41 @@ void IndicatorWindow::ShowPill(bool animate)
     if (!m_windowVisible) {
         SetPillFade(0.0f, kShowScale);
         ShowWindow();
+        StartShowFadeOnFirstFrame();
+        return;
     }
+    RevokeFirstFrame();
     AnimatePillOpacity(g.opacity, kShowMs);
     AnimatePillScale(1.0f, kShowMs);
+}
+
+void IndicatorWindow::StartShowFadeOnFirstFrame()
+{
+    RevokeFirstFrame();
+    m_firstFrameToken = mux::Media::CompositionTarget::Rendering([weak = get_weak()](auto&&, auto&&) {
+        auto self = weak.get();
+        if (!self) return;
+        self->RevokeFirstFrame();
+        // A hide since the show owns the pill now. Any other transition in
+        // between left it at opacity 0 and the entry scale, so still bring it
+        // in — to whatever state it is in by now.
+        if (!self->m_shown) return;
+        self->AnimatePillOpacity(GeometryFor(self->m_state, self->m_dotStyle).opacity, kShowMs);
+        self->AnimatePillScale(1.0f, kShowMs);
+    });
+}
+
+void IndicatorWindow::RevokeFirstFrame()
+{
+    if (!m_firstFrameToken) return;
+    mux::Media::CompositionTarget::Rendering(m_firstFrameToken);
+    m_firstFrameToken = {};
 }
 
 void IndicatorWindow::HidePill(bool animate)
 {
     m_shown = false;
+    RevokeFirstFrame();
     if (!m_windowVisible) return;
     if (!animate) {
         HideWindow();
@@ -1034,8 +1090,8 @@ void IndicatorWindow::HidePill(bool animate)
 
     const auto gen = m_motionGen;
     auto batch = m_compositor.CreateScopedBatch(mucomp::CompositionBatchTypes::Animation);
-    AnimatePillOpacity(0.0f, kHideMs);
-    AnimatePillScale(kHideScale, kHideMs);
+    AnimatePillOpacity(0.0f, kHideMs, true);
+    AnimatePillScale(kHideScale, kHideMs, true);
     batch.End();
     batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
         if (auto self = weak.get(); self && self->m_motionGen == gen && !self->m_shown) {
@@ -1226,17 +1282,21 @@ void IndicatorWindow::SetPillFade(float opacity, float scale)
     if (m_maskVisual) land(m_maskVisual);
 }
 
-void IndicatorWindow::AnimatePillOpacity(float to, int ms)
+void IndicatorWindow::AnimatePillOpacity(float to, int ms, bool soft)
 {
-    AnimateScalar(m_compositor, PillVisual(), L"Opacity", to, ms, m_easeOut);
-    if (m_maskVisual) AnimateScalar(m_backdropCompositor, m_maskVisual, L"Opacity", to, ms, m_backdropEaseOut);
+    AnimateScalar(m_compositor, PillVisual(), L"Opacity", to, ms, soft ? m_ease : m_easeOut);
+    if (m_maskVisual) {
+        AnimateScalar(m_backdropCompositor, m_maskVisual, L"Opacity", to, ms,
+                      soft ? m_backdropEase : m_backdropEaseOut);
+    }
 }
 
-void IndicatorWindow::AnimatePillScale(float to, int ms)
+void IndicatorWindow::AnimatePillScale(float to, int ms, bool soft)
 {
-    AnimateVector3(m_compositor, PillVisual(), L"Scale", {to, to, 1.0f}, ms, m_easeOut);
+    AnimateVector3(m_compositor, PillVisual(), L"Scale", {to, to, 1.0f}, ms, soft ? m_ease : m_easeOut);
     if (m_maskVisual) {
-        AnimateVector3(m_backdropCompositor, m_maskVisual, L"Scale", {to, to, 1.0f}, ms, m_backdropEaseOut);
+        AnimateVector3(m_backdropCompositor, m_maskVisual, L"Scale", {to, to, 1.0f}, ms,
+                       soft ? m_backdropEase : m_backdropEaseOut);
     }
 }
 
