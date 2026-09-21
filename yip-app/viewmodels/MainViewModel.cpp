@@ -51,6 +51,9 @@ constexpr float kHoldFallPerTick = 0.02f;
 // Don't re-raise a binding for movement the eye cannot resolve.
 constexpr float kMeterEpsilon = 1.0f / 512.0f;
 
+// How often the PEAK / RMS dB readouts refresh while recording.
+constexpr std::chrono::milliseconds kLabelInterval{100};
+
 /// Map an amplitude onto the meter's logarithmic 0..1 travel. A linear bar
 /// spends its whole length in the bottom fifth and tells you nothing.
 float MeterNorm(float amplitude)
@@ -437,15 +440,28 @@ void MainViewModel::Tick()
 
     if (std::abs(peak - m_meterPeak) >= kMeterEpsilon) {
         m_meterPeak = peak;
-        m_peakLabel = FormatDbFromAmplitude(snapshot.peak);
         Raise(L"MeterPeak");
-        Raise(L"PeakLabel");
     }
     if (std::abs(rms - m_meterRms) >= kMeterEpsilon) {
         m_meterRms = rms;
-        m_rmsLabel = FormatDbFromAmplitude(snapshot.rms);
         Raise(L"MeterRms");
-        Raise(L"RmsLabel");
+    }
+
+    // The dB readouts carry a tenth of a decibel, so at 60 Hz they re-laid out
+    // text almost every tick, faster than anyone can read a number. They move
+    // at kLabelInterval instead; the waveform keeps the full rate. A stopped
+    // take bypasses the wait so the labels land on the post-stop value.
+    const auto now = std::chrono::steady_clock::now();
+    if (snapshot.recording == 0 || now - m_labelStamp >= kLabelInterval) {
+        m_labelStamp = now;
+        if (auto label = FormatDbFromAmplitude(snapshot.peak); label != m_peakLabel) {
+            m_peakLabel = label;
+            Raise(L"PeakLabel");
+        }
+        if (auto label = FormatDbFromAmplitude(snapshot.rms); label != m_rmsLabel) {
+            m_rmsLabel = label;
+            Raise(L"RmsLabel");
+        }
     }
     if (std::abs(hold - m_meterHold) >= kMeterEpsilon) {
         m_meterHold = hold;

@@ -97,6 +97,10 @@ constexpr float kBarWeights[kBarCount] = {0.62f, 1.00f, 0.86f, 0.50f};
 // last 6 dB, which is the headroom worth worrying about.
 constexpr float kBarHotThreshold = 0.86f;
 
+// A bar height change smaller than this (DIPs) is at most a pixel even at
+// 500% display scale, so the tick leaves the bar where it is.
+constexpr float kBarTargetEpsilon = 0.2f;
+
 // Steps sampled out of the shared meter ramp for the bars.
 constexpr uint32_t kBarPaletteSteps = 12;
 
@@ -662,7 +666,9 @@ void IndicatorWindow::BuildCompositionLayer()
         bar.Brush(m_barIdleBrush);
         meterContainer.Children().InsertAtTop(bar);
         m_barVisuals[static_cast<size_t>(i)] = bar;
+        m_barTargets[static_cast<size_t>(i)] = BarHeight(kBarRestScale);
     }
+    m_barBrush = m_barIdleBrush;
 
     // Recording dot — drawn as an 8×8 sprite visual on the DotHost element.
     auto dotContainer = m_compositor.CreateContainerVisual();
@@ -699,7 +705,17 @@ void IndicatorWindow::UpdateFromMeter()
         ApplyPausedVisuals();
     }
 
-    UpdateMeterBars(MeterNorm(snapshot.peak), snapshot.clip_count > 0);
+    // The dot style collapses the meter and clock away until a tap expands
+    // the pill. Nothing reads them there, so the tick keeps only its pause
+    // check; ApplyLayoutFor brings them current the moment they are shown.
+    if (ReadoutDetail().Visibility() == mux::Visibility::Collapsed) return;
+
+    ApplyReadout(snapshot, false);
+}
+
+void IndicatorWindow::ApplyReadout(RecMeter const& snapshot, bool snap)
+{
+    UpdateMeterBars(MeterNorm(snapshot.peak), snapshot.clip_count > 0, snap);
 
     auto text = winrt::hstring{FormatPillElapsed(snapshot.elapsed_ms)};
     if (text != m_elapsedText) {
@@ -708,7 +724,14 @@ void IndicatorWindow::UpdateFromMeter()
     }
 }
 
-void IndicatorWindow::UpdateMeterBars(float level, bool hot)
+void IndicatorWindow::SyncReadoutNow()
+{
+    RecMeter snapshot{};
+    if (::rec_meter(&snapshot) != REC_STATUS_OK) return;
+    ApplyReadout(snapshot, true);
+}
+
+void IndicatorWindow::UpdateMeterBars(float level, bool hot, bool snap)
 {
     const float clamped = std::clamp(level, 0.0f, 1.0f);
     const auto dur = std::chrono::milliseconds(kMeterMs);
@@ -727,12 +750,31 @@ void IndicatorWindow::UpdateMeterBars(float level, bool hot)
         brush = m_barLiveBrush;
     }
 
+    // Brushes are mutated in place on a theme change, so identity is enough
+    // to know the bars already wear this one.
+    const bool newBrush = brush && brush != m_barBrush;
+    if (newBrush) m_barBrush = brush;
+
     for (int i = 0; i < kBarCount; ++i) {
         auto& bar = m_barVisuals[static_cast<size_t>(i)];
         if (!bar) continue;
-        if (brush) bar.Brush(brush);
+        if (newBrush) bar.Brush(brush);
 
+        // Silence and steady tone would otherwise restart four animations
+        // every tick toward heights they already hold, keeping the pill and
+        // its blurred backdrop redrawing for nothing.
         const float target = BarHeight(std::max(kBarRestScale, clamped * kBarWeights[i]));
+        auto& last = m_barTargets[static_cast<size_t>(i)];
+        if (snap) {
+            // Revealed mid-take: land on the live level, no catch-up motion
+            // from wherever the bar was left.
+            bar.StopAnimation(L"Size.Y");
+            bar.Size({kBarWidth, target});
+            last = target;
+            continue;
+        }
+        if (std::abs(target - last) < kBarTargetEpsilon) continue;
+        last = target;
         auto anim = m_compositor.CreateScalarKeyFrameAnimation();
         anim.InsertKeyFrame(1.0f, target, m_ease);
         anim.Duration(dur);
@@ -787,6 +829,7 @@ void IndicatorWindow::StopMeterAnimations()
 {
     // Leave the last elapsed time on screen through the Saving frame; only the
     // bars fall back, so the pill does not blank out mid-fade.
+    m_barTargets.fill(BarHeight(kBarRestScale));
     for (auto& bar : m_barVisuals) {
         if (!bar) continue;
         bar.StopAnimation(L"Size.Y");
@@ -947,7 +990,9 @@ void IndicatorWindow::ApplyLayoutFor(::yip::IndicatorState s, ClipPolicy clip)
     // The dot style's collapsed disc is narrower than the padding, so the
     // padding goes with the meter and clock or the dot is pushed off centre.
     const bool wantDetail = DetailShownFor(s);
+    const bool detailWasHidden = ReadoutDetail().Visibility() == mux::Visibility::Collapsed;
     ReadoutDetail().Visibility(wantDetail ? mux::Visibility::Visible : mux::Visibility::Collapsed);
+    if (wantDetail && detailWasHidden && m_recording) SyncReadoutNow();
     PillContent().Padding(wantDetail ? m_contentPadding : mux::Thickness{});
 
     auto actions = muxh::ElementCompositionPreview::GetElementVisual(ExpandedActions());

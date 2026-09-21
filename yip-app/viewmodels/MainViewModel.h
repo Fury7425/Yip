@@ -245,6 +245,8 @@ private:
     // writes these when the level moves, so a bare dash would survive startup.
     winrt::hstring m_peakLabel{L"-\u221E dB"};
     winrt::hstring m_rmsLabel{L"-\u221E dB"};
+    // When the dB labels last refreshed; Tick holds them to kLabelInterval.
+    std::chrono::steady_clock::time_point m_labelStamp{};
     winrt::hstring m_elapsedText{L"00:00.0"};
 
     winrt::hstring m_statusText{L"Ready"};

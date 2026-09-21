@@ -63,7 +63,9 @@ private:
                               winrt::Windows::Foundation::IInspectable const& args);
     // One rec_meter() snapshot per tick, fanned out to the bars and the timer.
     void UpdateFromMeter();
-    void UpdateMeterBars(float level, bool hot);
+    void ApplyReadout(RecMeter const& snapshot, bool snap);
+    void SyncReadoutNow();
+    void UpdateMeterBars(float level, bool hot, bool snap = false);
     void UpdateDotForState(::yip::IndicatorState s);
     // Glyph, tooltip and dot for whichever of pause/resume the button offers.
     void ApplyPausedVisuals();
@@ -218,6 +220,10 @@ private:
     // Sampled from the same YipMeterGradientBrush the main window's waveform
     // uses, so a level looks the same in both places.
     std::vector<winrt::Microsoft::UI::Composition::CompositionColorBrush> m_barPalette;
+    // What the bars were last told, so a tick that changes nothing visible
+    // starts no animation and leaves the compositor idle.
+    std::array<float, 4> m_barTargets{};
+    winrt::Microsoft::UI::Composition::CompositionColorBrush m_barBrush{nullptr};
     winrt::Microsoft::UI::Composition::CompositionEasingFunction m_ease{nullptr};
     winrt::Microsoft::UI::Composition::CompositionEasingFunction m_easeOut{nullptr};
     winrt::Microsoft::UI::Composition::CompositionEasingFunction m_easeMorph{nullptr};
