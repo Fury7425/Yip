@@ -42,6 +42,10 @@ public:
     // True once the shell has accepted the icon.
     bool IsLive() const noexcept { return m_added; }
 
+    // The hidden host window. Exists for the whole session, whatever windows
+    // come and go, which is why the global hotkey is registered on it too.
+    HWND HostWindow() const noexcept { return m_host; }
+
     // Class name of the hidden host window. A second instance finds the window
     // by it, so the string is part of the contract between the two processes.
     static const wchar_t* HostClassName() noexcept;

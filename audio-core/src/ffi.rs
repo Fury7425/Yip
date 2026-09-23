@@ -250,8 +250,13 @@ fn player_singleton() -> &'static parking_lot::Mutex<Option<Player>> {
 
 /// Callback invoked whenever the recording state flips. `recording` is 1 while
 /// a capture session is live, 0 otherwise. Delivered on the thread that called
-/// [`rec_start`] / [`rec_stop`], **after** the internal lock is released, so the
-/// callback may re-enter any `rec_*` getter.
+/// [`rec_start`] / [`rec_stop`], **after** the recorder lock is released, so the
+/// callback may re-enter any `rec_*` getter — but not `rec_start` / `rec_stop`.
+///
+/// A take can also end by itself (input device removed, disk full). Then the
+/// callback fires with 0 on an audio-core worker thread, `rec_is_recording`
+/// already reads 0, and the host must call [`rec_stop`] to finalise the file
+/// and read the cause from [`rec_last_error`].
 pub type RecStateCallback = Option<extern "C" fn(recording: u8, user: *mut c_void)>;
 
 /// Callback slot plus its opaque user pointer.
@@ -275,23 +280,51 @@ fn state_sink() -> &'static parking_lot::Mutex<StateSink> {
     })
 }
 
-/// Last state handed to the host. Lets `notify_state` stay edge-triggered so a
-/// redundant `rec_stop` does not spam the UI.
-static LAST_NOTIFIED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Set by the capture or writer thread when the take ends on its own (device
+/// removed, disk full). Cleared by `rec_start`; `RECORDING` drops with it.
+static FAULTED: AtomicBool = AtomicBool::new(false);
 
-/// Copy the slot out, drop the guard, then call. Never invoke a host callback
-/// while holding a lock the host might re-enter.
-fn notify_state(recording: bool) {
-    if LAST_NOTIFIED.swap(recording, std::sync::atomic::Ordering::AcqRel) == recording {
+/// Last state handed to the host, and the lock that orders deliveries. A fault
+/// publishes from the capture thread while `rec_start` may be publishing from
+/// the UI thread, and two unserialised callbacks can land in the host's queue
+/// the wrong way round — leaving a UI that believes a dead take is live.
+fn last_published() -> &'static parking_lot::Mutex<bool> {
+    static LAST: OnceLock<parking_lot::Mutex<bool>> = OnceLock::new();
+    LAST.get_or_init(|| parking_lot::Mutex::new(false))
+}
+
+/// Hand the host the *current* value of `RECORDING` if it has not seen it yet.
+///
+/// Level-triggered and serialised: whichever thread publishes last reports the
+/// truth, so deliveries cannot cross. The host callback runs under this lock,
+/// which it never sees; the callback must not call `rec_start` / `rec_stop`
+/// re-entrantly (getters are fine — they take no lock).
+fn publish_state() {
+    let mut last = last_published().lock();
+    let now = RECORDING.load(Ordering::SeqCst);
+    if *last == now {
         return;
     }
+    *last = now;
     let (cb, user) = {
         let guard = state_sink().lock();
         (guard.cb, guard.user)
     };
     if let Some(f) = cb {
-        f(u8::from(recording), user);
+        f(u8::from(now), user);
     }
+}
+
+/// The session ended without being asked to. Runs on the capture or writer
+/// thread, so it takes no recorder lock (`rec_stop` holds that while joining
+/// those very threads). The host sees `recording == 0` and calls `rec_stop`,
+/// which tears the session down and returns the error that ended it.
+fn session_faulted() {
+    FAULTED.store(true, Ordering::SeqCst);
+    RECORDING.store(false, Ordering::SeqCst);
+    PAUSED.store(false, Ordering::Release);
+    METER.silence();
+    publish_state();
 }
 
 /// Install (or clear, with a null `cb`) the recording-state callback.
@@ -375,15 +408,24 @@ pub unsafe extern "C" fn rec_start(
         }
         // Clear the meter before the capture thread can push its first packet.
         METER.reset();
-        let rec = Recorder::start(dev, std::path::Path::new(p), config)?;
+        // No thread of an earlier session is alive (it was joined by rec_stop),
+        // so nothing can raise this again before the new one starts.
+        FAULTED.store(false, Ordering::SeqCst);
+        let rec = Recorder::start(dev, std::path::Path::new(p), config, session_faulted)?;
         SESSION_START_MS.store(now_ms(), Ordering::Relaxed);
         PAUSED.store(false, Ordering::Release);
-        RECORDING.store(true, Ordering::Release);
+        RECORDING.store(true, Ordering::SeqCst);
+        // A fault between Recorder::start returning and the store above was
+        // just overwritten. FAULTED is set before RECORDING is cleared, so
+        // reading it after our store catches that case.
+        if FAULTED.load(Ordering::SeqCst) {
+            RECORDING.store(false, Ordering::SeqCst);
+        }
         *guard = Some(rec);
         Ok(())
     });
     if status == RecStatus::Ok {
-        notify_state(true);
+        publish_state();
     }
     status
 }
@@ -400,10 +442,10 @@ pub extern "C" fn rec_stop() -> RecStatus {
     });
     // The session is gone either way — a failed flush still ends capture. The
     // session totals stay readable; only the live levels drop to zero.
-    RECORDING.store(false, Ordering::Release);
+    RECORDING.store(false, Ordering::SeqCst);
     PAUSED.store(false, Ordering::Release);
     METER.silence();
-    notify_state(false);
+    publish_state();
     status
 }
 

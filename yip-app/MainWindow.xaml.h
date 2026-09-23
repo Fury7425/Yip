@@ -10,16 +10,11 @@
 #include <winrt/Microsoft.UI.Composition.SystemBackdrops.h>
 #include <winrt/Windows.System.h>
 
-namespace yip::interop {
-class DeviceWatcher;
-}
-namespace yip {
-class HotkeyManager;
-}
-
 namespace winrt::yip::implementation {
 struct MainWindow : MainWindowT<MainWindow> {
     MainWindow();
+    // Attach to a view model owned elsewhere (App), so it survives the window.
+    explicit MainWindow(winrt::yip::viewmodels::MainViewModel const& viewModel);
     ~MainWindow();
 
     winrt::yip::viewmodels::MainViewModel ViewModel();
@@ -91,13 +86,12 @@ private:
     // coalesced downstream, so its position lags the thumb by a tick or two and
     // writing it back would drag the thumb backwards under the pointer.
     int m_seekHoldTicks{0};
-    std::unique_ptr<::yip::interop::DeviceWatcher> m_deviceWatcher;
-    std::unique_ptr<::yip::HotkeyManager> m_hotkey;
     ::yip::RecordingStateBus::Token m_stateToken{0};
     winrt::event_token m_vmToken{};
     winrt::event_token m_themeToken{};
     HWND m_hwnd{nullptr};
     bool m_focused{true};
+    bool m_tornDown{false};
 
     // ----- backdrop -----
     // Driven through the controller rather than Window::SystemBackdrop so the
@@ -140,7 +134,9 @@ private:
     void UpdatePlayPauseGlyph();
     void UpdateSeekSlider();
     void OnRecordingStateChanged(bool recording);
-    void ApplyHotkeyFromSettings();
+    // Stop timers, drop subscriptions and detach from the view model. Runs on
+    // Closed, so a closed window stops costing anything straight away.
+    void Teardown();
     void OnActivated(winrt::Windows::Foundation::IInspectable const& sender,
                      winrt::Microsoft::UI::Xaml::WindowActivatedEventArgs const& args);
     void OnViewModelPropertyChanged(winrt::Windows::Foundation::IInspectable const& sender,

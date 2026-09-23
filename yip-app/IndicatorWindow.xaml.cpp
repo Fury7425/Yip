@@ -52,7 +52,12 @@ namespace {
 // padding the pill's XAML actually binds to lives there. Colours are the other
 // way round — every one of them is resolved from the theme dictionaries by
 // ResolveThemeBrushes().
-constexpr int kMeterMs = 33;
+// 20 Hz. Every tick that moves a bar keeps the compositor — and the blurred
+// backdrop behind the pill — drawing, so the rate is the GPU cost of a take.
+constexpr int kMeterMs = 50;
+// Each bar glides for a little longer than a tick, so consecutive targets
+// blend into one motion instead of stepping at the tick rate.
+constexpr int kBarGlideMs = 75;
 constexpr int kAutoCollapseMs = 3000;
 constexpr int kBarCount = 4;
 constexpr float kBarWidth = 3.0f;
@@ -97,9 +102,10 @@ constexpr float kBarWeights[kBarCount] = {0.62f, 1.00f, 0.86f, 0.50f};
 // last 6 dB, which is the headroom worth worrying about.
 constexpr float kBarHotThreshold = 0.86f;
 
-// A bar height change smaller than this (DIPs) is at most a pixel even at
-// 500% display scale, so the tick leaves the bar where it is.
-constexpr float kBarTargetEpsilon = 0.2f;
+// A bar height change smaller than this (DIPs) is left alone: under a pixel at
+// 100% scale and a small fraction of the 18 DIP travel, so nobody sees it, but
+// animating it keeps the compositor busy through steady tone and room noise.
+constexpr float kBarTargetEpsilon = 0.75f;
 
 // Steps sampled out of the shared meter ramp for the bars.
 constexpr uint32_t kBarPaletteSteps = 12;
@@ -406,6 +412,13 @@ IndicatorWindow::IndicatorWindow()
         });
     });
 
+    // App closes the pill between takes to give its memory back. Everything
+    // global it hooked is released on Closed, not in the destructor, which can
+    // run after the next take's pill already exists and would unhook that one.
+    Closed([weak = get_weak()](auto&&, auto&&) {
+        if (auto self = weak.get()) self->Teardown();
+    });
+
     // Subscribe last: the first callback can transition straight into
     // Recording, which touches every timer created above.
     m_stateToken = ::yip::RecordingStateBus::Subscribe(dq, [weak = get_weak()](bool recording) {
@@ -418,6 +431,14 @@ IndicatorWindow::IndicatorWindow()
 
 IndicatorWindow::~IndicatorWindow()
 {
+    Teardown();
+}
+
+void IndicatorWindow::Teardown()
+{
+    if (m_tornDown) return;
+    m_tornDown = true;
+
     ::yip::RecordingStateBus::Unsubscribe(m_stateToken);
     m_stateToken = 0;
     ::yip::Settings::SetSavedHandler(nullptr);
@@ -734,7 +755,7 @@ void IndicatorWindow::SyncReadoutNow()
 void IndicatorWindow::UpdateMeterBars(float level, bool hot, bool snap)
 {
     const float clamped = std::clamp(level, 0.0f, 1.0f);
-    const auto dur = std::chrono::milliseconds(kMeterMs);
+    const auto dur = std::chrono::milliseconds(kBarGlideMs);
 
     const bool wantHot = hot || clamped >= kBarHotThreshold;
 
@@ -787,24 +808,18 @@ void IndicatorWindow::UpdateDotForState(::yip::IndicatorState s)
     if (!m_dotVisual) return;
     // Expanding the pill mid-take is still a live take: the lamp stays red.
     // A paused one is not — nothing is reaching the file, so the lamp goes
-    // neutral and stops pulsing.
+    // neutral.
     const bool live = !m_paused && ((s == ::yip::IndicatorState::Recording) ||
                                     (s == ::yip::IndicatorState::Expanded && m_recording));
     m_dotVisual.Brush(live ? m_dotRecordBrush : m_dotNeutralBrush);
 
-    // Pulse opacity gently during recording for "alive" feel.
-    if (live) {
-        auto pulse = m_compositor.CreateScalarKeyFrameAnimation();
-        pulse.InsertKeyFrame(0.0f, 1.0f, m_ease);
-        pulse.InsertKeyFrame(0.5f, 0.55f, m_ease);
-        pulse.InsertKeyFrame(1.0f, 1.0f, m_ease);
-        pulse.Duration(std::chrono::milliseconds(1200));
-        pulse.IterationBehavior(mucomp::AnimationIterationBehavior::Forever);
-        m_dotVisual.StartAnimation(L"Opacity", pulse);
-    } else {
-        m_dotVisual.StopAnimation(L"Opacity");
-        m_dotVisual.Opacity(1.0f);
-    }
+    // A steady lamp. It used to pulse on a Forever animation, and a running
+    // animation makes the compositor draw every display refresh — 60 to 165
+    // frames a second, each re-running the backdrop blur and mask — for the
+    // whole take, silence included. The red lamp and the meter already say
+    // "recording"; the pulse was paid for in GPU time.
+    m_dotVisual.StopAnimation(L"Opacity");
+    m_dotVisual.Opacity(1.0f);
 }
 
 void IndicatorWindow::ApplyPausedVisuals()

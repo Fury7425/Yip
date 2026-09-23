@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
 use std::thread::JoinHandle;
 
-use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
     AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
@@ -28,7 +28,7 @@ use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_MULTITHREADED, CoInitializeEx, CoTaskMemFree, CoUninitialize,
 };
 use windows::Win32::System::Threading::{
-    AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW, CreateEventW, INFINITE,
+    AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW, CreateEventW,
     WaitForMultipleObjects,
 };
 use windows::core::Interface;
@@ -63,7 +63,15 @@ unsafe impl Send for SendHandle {}
 unsafe impl Sync for SendHandle {}
 
 impl Recorder {
-    pub fn start(device_id: &str, path: &Path, cfg: RecConfig) -> Result<Self, YipError> {
+    /// `on_fault` runs on the capture or writer thread when the take ends by
+    /// itself — the device removed, the disk full. It must not block and must
+    /// not call back into `Recorder`; the owner stops the session afterwards.
+    pub fn start(
+        device_id: &str,
+        path: &Path,
+        cfg: RecConfig,
+        on_fault: fn(),
+    ) -> Result<Self, YipError> {
         // Refuse a bad format before any thread or device is touched.
         let encoding = Encoding::from_config(&cfg)?;
 
@@ -89,6 +97,8 @@ impl Recorder {
         let capture_thread = std::thread::Builder::new()
             .name("yip-capture".into())
             .spawn(move || -> Result<(), YipError> {
+                // However capture ends, the writer is told to flush what it has.
+                let _flush = FlagOnDrop(writer_stop_for_capture);
                 capture_loop(
                     &device_id_owned,
                     &path_owned,
@@ -97,9 +107,9 @@ impl Recorder {
                     &mut producer,
                     &stop_for_capture,
                     &paused_for_capture,
-                    &writer_stop_for_capture,
-                    stop_event_for_thread,
+                    &stop_event_for_thread,
                     &ready_tx,
+                    on_fault,
                 )
             })
             .map_err(|e| YipError::Wasapi(format!("spawn capture: {e}")))?;
@@ -126,7 +136,15 @@ impl Recorder {
         let (writer_ready_tx, writer_ready_rx) = channel::<Result<(), YipError>>();
         let writer_thread = std::thread::Builder::new()
             .name("yip-writer".into())
-            .spawn(move || run_writer(consumer, wcfg, writer_stop_for_writer, writer_ready_tx))
+            .spawn(move || {
+                run_writer(
+                    consumer,
+                    wcfg,
+                    writer_stop_for_writer,
+                    writer_ready_tx,
+                    on_fault,
+                )
+            })
             .map_err(|e| YipError::Io(format!("spawn writer: {e}")))?;
         rec.writer_thread = Some(writer_thread);
 
@@ -161,27 +179,37 @@ impl Recorder {
         self.paused.store(paused, Ordering::Release);
     }
 
+    /// Stop both threads and finalise the file. Both threads are always
+    /// joined — a capture error must not skip the writer's flush — and the
+    /// first failure is what is reported: a device that went away is the
+    /// cause, a writer complaining about it afterwards is not.
     pub fn stop(mut self) -> Result<(), YipError> {
         self.stop.store(true, Ordering::Release);
         // Wake the capture loop. Single SetEvent is enough on an auto-reset event.
         // SAFETY: stop_event handle was created in start() and is still alive.
         let _ = unsafe { windows::Win32::System::Threading::SetEvent(self.stop_event.0) };
 
-        if let Some(h) = self.capture_thread.take() {
-            h.join()
-                .map_err(|_| YipError::Wasapi("capture thread panicked".into()))??;
-        }
+        let captured = match self.capture_thread.take() {
+            Some(h) => h
+                .join()
+                .unwrap_or_else(|_| Err(YipError::Wasapi("capture thread panicked".into()))),
+            None => Ok(()),
+        };
         // Capture thread sets writer_stop on its way out. Don't second-guess.
         self.writer_stop.store(true, Ordering::Release);
-        if let Some(h) = self.writer_thread.take() {
-            h.join()
-                .map_err(|_| YipError::Io("writer thread panicked".into()))??;
-        }
-        // SAFETY: handle live, single close.
+        let written = match self.writer_thread.take() {
+            Some(h) => h
+                .join()
+                .unwrap_or_else(|_| Err(YipError::Io("writer thread panicked".into())))
+                .map(|_| ()),
+            None => Ok(()),
+        };
+        // SAFETY: handle live, single close. Drop skips it: both threads are
+        // already taken.
         unsafe {
             let _ = windows::Win32::Foundation::CloseHandle(self.stop_event.0);
         }
-        Ok(())
+        captured.and(written)
     }
 }
 
@@ -209,8 +237,67 @@ impl Drop for Recorder {
 
 // ---------- capture thread body ----------
 
+/// How long the capture loop waits for a buffer event before it checks on the
+/// device itself. A removed endpoint can simply stop signalling, and an
+/// `INFINITE` wait then parked the thread for good while the UI went on
+/// reporting a live take. Loopback capture legitimately goes quiet while
+/// nothing is playing, so a timeout is a reason to ask the device, never a
+/// failure on its own.
+pub(crate) const DEVICE_PROBE_MS: u32 = 500;
+
+/// A Win32 event this module created. Closed on every exit path, including
+/// the early `?` returns that used to leak it.
+struct OwnedEvent(HANDLE);
+
+impl OwnedEvent {
+    fn new() -> Result<Self, YipError> {
+        // SAFETY: auto-reset, initially nonsignaled, unnamed.
+        let handle = unsafe { CreateEventW(None, false, false, None)? };
+        Ok(Self(handle))
+    }
+}
+
+impl Drop for OwnedEvent {
+    fn drop(&mut self) {
+        // SAFETY: created by `new` and closed exactly once, here.
+        unsafe {
+            let _ = windows::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+/// The engine mix format from `GetMixFormat`, freed with `CoTaskMemFree` on
+/// every path rather than only the one that reaches `Initialize`.
+struct MixFormat(*mut WAVEFORMATEX);
+
+impl Drop for MixFormat {
+    fn drop(&mut self) {
+        // SAFETY: CoTaskMem allocation handed out by GetMixFormat, freed once.
+        unsafe { CoTaskMemFree(Some(self.0.cast())) };
+    }
+}
+
+/// Raises a flag when dropped. The capture thread uses it so the writer is
+/// told to flush however capture ends — a device error included, which used
+/// to leave the writer draining an empty ring until `stop`.
+pub(crate) struct FlagOnDrop(pub(crate) Arc<AtomicBool>);
+
+impl Drop for FlagOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
+    }
+}
+
+/// A started shared-mode capture stream and the format it delivers.
+struct Stream {
+    client: IAudioClient,
+    capture: IAudioCaptureClient,
+    audio_event: OwnedEvent,
+    sample_rate: u32,
+    channels: u16,
+}
+
 #[allow(clippy::too_many_arguments)] // bag of refs is shorter than a struct here
-#[allow(clippy::cast_ptr_alignment)] // SAFETY: WASAPI GetBuffer guarantees f32-aligned data
 fn capture_loop(
     device_id: &str,
     path: &Path,
@@ -219,19 +306,53 @@ fn capture_loop(
     producer: &mut rtrb::Producer<f32>,
     stop: &Arc<AtomicBool>,
     paused: &Arc<AtomicBool>,
-    writer_stop: &Arc<AtomicBool>,
-    stop_event: SendHandle,
+    stop_event: &SendHandle,
     ready_tx: &std::sync::mpsc::Sender<Result<WriterConfig, YipError>>,
+    on_fault: fn(),
 ) -> Result<(), YipError> {
-    // SAFETY: per-thread COM init; balanced by CoUninitialize at end.
+    // SAFETY: per-thread COM init; balanced by the ComGuard below.
     let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     if hr.is_err() && hr.0 != windows::Win32::Foundation::RPC_E_CHANGED_MODE.0 {
         let e = YipError::Wasapi(format!("CoInitializeEx 0x{:08X}", hr.0 as u32));
         let _ = ready_tx.send(Err(e.clone()));
         return Err(e);
     }
-    let com_guard = ComGuard;
+    // Declared before the stream, so it drops after it: every COM object is
+    // released before the apartment goes away.
+    let _com = ComGuard;
 
+    // Any failure while opening is the caller's answer, not a lost thread: it
+    // goes back over `ready_tx`, so Record reports why rather than "capture
+    // thread died before ready".
+    let stream = match open_stream(device_id, cfg, encoding) {
+        Ok(stream) => stream,
+        Err(e) => {
+            let _ = ready_tx.send(Err(e.clone()));
+            return Err(e);
+        }
+    };
+
+    let _ = ready_tx.send(Ok(WriterConfig {
+        path: path.to_path_buf(),
+        sample_rate: stream.sample_rate,
+        channels: stream.channels,
+        encoding,
+    }));
+
+    let result = run_stream(&stream, producer, stop, paused, stop_event);
+    // SAFETY: client live; idempotent on a stopped or invalidated stream.
+    let _ = unsafe { stream.client.Stop() };
+
+    // A failure nobody asked for — the device pulled, the driver gone — ends
+    // the take on its own. Tell the host now; `rec_stop` collects the error.
+    if result.is_err() && !stop.load(Ordering::Acquire) {
+        on_fault();
+    }
+    result
+}
+
+/// Locate the endpoint, negotiate a float format and start the stream.
+fn open_stream(device_id: &str, cfg: RecConfig, encoding: Encoding) -> Result<Stream, YipError> {
     // Locate device, decide loopback.
     let device = find_device(device_id)?;
     // `cast` is a safe windows-rs trait method that wraps QueryInterface.
@@ -241,16 +362,14 @@ fn capture_loop(
     let is_render = flow == windows::Win32::Media::Audio::eRender;
 
     // SAFETY: standard activation of WASAPI client.
-    let client: IAudioClient = unsafe { device.Activate::<IAudioClient>(CLSCTX_ALL, None)? };
+    let mut client: IAudioClient = unsafe { device.Activate::<IAudioClient>(CLSCTX_ALL, None)? };
 
     // Negotiate mix format (always f32 shared since Vista).
-    // SAFETY: live client; returns CoTaskMem-allocated pointer.
-    let fmt_ptr = unsafe { client.GetMixFormat()? };
-    let (mix_rate, mix_channels) = parse_format(fmt_ptr)?;
+    // SAFETY: live client; returns CoTaskMem-allocated pointer, owned below.
+    let mix = MixFormat(unsafe { client.GetMixFormat()? });
+    let (mix_rate, mix_channels) = parse_format(mix.0)?;
 
-    // Audio event (auto-reset, nonsignaled).
-    // SAFETY: standard event creation.
-    let audio_event = unsafe { CreateEventW(None, false, false, None)? };
+    let audio_event = OwnedEvent::new()?;
 
     let mut stream_flags: u32 = AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
     if is_render {
@@ -283,7 +402,6 @@ fn capture_loop(
     // First choice: the caller's format. WASAPI resamples/remixes behind
     // AUTOCONVERTPCM. A device that refuses it leaves the client unusable, so
     // fall back on a *fresh* client at the engine mix format.
-    let mut client = client;
     let mut sample_rate = mix_rate;
     let mut channels = mix_channels;
     let mut initialized = false;
@@ -314,39 +432,51 @@ fn capture_loop(
 
     // Either the caller's format was refused or it matched the mix format
     // anyway: fall back to initialising at the engine format.
-    let init_res = if initialized {
-        None
-    } else {
-        // SAFETY: client live; fmt_ptr live; flags valid.
-        Some(unsafe {
+    if !initialized {
+        // SAFETY: client live; the mix format stays allocated until `mix`
+        // drops at the end of this function; flags valid.
+        unsafe {
             client.Initialize(
                 AUDCLNT_SHAREMODE_SHARED,
                 stream_flags,
                 buffer_100ns,
                 0,
-                fmt_ptr,
+                mix.0,
                 None,
-            )
-        })
-    };
-    // SAFETY: pointer from GetMixFormat must be freed with CoTaskMemFree, on
-    // both paths, and only after Initialize is done reading it.
-    unsafe { CoTaskMemFree(Some(fmt_ptr.cast())) };
-    if let Some(res) = init_res {
-        res?;
+            )?;
+        }
     }
 
-    let writer_cfg = WriterConfig {
-        path: path.to_path_buf(),
+    // SAFETY: client live; handle live for as long as the returned Stream.
+    unsafe { client.SetEventHandle(audio_event.0)? };
+
+    // SAFETY: client initialised above.
+    let capture: IAudioCaptureClient = unsafe { client.GetService::<IAudioCaptureClient>()? };
+
+    // SAFETY: client live; this transitions the engine to running.
+    unsafe { client.Start()? };
+
+    Ok(Stream {
+        client,
+        capture,
+        audio_event,
         sample_rate,
         channels,
-        encoding,
-    };
+    })
+}
 
-    // SAFETY: client live; handle live.
-    unsafe { client.SetEventHandle(audio_event)? };
-
-    let capture: IAudioCaptureClient = unsafe { client.GetService::<IAudioCaptureClient>()? };
+/// The realtime part: drain packets into the ring until asked to stop or the
+/// device fails.
+#[allow(clippy::cast_ptr_alignment)] // SAFETY: WASAPI GetBuffer guarantees f32-aligned data
+fn run_stream(
+    stream: &Stream,
+    producer: &mut rtrb::Producer<f32>,
+    stop: &Arc<AtomicBool>,
+    paused: &Arc<AtomicBool>,
+    stop_event: &SendHandle,
+) -> Result<(), YipError> {
+    let capture = &stream.capture;
+    let sample_rate = stream.sample_rate;
 
     // Promote thread to Pro Audio characteristic.
     let mut task_index: u32 = 0;
@@ -359,23 +489,19 @@ fn capture_loop(
     };
     let _mmcss_guard = mmcss.ok().map(MmcssGuard);
 
-    // SAFETY: client live; this transitions the engine to running.
-    unsafe { client.Start()? };
-
-    // Signal the parent that everything is wired and we have a writer config.
-    let _ = ready_tx.send(Ok(writer_cfg));
-
-    let handles = [audio_event, stop_event.0];
-    let samples_per_frame = usize::from(channels).max(1);
+    let handles = [stream.audio_event.0, stop_event.0];
+    let samples_per_frame = usize::from(stream.channels).max(1);
 
     'outer: loop {
         // SAFETY: handles array is in scope for the duration of the call.
-        let wait = unsafe { WaitForMultipleObjects(&handles, false, INFINITE) };
+        let wait = unsafe { WaitForMultipleObjects(&handles, false, DEVICE_PROBE_MS) };
         let idx = wait.0.wrapping_sub(WAIT_OBJECT_0.0);
         if idx == 1 || stop.load(Ordering::Acquire) {
             break;
         }
-        if idx != 0 {
+        // A timeout falls through to the drain below: GetNextPacketSize is
+        // what reports AUDCLNT_E_DEVICE_INVALIDATED once the endpoint is gone.
+        if idx != 0 && wait != WAIT_TIMEOUT {
             return Err(YipError::Wasapi(format!("Wait failed 0x{:08X}", wait.0)));
         }
 
@@ -487,17 +613,6 @@ fn capture_loop(
             }
         }
     }
-
-    // SAFETY: client live; idempotent on running streams.
-    let _ = unsafe { client.Stop() };
-    // SAFETY: audio_event was created by us.
-    unsafe {
-        let _ = windows::Win32::Foundation::CloseHandle(audio_event);
-    }
-    // Tell writer to flush.
-    writer_stop.store(true, Ordering::Release);
-
-    drop(com_guard);
     Ok(())
 }
 

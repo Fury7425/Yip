@@ -149,7 +149,9 @@ namespace yip.viewmodels
         Double PlaybackLevelPercent{ get; };
 
         // Reconcile the view model with audio-core's own state, for the paths
-        // that end a session without going through ToggleRecording.
+        // that end a session without going through ToggleRecording — the pill,
+        // the tray, or a take that failed on its own, which this finalises
+        // with rec_stop and reports as an error.
         void SyncRecordingState(Boolean recording);
         void ReportHotkeyConflict();
 

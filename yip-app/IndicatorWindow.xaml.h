@@ -37,6 +37,10 @@ private:
     // the layout pass must not undo the clip it is about to animate.
     enum class ClipPolicy { Clear, Keep };
 
+    // Unhook everything global and persist. Idempotent: Closed runs it, and
+    // the destructor makes sure it ran.
+    void Teardown();
+
     // ----- HWND helpers -----
     HWND Hwnd() const noexcept { return m_hwnd; }
     void ApplyToolWindowStyle();
@@ -241,6 +245,8 @@ private:
     // Last state delivered by the bus. Cheaper than asking audio-core again
     // from inside a transition.
     bool m_recording{false};
+
+    bool m_tornDown{false};
 
     // Mirrors rec_is_paused(). A paused take is still a take: the bus never
     // fires for it, so this arrives with the meter snapshot instead.
