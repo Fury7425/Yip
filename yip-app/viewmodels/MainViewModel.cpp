@@ -44,13 +44,17 @@ constexpr double kMeterFloorDb = -60.0;
 // Below this amplitude there is nothing to show; log10 of it is noise.
 constexpr float kSilenceFloor = 1e-7f;
 
-// How fast the peak-hold marker falls, in meter units per tick. At the 16 ms
-// focused tick that is a full sweep in roughly 0.8 s: long enough to read a
-// transient, short enough not to lie about the current level.
-constexpr float kHoldFallPerTick = 0.02f;
+// How fast the peak-hold marker falls, in meter units per second: a full
+// sweep in 0.8 s, long enough to read a transient, short enough not to lie
+// about the current level. Per second rather than per tick, so the marker
+// falls at the same speed whatever rate the window happens to poll at.
+constexpr float kHoldFallPerSecond = 1.25f;
 
 // Don't re-raise a binding for movement the eye cannot resolve.
 constexpr float kMeterEpsilon = 1.0f / 512.0f;
+// The playback level is a 44 DIP bar, so the same idea at its own scale:
+// half a DIP of travel. Finer than that redrew the window for nothing.
+constexpr float kPlaybackLevelEpsilon = 1.0f / 88.0f;
 
 // How often the PEAK / RMS dB readouts refresh while recording.
 constexpr std::chrono::milliseconds kLabelInterval{100};
@@ -456,9 +460,12 @@ void MainViewModel::Tick()
     // Peak hold: jump to a new peak at once, fall back linearly. Without it a
     // transient is a single frame nobody sees. Once capture ends the timer
     // stops, so the marker has to be cleared here or it hangs on screen.
+    const auto now = std::chrono::steady_clock::now();
+    const float sinceLast = std::chrono::duration<float>(now - m_holdStamp).count();
+    m_holdStamp = now;
     float hold = 0.0f;
     if (snapshot.recording != 0) {
-        hold = (peak >= m_meterHold) ? peak : std::max(peak, m_meterHold - kHoldFallPerTick);
+        hold = (peak >= m_meterHold) ? peak : std::max(peak, m_meterHold - kHoldFallPerSecond * sinceLast);
     }
 
     if (std::abs(peak - m_meterPeak) >= kMeterEpsilon) {
@@ -470,11 +477,11 @@ void MainViewModel::Tick()
         Raise(L"MeterRms");
     }
 
-    // The dB readouts carry a tenth of a decibel, so at 60 Hz they re-laid out
-    // text almost every tick, faster than anyone can read a number. They move
-    // at kLabelInterval instead; the waveform keeps the full rate. A stopped
-    // take bypasses the wait so the labels land on the post-stop value.
-    const auto now = std::chrono::steady_clock::now();
+    // The dB readouts carry a tenth of a decibel, so at the meter rate they
+    // re-laid out text almost every tick, faster than anyone can read a
+    // number. They move at kLabelInterval instead; the waveform keeps the full
+    // rate. A stopped take bypasses the wait so the labels land on the
+    // post-stop value.
     if (snapshot.recording == 0 || now - m_labelStamp >= kLabelInterval) {
         m_labelStamp = now;
         if (auto label = FormatDbFromAmplitude(snapshot.peak); label != m_peakLabel) {
@@ -506,7 +513,7 @@ void MainViewModel::Tick()
         }
     }
 
-    // The timer only ever moves in tenths; re-formatting at 60 Hz would churn
+    // The timer only ever moves in tenths; re-formatting every tick would churn
     // the binding nine times out of ten for no visible change.
     auto text = winrt::hstring{FormatElapsed(snapshot.elapsed_ms)};
     if (text != m_elapsedText) {
@@ -957,7 +964,9 @@ void MainViewModel::PlaybackTick()
     }
 
     const float level = MeterNorm(snapshot.level);
-    if (std::abs(level - m_playbackLevel) >= kMeterEpsilon) {
+    // Silence always lands, so a quiet passage never leaves a sliver lit.
+    const bool toSilence = level == 0.0f && m_playbackLevel != 0.0f;
+    if (toSilence || std::abs(level - m_playbackLevel) >= kPlaybackLevelEpsilon) {
         m_playbackLevel = level;
         Raise(L"PlaybackLevelPercent");
     }

@@ -16,6 +16,42 @@
          first one's key tip ("Ctrl+R") off whatever element owns them, so it
          popped up over any bare stretch of the window, caption buttons included. -->
     <Grid x:Name="Root" KeyboardAcceleratorPlacementMode="Hidden">
+        <Grid.Resources>
+            <!-- One menu for every row, rather than one per row: declared in
+                 the item template, each realized row carried its own flyout,
+                 five items, a separator and five icons, most of them never
+                 opened. Target is the row it opened on
+                 (MainWindow::OnRecordingMenuOpening). -->
+            <MenuFlyout x:Key="RecordingMenu" Opening="OnRecordingMenuOpening">
+                <MenuFlyoutItem Text="Play" Click="OnPlayItem">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE768;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Open with default app"
+                                Click="OnOpenExternallyItem">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE8E5;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Show in Explorer" Click="OnRevealItem">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xEC50;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Copy path" Click="OnCopyPathItem">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE8C8;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Delete" Click="OnDeleteItem">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE74D;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+            </MenuFlyout>
+        </Grid.Resources>
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="R" Modifiers="Control" Invoked="OnRecordAccelerator" />
             <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnSearchAccelerator" />
@@ -344,38 +380,8 @@
                         </ListView.ItemContainerStyle>
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="vm:RecordingEntry">
-                                <Grid ColumnSpacing="12" Background="Transparent">
-                                    <Grid.ContextFlyout>
-                                        <MenuFlyout>
-                                            <MenuFlyoutItem Text="Play" Click="OnPlayItem">
-                                                <MenuFlyoutItem.Icon>
-                                                    <FontIcon Glyph="&#xE768;" />
-                                                </MenuFlyoutItem.Icon>
-                                            </MenuFlyoutItem>
-                                            <MenuFlyoutItem Text="Open with default app"
-                                                            Click="OnOpenExternallyItem">
-                                                <MenuFlyoutItem.Icon>
-                                                    <FontIcon Glyph="&#xE8E5;" />
-                                                </MenuFlyoutItem.Icon>
-                                            </MenuFlyoutItem>
-                                            <MenuFlyoutItem Text="Show in Explorer" Click="OnRevealItem">
-                                                <MenuFlyoutItem.Icon>
-                                                    <FontIcon Glyph="&#xEC50;" />
-                                                </MenuFlyoutItem.Icon>
-                                            </MenuFlyoutItem>
-                                            <MenuFlyoutItem Text="Copy path" Click="OnCopyPathItem">
-                                                <MenuFlyoutItem.Icon>
-                                                    <FontIcon Glyph="&#xE8C8;" />
-                                                </MenuFlyoutItem.Icon>
-                                            </MenuFlyoutItem>
-                                            <MenuFlyoutSeparator />
-                                            <MenuFlyoutItem Text="Delete" Click="OnDeleteItem">
-                                                <MenuFlyoutItem.Icon>
-                                                    <FontIcon Glyph="&#xE74D;" />
-                                                </MenuFlyoutItem.Icon>
-                                            </MenuFlyoutItem>
-                                        </MenuFlyout>
-                                    </Grid.ContextFlyout>
+                                <Grid ColumnSpacing="12" Background="Transparent"
+                                      ContextFlyout="{StaticResource RecordingMenu}">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
@@ -499,16 +505,25 @@
                                    VerticalAlignment="Center"
                                    Foreground="{ThemeResource YipTextPrimaryBrush}" />
                         <!-- Output level, on the capture meter's own
-                             logarithmic travel. -->
-                        <ProgressBar Grid.Column="1"
-                                     Width="44" Height="3"
-                                     Minimum="0" Maximum="100"
-                                     Value="{x:Bind ViewModel.PlaybackLevelPercent, Mode=OneWay}"
-                                     Foreground="{ThemeResource YipPlaybackLevelBrush}"
-                                     Background="{ThemeResource YipMeterTrackQuietBrush}"
-                                     VerticalAlignment="Center"
-                                     IsHitTestVisible="False"
-                                     AutomationProperties.Name="Playback level" />
+                             logarithmic travel. A track and a fill scaled
+                             from code (MainWindow::UpdatePlaybackLevel), not a
+                             ProgressBar: that one plays a reposition theme
+                             animation on every value change, so at the poll
+                             rate it kept the compositor drawing every display
+                             refresh for as long as anything played. A Scale
+                             write is one frame and no layout pass. -->
+                        <Border Grid.Column="1"
+                                Width="44" Height="3"
+                                CornerRadius="1.5"
+                                Background="{ThemeResource YipMeterTrackQuietBrush}"
+                                VerticalAlignment="Center"
+                                IsHitTestVisible="False"
+                                AutomationProperties.Name="Playback level">
+                            <Rectangle x:Name="PlaybackLevelFill"
+                                       Fill="{ThemeResource YipPlaybackLevelBrush}"
+                                       RadiusX="1.5" RadiusY="1.5"
+                                       Scale="0,1,1" />
+                        </Border>
                     </Grid>
 
                     <Slider x:Name="SeekSlider"

@@ -52,12 +52,13 @@ namespace {
 // padding the pill's XAML actually binds to lives there. Colours are the other
 // way round — every one of them is resolved from the theme dictionaries by
 // ResolveThemeBrushes().
-// 20 Hz. Every tick that moves a bar keeps the compositor — and the blurred
-// backdrop behind the pill — drawing, so the rate is the GPU cost of a take.
-constexpr int kMeterMs = 50;
-// Each bar glides for a little longer than a tick, so consecutive targets
-// blend into one motion instead of stepping at the tick rate.
-constexpr int kBarGlideMs = 75;
+// 25 Hz. Every tick that moves a bar costs one compositor frame — the blurred
+// backdrop and its mask included — so the rate is the GPU cost of a take.
+// The bars land on each tick's level rather than gliding to it: a glide a
+// little longer than a tick never finished before the next one started, so
+// through any live signal the pill redrew at the display's refresh rate
+// (60–165 frames a second) instead of the tick rate.
+constexpr int kMeterMs = 40;
 constexpr int kAutoCollapseMs = 3000;
 constexpr int kBarCount = 4;
 constexpr float kBarWidth = 3.0f;
@@ -755,7 +756,6 @@ void IndicatorWindow::SyncReadoutNow()
 void IndicatorWindow::UpdateMeterBars(float level, bool hot, bool snap)
 {
     const float clamped = std::clamp(level, 0.0f, 1.0f);
-    const auto dur = std::chrono::milliseconds(kBarGlideMs);
 
     const bool wantHot = hot || clamped >= kBarHotThreshold;
 
@@ -781,25 +781,18 @@ void IndicatorWindow::UpdateMeterBars(float level, bool hot, bool snap)
         if (!bar) continue;
         if (newBrush) bar.Brush(brush);
 
-        // Silence and steady tone would otherwise restart four animations
-        // every tick toward heights they already hold, keeping the pill and
-        // its blurred backdrop redrawing for nothing.
+        // Silence and steady tone would otherwise rewrite four heights every
+        // tick that the bars already hold, keeping the pill and its blurred
+        // backdrop redrawing for nothing. `snap` (revealed mid-take) always
+        // writes, so the bar lands on the live level whatever it last held.
         const float target = BarHeight(std::max(kBarRestScale, clamped * kBarWeights[i]));
         auto& last = m_barTargets[static_cast<size_t>(i)];
-        if (snap) {
-            // Revealed mid-take: land on the live level, no catch-up motion
-            // from wherever the bar was left.
-            bar.StopAnimation(L"Size.Y");
-            bar.Size({kBarWidth, target});
-            last = target;
-            continue;
-        }
-        if (std::abs(target - last) < kBarTargetEpsilon) continue;
+        if (!snap && std::abs(target - last) < kBarTargetEpsilon) continue;
         last = target;
-        auto anim = m_compositor.CreateScalarKeyFrameAnimation();
-        anim.InsertKeyFrame(1.0f, target, m_ease);
-        anim.Duration(dur);
-        bar.StartAnimation(L"Size.Y", anim);
+        // A direct write is one frame. The stop only matters after
+        // StopMeterAnimations, whose settle may still be running.
+        bar.StopAnimation(L"Size.Y");
+        bar.Size({kBarWidth, target});
     }
 }
 

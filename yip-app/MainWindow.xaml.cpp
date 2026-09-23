@@ -77,8 +77,12 @@ constexpr int kPlaybackTickBlurredMs = 200;
 // because it is what notices the file ending and releases the player.
 constexpr int kPlaybackTickMinimizedMs = 1000;
 
-// Capture meter poll: 60 Hz focused, 10 Hz blurred. Stopped while minimized.
-constexpr int kMeterTickFocusedMs = 16;
+// Capture meter poll: 30 Hz focused, 10 Hz blurred. Stopped while minimized.
+// Every tick scrolls the strip, and every scroll is a frame the compositor
+// draws with the acrylic behind it re-blurred, so this rate is the window's
+// GPU cost for the whole take. 30 Hz keeps the strip reading as motion; at 60
+// it cost twice as much to show more of the same history.
+constexpr int kMeterTickFocusedMs = 33;
 constexpr int kMeterTickBlurredMs = 100;
 
 // Ticks the scrubber is left alone for after a seek, so the thumb is not
@@ -275,6 +279,7 @@ void MainWindow::Teardown()
     // back through its two-way SelectedIndex; the selection is put back after.
     const auto selectedDevice = m_viewModel.SelectedDeviceIndex();
     Bindings->StopTracking();
+    m_menuEntry = nullptr;
     DeviceCombo().ItemsSource(nullptr);
     RecordingsList().ItemsSource(nullptr);
     m_viewModel.SelectedDeviceIndex(selectedDevice);
@@ -477,6 +482,7 @@ void MainWindow::BuildWaveVisuals(double width, double height)
     m_waveHold = hold;
     m_waveCount = bars;
     m_waveHead = 0;
+    m_waveSilentRun = bars; // nothing drawn yet: the whole strip is silent
     scroller.Offset({0.0f, 0.0f, 0.0f});
     root.Opacity((m_viewModel && m_viewModel.IsRecording()) ? 1.0f : kWaveIdleOpacity);
 }
@@ -490,6 +496,20 @@ void MainWindow::PushWaveSample(float level, float hold)
     const float rest = kWaveRestPx / std::max(h, 1.0f);
     const float clamped = std::clamp(level, 0.0f, 1.0f);
     const float scale = std::max(rest, clamped);
+    const float held = std::clamp(hold, 0.0f, 1.0f);
+    const bool holdShown = held > 0.002f;
+
+    // Silence draws nothing, so once a strip's worth of it has scrolled in,
+    // every bar on screen is empty and scrolling them changes no pixel — but
+    // it still cost a frame per tick, acrylic and all, through every pause in
+    // speech. Hold still until there is something to draw; the history it
+    // skips is silence either way, so the strip resumes seamlessly.
+    if (scale <= rest && !holdShown) {
+        if (m_waveSilentRun >= m_waveCount) return;
+        ++m_waveSilentRun;
+    } else {
+        m_waveSilentRun = 0;
+    }
 
     auto brush = m_waveRestBrush;
     if (!m_wavePalette.empty()) {
@@ -513,9 +533,8 @@ void MainWindow::PushWaveSample(float level, float hold)
     m_waveScroller.Offset({-static_cast<float>(m_waveHead) * kWavePitch, 0.0f, 0.0f});
 
     if (m_waveHold) {
-        const float held = std::clamp(hold, 0.0f, 1.0f);
         m_waveHold.Offset({0.0f, h * 0.5f - held * h * 0.5f, 0.0f});
-        m_waveHold.Opacity(held > 0.002f ? 1.0f : 0.0f);
+        m_waveHold.Opacity(holdShown ? 1.0f : 0.0f);
     }
 }
 
@@ -528,6 +547,7 @@ void MainWindow::ClearWave()
         if (m_waveRestBrush) bar.Brush(m_waveRestBrush);
     }
     m_waveHead = 0;
+    m_waveSilentRun = m_waveCount;
     if (m_waveScroller) m_waveScroller.Offset({0.0f, 0.0f, 0.0f});
     if (m_waveHold) m_waveHold.Opacity(0.0f);
 }
@@ -557,7 +577,7 @@ void MainWindow::OnActivated(winrt::Windows::Foundation::IInspectable const& /*s
 
     if (now_focused == m_focused) return;
     m_focused = now_focused;
-    // Throttle meter poll: 60 Hz focused → 10 Hz blurred (spec). The timer only
+    // Throttle meter poll: 30 Hz focused → 10 Hz blurred. The timer only
     // exists while recording, so this is a no-op when idle.
     if (m_meterTimer) m_meterTimer.Interval(MeterInterval());
     if (m_playbackTimer) m_playbackTimer.Interval(PlaybackInterval());
@@ -625,6 +645,8 @@ void MainWindow::OnViewModelPropertyChanged(
         UpdatePlaybackBar();
     } else if (name == L"IsPlaybackPlaying") {
         UpdatePlayPauseGlyph();
+    } else if (name == L"PlaybackLevelPercent") {
+        UpdatePlaybackLevel();
     }
 }
 
@@ -778,6 +800,7 @@ void MainWindow::UpdatePlaybackBar()
     PlaybackBar().Visibility(loaded ? winrt::Microsoft::UI::Xaml::Visibility::Visible
                                     : winrt::Microsoft::UI::Xaml::Visibility::Collapsed);
     UpdatePlayPauseGlyph();
+    UpdatePlaybackLevel();
 
     if (loaded) {
         // Poll only a take with a player behind it. One kept by
@@ -804,22 +827,40 @@ void MainWindow::UpdatePlayPauseGlyph()
     PlayPauseGlyph().Glyph(m_viewModel.IsPlaybackPlaying() ? kPauseGlyph : kPlayGlyph);
 }
 
+void MainWindow::UpdatePlaybackLevel()
+{
+    if (!m_viewModel) return;
+    const auto level = static_cast<float>(std::clamp(m_viewModel.PlaybackLevelPercent() / 100.0, 0.0, 1.0));
+    PlaybackLevelFill().Scale({level, 1.0f, 1.0f});
+}
+
 void MainWindow::UpdateSeekSlider()
 {
     if (!m_viewModel) return;
+    auto slider = SeekSlider();
     const double duration = m_viewModel.PlaybackDurationMs();
     const bool seekable = duration > 0.0;
 
     // A container that does not declare a duration still plays; there is just
     // nothing for the thumb to span.
-    SeekSlider().IsEnabled(seekable);
+    slider.IsEnabled(seekable);
 
     m_suppressSeek = true;
-    SeekSlider().Maximum(seekable ? duration : 100.0);
+    slider.Maximum(seekable ? duration : 100.0);
     if (m_seekHoldTicks > 0) {
         --m_seekHoldTicks;
     } else {
-        SeekSlider().Value(std::clamp(m_viewModel.PlaybackPositionMs(), 0.0, SeekSlider().Maximum()));
+        const double position = std::clamp(m_viewModel.PlaybackPositionMs(), 0.0, slider.Maximum());
+        // On anything longer than a few seconds the thumb moves well under a
+        // pixel per tick, and every write still re-lays out the slider and
+        // draws a frame. Move it once the change is worth half a pixel of
+        // track; a jump (seek, a new take, the end) is always bigger than that.
+        const double track = std::max(slider.ActualWidth(), 1.0);
+        const double minStep = slider.Maximum() / track * 0.5;
+        if (std::abs(position - slider.Value()) >= minStep || position <= 0.0 ||
+            position >= slider.Maximum()) {
+            slider.Value(position);
+        }
     }
     m_suppressSeek = false;
 }
@@ -913,36 +954,48 @@ void MainWindow::OnRecordingClick(winrt::Windows::Foundation::IInspectable const
     }
 }
 
-void MainWindow::OnPlayItem(winrt::Windows::Foundation::IInspectable const& sender,
+void MainWindow::OnRecordingMenuOpening(winrt::Windows::Foundation::IInspectable const& sender,
+                                        winrt::Windows::Foundation::IInspectable const& /*args*/)
+{
+    // The row menu is one shared flyout, so its items inherit no DataContext:
+    // the row it opened on is its Target.
+    m_menuEntry = nullptr;
+    if (auto flyout = sender.try_as<winrt::Microsoft::UI::Xaml::Controls::Primitives::FlyoutBase>()) {
+        m_menuEntry = EntryFrom(flyout.Target());
+    }
+}
+
+void MainWindow::OnPlayItem(winrt::Windows::Foundation::IInspectable const& /*sender*/,
                             winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
 {
     // From the menu, Play means play this one from the top, whatever is loaded.
-    if (auto entry = EntryFrom(sender)) m_viewModel.PlayRecording(entry);
+    if (auto entry = m_menuEntry) m_viewModel.PlayRecording(entry);
 }
 
-void MainWindow::OnOpenExternallyItem(winrt::Windows::Foundation::IInspectable const& sender,
+void MainWindow::OnOpenExternallyItem(winrt::Windows::Foundation::IInspectable const& /*sender*/,
                                       winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
 {
-    if (auto entry = EntryFrom(sender)) m_viewModel.OpenRecordingExternally(entry);
+    if (auto entry = m_menuEntry) m_viewModel.OpenRecordingExternally(entry);
 }
 
-void MainWindow::OnRevealItem(winrt::Windows::Foundation::IInspectable const& sender,
+void MainWindow::OnRevealItem(winrt::Windows::Foundation::IInspectable const& /*sender*/,
                               winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
 {
-    if (auto entry = EntryFrom(sender)) m_viewModel.RevealRecording(entry);
+    if (auto entry = m_menuEntry) m_viewModel.RevealRecording(entry);
 }
 
-void MainWindow::OnCopyPathItem(winrt::Windows::Foundation::IInspectable const& sender,
+void MainWindow::OnCopyPathItem(winrt::Windows::Foundation::IInspectable const& /*sender*/,
                                 winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
 {
-    if (auto entry = EntryFrom(sender)) m_viewModel.CopyRecordingPath(entry);
+    if (auto entry = m_menuEntry) m_viewModel.CopyRecordingPath(entry);
 }
 
-winrt::fire_and_forget MainWindow::OnDeleteItem(winrt::Windows::Foundation::IInspectable const& sender,
+winrt::fire_and_forget MainWindow::OnDeleteItem(winrt::Windows::Foundation::IInspectable const& /*sender*/,
                                                 winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
 {
     auto strong = get_strong();
-    auto entry = EntryFrom(sender);
+    // Taken before the dialog: the menu could open on another row meanwhile.
+    auto entry = strong->m_menuEntry;
     if (!entry) co_return;
 
     winrt::Microsoft::UI::Xaml::Controls::ContentDialog dialog;
