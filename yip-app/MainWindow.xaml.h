@@ -40,6 +40,9 @@ struct MainWindow : MainWindowT<MainWindow> {
     // Space on a focused row, so the keyboard gets the same behaviour free.
     void OnRecordingClick(winrt::Windows::Foundation::IInspectable const& sender,
                           winrt::Microsoft::UI::Xaml::Controls::ItemClickEventArgs const& args);
+    // Every row shares one context menu; this records which row it opened on.
+    void OnRecordingMenuOpening(winrt::Windows::Foundation::IInspectable const& sender,
+                                winrt::Windows::Foundation::IInspectable const& args);
     void OnPlayItem(winrt::Windows::Foundation::IInspectable const& sender,
                     winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     void OnOpenExternallyItem(winrt::Windows::Foundation::IInspectable const& sender,
@@ -124,12 +127,17 @@ private:
     winrt::Microsoft::UI::Composition::CompositionColorBrush m_waveHoldBrush{nullptr};
     int m_waveCount{0};
     int m_waveHead{0};
+    // Consecutive silent samples pushed; at m_waveCount the strip is blank.
+    int m_waveSilentRun{0};
     double m_waveWidth{0.0};
     double m_waveHeight{0.0};
 
     // Resolved from App.xaml, re-resolved when the system theme flips.
     winrt::Microsoft::UI::Xaml::Media::Brush m_lampIdleBrush{nullptr};
     winrt::Microsoft::UI::Xaml::Media::Brush m_lampLiveBrush{nullptr};
+
+    // The recording the shared row menu last opened on (OnRecordingMenuOpening).
+    winrt::yip::viewmodels::RecordingEntry m_menuEntry{nullptr};
 
     // Meter polling only runs while capture is live — see OnRecordingStateChanged.
     void StartMeterPolling();
@@ -139,6 +147,7 @@ private:
     // Show or hide the transport, and start or stop its timer with it.
     void UpdatePlaybackBar();
     void UpdatePlayPauseGlyph();
+    void UpdatePlaybackLevel();
     void UpdateSeekSlider();
     void OnRecordingStateChanged(bool recording);
     // Stop timers, drop subscriptions and detach from the view model. Runs on

@@ -225,7 +225,7 @@ private:
     // uses, so a level looks the same in both places.
     std::vector<winrt::Microsoft::UI::Composition::CompositionColorBrush> m_barPalette;
     // What the bars were last told, so a tick that changes nothing visible
-    // starts no animation and leaves the compositor idle.
+    // writes nothing and leaves the compositor idle.
     std::array<float, 4> m_barTargets{};
     winrt::Microsoft::UI::Composition::CompositionColorBrush m_barBrush{nullptr};
     winrt::Microsoft::UI::Composition::CompositionEasingFunction m_ease{nullptr};

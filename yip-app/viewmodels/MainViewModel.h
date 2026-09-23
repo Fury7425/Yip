@@ -250,6 +250,8 @@ private:
     winrt::hstring m_rmsLabel{L"-\u221E dB"};
     // When the dB labels last refreshed; Tick holds them to kLabelInterval.
     std::chrono::steady_clock::time_point m_labelStamp{};
+    // When the peak-hold last fell; its fall is timed, not counted in ticks.
+    std::chrono::steady_clock::time_point m_holdStamp{};
     winrt::hstring m_elapsedText{L"00:00.0"};
 
     winrt::hstring m_statusText{L"Ready"};
