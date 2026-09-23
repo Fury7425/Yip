@@ -198,10 +198,14 @@ impl Recorder {
         // Capture thread sets writer_stop on its way out. Don't second-guess.
         self.writer_stop.store(true, Ordering::Release);
         let written = match self.writer_thread.take() {
-            Some(h) => h
-                .join()
-                .unwrap_or_else(|_| Err(YipError::Io("writer thread panicked".into())))
-                .map(|_| ()),
+            Some(h) => {
+                // Cut the writer's park short: it may be sleeping out a whole
+                // batch, and the file is not finalised until it wakes.
+                h.thread().unpark();
+                h.join()
+                    .unwrap_or_else(|_| Err(YipError::Io("writer thread panicked".into())))
+                    .map(|_| ())
+            }
             None => Ok(()),
         };
         // SAFETY: handle live, single close. Drop skips it: both threads are
@@ -225,6 +229,7 @@ impl Drop for Recorder {
             }
             self.writer_stop.store(true, Ordering::Release);
             if let Some(h) = self.writer_thread.take() {
+                h.thread().unpark();
                 let _ = h.join();
             }
             // SAFETY: single close, handle valid.

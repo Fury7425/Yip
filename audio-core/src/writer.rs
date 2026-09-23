@@ -29,11 +29,18 @@ const FILE_BUFFER_BYTES: usize = 256 * 1024;
 /// ~85 ms of audio, against a ring that holds 5 s.
 const MIN_DRAIN_SAMPLES: usize = 8192;
 
-/// How long to park when there is nothing worth writing. A drain only happens
-/// once `MIN_DRAIN_SAMPLES` (~85 ms at 48 kHz stereo) has piled up, so waking
-/// every 2 ms, as this used to, was ~40 empty wake-ups per drain. At 15 ms the
-/// ring (5 s) still never gets anywhere near full.
-const PARK: Duration = Duration::from_millis(15);
+/// Longest park when there is nothing worth writing. The writer sleeps for
+/// roughly as long as the missing part of a batch takes to arrive, so each
+/// wake-up finds a drain waiting — a fixed 15 ms poll found one about every
+/// sixth time. The ceiling keeps a low-rate mono take (8192 samples is a second
+/// at 8 kHz) far from the ring's end. `Recorder::stop` unparks the thread, so
+/// a long park never delays finalising the file.
+const PARK_MAX: Duration = Duration::from_millis(100);
+
+/// Added to the estimated fill time: WASAPI delivers in ~10 ms packets, so a
+/// park that ends exactly on the estimate tends to wake one packet short. Also
+/// the floor, so a nearly full batch never spins.
+const PARK_SLACK: Duration = Duration::from_millis(10);
 
 /// Largest data chunk a single WAV file is allowed to reach. RIFF sizes are
 /// 32-bit and `hound` counts in a `u32` that wraps silently in release builds,
@@ -211,14 +218,20 @@ pub fn run_writer(
             return Err(e);
         }
     };
-    let result = drain(consumer, sink, &stop);
+    let samples_per_sec = u64::from(cfg.sample_rate) * u64::from(cfg.channels.max(1));
+    let result = drain(consumer, sink, &stop, samples_per_sec);
     if result.is_err() && !stop.load(Ordering::Acquire) {
         on_fault();
     }
     result
 }
 
-fn drain(mut consumer: Consumer<f32>, mut sink: Sink, stop: &AtomicBool) -> Result<u64, YipError> {
+fn drain(
+    mut consumer: Consumer<f32>,
+    mut sink: Sink,
+    stop: &AtomicBool,
+    samples_per_sec: u64,
+) -> Result<u64, YipError> {
     let mut total: u64 = 0;
 
     loop {
@@ -228,17 +241,13 @@ fn drain(mut consumer: Consumer<f32>, mut sink: Sink, stop: &AtomicBool) -> Resu
         let stopping = stop.load(Ordering::Acquire);
         let n = consumer.slots();
 
-        if n == 0 {
-            if stopping {
-                break;
-            }
-            std::thread::sleep(PARK);
-            continue;
+        if n == 0 && stopping {
+            break;
         }
         if n < MIN_DRAIN_SAMPLES && !stopping {
             // Let a few more packets pile up rather than paying the chunk
             // dance for each one. The ring has seconds of headroom.
-            std::thread::sleep(PARK);
+            std::thread::park_timeout(park_for(MIN_DRAIN_SAMPLES - n, samples_per_sec));
             continue;
         }
 
@@ -252,6 +261,16 @@ fn drain(mut consumer: Consumer<f32>, mut sink: Sink, stop: &AtomicBool) -> Resu
 
     sink.finish()?;
     Ok(total)
+}
+
+/// How long `missing` samples take to arrive at `samples_per_sec`, plus
+/// [`PARK_SLACK`], capped at [`PARK_MAX`].
+fn park_for(missing: usize, samples_per_sec: u64) -> Duration {
+    if samples_per_sec == 0 {
+        return PARK_MAX;
+    }
+    let micros = (missing as u64).saturating_mul(1_000_000) / samples_per_sec;
+    (Duration::from_micros(micros) + PARK_SLACK).min(PARK_MAX)
 }
 
 #[cfg(test)]
@@ -287,6 +306,17 @@ mod tests {
         assert_eq!(first.len(), 6, "first part holds three whole frames");
         let second = hound::WavReader::open(dir.path().join("take (part 2).wav")).unwrap();
         assert_eq!(second.len(), 4, "the rest carries on in part 2");
+    }
+
+    #[test]
+    fn park_tracks_the_fill_time_within_bounds() {
+        // 48 kHz stereo: 8192 samples is ~85 ms, plus the slack.
+        assert_eq!(park_for(8192, 96_000), Duration::from_micros(95_333));
+        // A nearly full batch still parks for the slack, never zero.
+        assert_eq!(park_for(1, 10_000_000), PARK_SLACK);
+        // A slow mono take is capped well inside the ring.
+        assert_eq!(park_for(8192, 8_000), PARK_MAX);
+        assert_eq!(park_for(8192, 0), PARK_MAX);
     }
 
     #[test]

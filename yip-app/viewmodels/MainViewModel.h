@@ -204,6 +204,9 @@ private:
         std::wstring subtitle;
         uint64_t sizeBytes{0};
         std::filesystem::file_time_type modified{};
+        // The header probe succeeded. Only a successful probe is reused by the
+        // next refresh; a failed one is retried.
+        bool probed{false};
     };
 
     void Raise(winrt::hstring const& name);

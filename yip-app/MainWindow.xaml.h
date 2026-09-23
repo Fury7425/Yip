@@ -91,7 +91,14 @@ private:
     winrt::event_token m_themeToken{};
     HWND m_hwnd{nullptr};
     bool m_focused{true};
+    // Minimized, nothing of the window is on screen: the meter stops and the
+    // playback poll drops to the rate that still notices a take ending.
+    bool m_minimized{false};
     bool m_tornDown{false};
+    // Held for the Changed subscription, so Teardown can remove it without
+    // asking a closing window for its AppWindow.
+    winrt::Microsoft::UI::Windowing::AppWindow m_appWindow{nullptr};
+    winrt::event_token m_appWindowToken{};
 
     // ----- backdrop -----
     // Driven through the controller rather than Window::SystemBackdrop so the
@@ -139,6 +146,11 @@ private:
     void Teardown();
     void OnActivated(winrt::Windows::Foundation::IInspectable const& sender,
                      winrt::Microsoft::UI::Xaml::WindowActivatedEventArgs const& args);
+    // Re-read the minimized state and start, stop or retime the polls to match.
+    void UpdateMinimized();
+    bool IsMinimized();
+    std::chrono::milliseconds MeterInterval() const noexcept;
+    std::chrono::milliseconds PlaybackInterval() const noexcept;
     void OnViewModelPropertyChanged(winrt::Windows::Foundation::IInspectable const& sender,
                                     winrt::Microsoft::UI::Xaml::Data::PropertyChangedEventArgs const& args);
     void OnActualThemeChanged(winrt::Microsoft::UI::Xaml::FrameworkElement const& sender,

@@ -73,6 +73,13 @@ constexpr winrt::Windows::UI::Color kMissingToken{0xFF, 0x80, 0x80, 0x80};
 // continuous, and it only runs while a take is loaded.
 constexpr int kPlaybackTickFocusedMs = 50;
 constexpr int kPlaybackTickBlurredMs = 200;
+// Minimized, the transport is not on screen. The poll keeps running only
+// because it is what notices the file ending and releases the player.
+constexpr int kPlaybackTickMinimizedMs = 1000;
+
+// Capture meter poll: 60 Hz focused, 10 Hz blurred. Stopped while minimized.
+constexpr int kMeterTickFocusedMs = 16;
+constexpr int kMeterTickBlurredMs = 100;
 
 // Ticks the scrubber is left alone for after a seek, so the thumb is not
 // dragged back by a position that has not caught up yet.
@@ -198,6 +205,12 @@ MainWindow::MainWindow(winrt::yip::viewmodels::MainViewModel const& viewModel)
         const double scale = DpiScale();
         appWindow.Resize({static_cast<int32_t>(std::lround(kDefaultWindowW * scale)),
                           static_cast<int32_t>(std::lround(kDefaultWindowH * scale))});
+        // Minimize and restore both raise Changed. OnActivated re-checks too,
+        // so a missed restore can never leave the meter stopped.
+        m_appWindow = appWindow;
+        m_appWindowToken = appWindow.Changed([weak = get_weak()](auto&&, auto&&) {
+            if (auto self = weak.get()) self->UpdateMinimized();
+        });
     }
 
     UpdateRecordButtonShape();
@@ -237,6 +250,11 @@ void MainWindow::Teardown()
 
     ::yip::RecordingStateBus::Unsubscribe(m_stateToken);
     m_stateToken = 0;
+    if (m_appWindow) {
+        m_appWindow.Changed(m_appWindowToken);
+        m_appWindowToken = {};
+        m_appWindow = nullptr;
+    }
     StopMeterPolling();
     StopPlaybackPolling();
     if (m_themeToken) {
@@ -535,18 +553,54 @@ void MainWindow::OnActivated(winrt::Windows::Foundation::IInspectable const& /*s
     // Caption metrics settle after the first activation, and change again on a
     // DPI move, so re-measure whichever way focus went.
     UpdateTitleBarInset();
+    UpdateMinimized();
 
     if (now_focused == m_focused) return;
     m_focused = now_focused;
     // Throttle meter poll: 60 Hz focused → 10 Hz blurred (spec). The timer only
     // exists while recording, so this is a no-op when idle.
-    if (m_meterTimer) {
-        m_meterTimer.Interval(m_focused ? std::chrono::milliseconds(16) : std::chrono::milliseconds(100));
+    if (m_meterTimer) m_meterTimer.Interval(MeterInterval());
+    if (m_playbackTimer) m_playbackTimer.Interval(PlaybackInterval());
+}
+
+bool MainWindow::IsMinimized()
+{
+    namespace muw = winrt::Microsoft::UI::Windowing;
+    if (m_appWindow) {
+        if (auto presenter = m_appWindow.Presenter().try_as<muw::OverlappedPresenter>()) {
+            return presenter.State() == muw::OverlappedPresenterState::Minimized;
+        }
     }
-    if (m_playbackTimer) {
-        m_playbackTimer.Interval(m_focused ? std::chrono::milliseconds(kPlaybackTickFocusedMs)
-                                           : std::chrono::milliseconds(kPlaybackTickBlurredMs));
+    return m_hwnd && ::IsIconic(m_hwnd);
+}
+
+void MainWindow::UpdateMinimized()
+{
+    if (m_tornDown) return;
+    const bool minimized = IsMinimized();
+    if (minimized == m_minimized) return;
+    m_minimized = minimized;
+
+    // Nothing reads the meter or the strip while minimized. The view model
+    // keeps no per-tick history, so the first tick after a restore lands on
+    // the live values and the strip carries on from where it stopped.
+    if (m_minimized) {
+        StopMeterPolling();
+    } else if (::yip::RecordingStateBus::IsRecording()) {
+        StartMeterPolling();
     }
+    if (m_playbackTimer) m_playbackTimer.Interval(PlaybackInterval());
+}
+
+std::chrono::milliseconds MainWindow::MeterInterval() const noexcept
+{
+    return std::chrono::milliseconds(m_focused ? kMeterTickFocusedMs : kMeterTickBlurredMs);
+}
+
+std::chrono::milliseconds MainWindow::PlaybackInterval() const noexcept
+{
+    if (m_minimized) return std::chrono::milliseconds(kPlaybackTickMinimizedMs);
+    return std::chrono::milliseconds(m_focused ? kPlaybackTickFocusedMs : kPlaybackTickBlurredMs);
 }
 
 // ============================================================ View model
@@ -662,10 +716,11 @@ void MainWindow::OnRecordingStateChanged(bool recording)
 
 void MainWindow::StartMeterPolling()
 {
-    if (m_meterTimer) return;
+    // A take started while minimized picks its meter up on restore.
+    if (m_meterTimer || m_minimized) return;
     auto queue = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
     m_meterTimer = queue.CreateTimer();
-    m_meterTimer.Interval(m_focused ? std::chrono::milliseconds(16) : std::chrono::milliseconds(100));
+    m_meterTimer.Interval(MeterInterval());
     m_meterTimer.IsRepeating(true);
     m_meterTimer.Tick([weak = get_weak()](auto&&, auto&&) {
         if (auto self = weak.get()) {
@@ -693,8 +748,7 @@ void MainWindow::StartPlaybackPolling()
     if (m_playbackTimer) return;
     auto queue = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
     m_playbackTimer = queue.CreateTimer();
-    m_playbackTimer.Interval(m_focused ? std::chrono::milliseconds(kPlaybackTickFocusedMs)
-                                       : std::chrono::milliseconds(kPlaybackTickBlurredMs));
+    m_playbackTimer.Interval(PlaybackInterval());
     m_playbackTimer.IsRepeating(true);
     m_playbackTimer.Tick([weak = get_weak()](auto&&, auto&&) {
         if (auto self = weak.get()) {

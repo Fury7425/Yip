@@ -23,6 +23,7 @@
 #include <cwctype>
 #include <iomanip>
 #include <sstream>
+#include <unordered_map>
 
 using namespace std::chrono_literals;
 
@@ -328,7 +329,18 @@ void MainViewModel::RefreshDevices()
 
 void MainViewModel::RefreshRecordings()
 {
+    // The last scan doubles as a probe cache. Every open of the window, every
+    // stop, delete and settings change rescans the folder, and for FLAC, MP3
+    // and M4A a probe is a trip through the shell's property handlers on the
+    // UI thread. A file whose size and write time have not moved has the same
+    // headers it had last time, so only new or changed files are read.
+    std::vector<Row> previous = std::move(m_rows);
     m_rows.clear();
+    std::unordered_map<std::wstring, const Row*> known;
+    known.reserve(previous.size());
+    for (const auto& r : previous) {
+        if (r.probed) known.emplace(r.path.native(), &r);
+    }
 
     const auto& folder = m_settings.output_folder;
     std::error_code ec;
@@ -349,12 +361,23 @@ void MainViewModel::RefreshRecordings()
             r.modified = fs::last_write_time(p, ec);
             r.modifiedAt = ec ? std::wstring{} : FormatModified(r.modified);
 
-            // Read the real headers. Deriving duration from file size and an
-            // assumed 48 kHz stereo float32 is wrong for every other format,
-            // and the format is user-selectable.
-            const auto info = ::yip::ProbeAudio(p);
-            r.duration = FormatDuration(info ? info->duration : std::chrono::milliseconds{0});
-            r.subtitle = FormatSubtitle(info, r.sizeBytes);
+            // A write time that could not be read proves nothing; probe again.
+            const auto hit = known.find(p.native());
+            const bool unchanged = !ec && hit != known.end() && hit->second->sizeBytes == r.sizeBytes &&
+                                   hit->second->modified == r.modified;
+            if (unchanged) {
+                r.duration = hit->second->duration;
+                r.subtitle = hit->second->subtitle;
+                r.probed = true;
+            } else {
+                // Read the real headers. Deriving duration from file size and
+                // an assumed 48 kHz stereo float32 is wrong for every other
+                // format, and the format is user-selectable.
+                const auto info = ::yip::ProbeAudio(p);
+                r.duration = FormatDuration(info ? info->duration : std::chrono::milliseconds{0});
+                r.subtitle = FormatSubtitle(info, r.sizeBytes);
+                r.probed = info.has_value();
+            }
             m_rows.push_back(std::move(r));
         }
     }
