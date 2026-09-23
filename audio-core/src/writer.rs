@@ -29,11 +29,15 @@ const FILE_BUFFER_BYTES: usize = 256 * 1024;
 /// ~85 ms of audio, against a ring that holds 5 s.
 const MIN_DRAIN_SAMPLES: usize = 8192;
 
-/// How long to park when there is nothing worth writing. A drain only happens
-/// once `MIN_DRAIN_SAMPLES` (~85 ms at 48 kHz stereo) has piled up, so waking
-/// every 2 ms, as this used to, was ~40 empty wake-ups per drain. At 15 ms the
-/// ring (5 s) still never gets anywhere near full.
-const PARK: Duration = Duration::from_millis(15);
+/// Bounds on how long the writer parks while a batch piles up. The park is
+/// sized to when `MIN_DRAIN_SAMPLES` will be there (~85 ms at 48 kHz stereo,
+/// ~170 ms mono), so a drain costs one or two wake-ups instead of the half
+/// dozen a fixed 15 ms park spent finding the ring not ready yet. The ceiling
+/// keeps a slow wake-up (timer granularity is ~15.6 ms) far inside the ring's
+/// seconds of headroom; the floor stops a high-rate, many-channel stream from
+/// spinning.
+const PARK_MIN: Duration = Duration::from_millis(2);
+const PARK_MAX: Duration = Duration::from_millis(50);
 
 /// Largest data chunk a single WAV file is allowed to reach. RIFF sizes are
 /// 32-bit and `hound` counts in a `u32` that wraps silently in release builds,
@@ -211,14 +215,28 @@ pub fn run_writer(
             return Err(e);
         }
     };
-    let result = drain(consumer, sink, &stop);
+    let samples_per_sec = u64::from(cfg.sample_rate) * u64::from(cfg.channels.max(1));
+    let result = drain(consumer, sink, &stop, samples_per_sec);
     if result.is_err() && !stop.load(Ordering::Acquire) {
         on_fault();
     }
     result
 }
 
-fn drain(mut consumer: Consumer<f32>, mut sink: Sink, stop: &AtomicBool) -> Result<u64, YipError> {
+/// How long until `MIN_DRAIN_SAMPLES` will have piled up, given `queued`
+/// already waiting, clamped to [`PARK_MIN`, `PARK_MAX`].
+fn park_for(queued: usize, samples_per_sec: u64) -> Duration {
+    let missing = MIN_DRAIN_SAMPLES.saturating_sub(queued) as u64;
+    let micros = missing.saturating_mul(1_000_000) / samples_per_sec.max(1);
+    Duration::from_micros(micros).clamp(PARK_MIN, PARK_MAX)
+}
+
+fn drain(
+    mut consumer: Consumer<f32>,
+    mut sink: Sink,
+    stop: &AtomicBool,
+    samples_per_sec: u64,
+) -> Result<u64, YipError> {
     let mut total: u64 = 0;
 
     loop {
@@ -232,13 +250,13 @@ fn drain(mut consumer: Consumer<f32>, mut sink: Sink, stop: &AtomicBool) -> Resu
             if stopping {
                 break;
             }
-            std::thread::sleep(PARK);
+            std::thread::sleep(park_for(0, samples_per_sec));
             continue;
         }
         if n < MIN_DRAIN_SAMPLES && !stopping {
             // Let a few more packets pile up rather than paying the chunk
             // dance for each one. The ring has seconds of headroom.
-            std::thread::sleep(PARK);
+            std::thread::sleep(park_for(n, samples_per_sec));
             continue;
         }
 
@@ -287,6 +305,18 @@ mod tests {
         assert_eq!(first.len(), 6, "first part holds three whole frames");
         let second = hound::WavReader::open(dir.path().join("take (part 2).wav")).unwrap();
         assert_eq!(second.len(), 4, "the rest carries on in part 2");
+    }
+
+    #[test]
+    fn park_waits_for_the_batch_within_bounds() {
+        // 48 kHz stereo: a whole batch is ~85 ms away, so the ceiling wins.
+        assert_eq!(park_for(0, 96_000), PARK_MAX);
+        // Most of a batch already queued: only the remainder is waited for.
+        let half = park_for(MIN_DRAIN_SAMPLES - 960, 96_000);
+        assert_eq!(half, Duration::from_millis(10));
+        // A batch already there, or all but due, never parks below the floor.
+        assert_eq!(park_for(MIN_DRAIN_SAMPLES, 96_000), PARK_MIN);
+        assert_eq!(park_for(MIN_DRAIN_SAMPLES - 1, 96_000), PARK_MIN);
     }
 
     #[test]

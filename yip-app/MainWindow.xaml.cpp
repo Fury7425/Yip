@@ -74,9 +74,22 @@ constexpr winrt::Windows::UI::Color kMissingToken{0xFF, 0x80, 0x80, 0x80};
 constexpr int kPlaybackTickFocusedMs = 50;
 constexpr int kPlaybackTickBlurredMs = 200;
 
+// Capture meter: 60 Hz focused, 10 Hz blurred. The waveform advances one bar
+// per tick, so these also set how fast it scrolls.
+constexpr int kMeterTickFocusedMs = 16;
+constexpr int kMeterTickBlurredMs = 100;
+
+// Both timers while the window is minimised. The meter tick does nothing then
+// but notice the restore; the playback tick still has to catch the file
+// running out, so the take is released without the window being brought back.
+constexpr int kHiddenTickMs = 500;
+
 // Ticks the scrubber is left alone for after a seek, so the thumb is not
 // dragged back by a position that has not caught up yet.
 constexpr int kSeekHoldTicks = 6;
+
+// Smallest scrubber move worth a layout pass, in DIPs.
+constexpr double kSeekMinMovePx = 0.5;
 
 // Transport glyphs. Play while held, pause while running: a transport button
 // shows what it will do, not what it is doing.
@@ -536,17 +549,43 @@ void MainWindow::OnActivated(winrt::Windows::Foundation::IInspectable const& /*s
     // DPI move, so re-measure whichever way focus went.
     UpdateTitleBarInset();
 
-    if (now_focused == m_focused) return;
+    // Minimising deactivates and restoring activates, so this is also where a
+    // restored window gets its full rate back without waiting for a slow tick.
+    const bool now_minimized = m_hwnd && ::IsIconic(m_hwnd);
+    if (now_focused == m_focused && now_minimized == m_minimized) return;
     m_focused = now_focused;
-    // Throttle meter poll: 60 Hz focused → 10 Hz blurred (spec). The timer only
-    // exists while recording, so this is a no-op when idle.
+    m_minimized = now_minimized;
+    ApplyPollRates();
+}
+
+void MainWindow::ApplyPollRates()
+{
+    // Throttle meter poll: 60 Hz focused → 10 Hz blurred (spec), and next to
+    // nothing minimised. The timers only exist while there is something to
+    // poll, so this is a no-op when idle.
     if (m_meterTimer) {
-        m_meterTimer.Interval(m_focused ? std::chrono::milliseconds(16) : std::chrono::milliseconds(100));
+        m_meterTimer.Interval(std::chrono::milliseconds(m_minimized ? kHiddenTickMs
+                                                        : m_focused ? kMeterTickFocusedMs
+                                                                    : kMeterTickBlurredMs));
     }
     if (m_playbackTimer) {
-        m_playbackTimer.Interval(m_focused ? std::chrono::milliseconds(kPlaybackTickFocusedMs)
-                                           : std::chrono::milliseconds(kPlaybackTickBlurredMs));
+        m_playbackTimer.Interval(std::chrono::milliseconds(m_minimized ? kHiddenTickMs
+                                                           : m_focused ? kPlaybackTickFocusedMs
+                                                                       : kPlaybackTickBlurredMs));
     }
+}
+
+bool MainWindow::SyncMinimized()
+{
+    // Polled from the ticks rather than trusted to an event: a minimise or
+    // restore that does not move focus (Win+D, a taskbar restore that does not
+    // activate) still gets noticed within one tick.
+    const bool now_minimized = m_hwnd && ::IsIconic(m_hwnd);
+    if (now_minimized != m_minimized) {
+        m_minimized = now_minimized;
+        ApplyPollRates();
+    }
+    return m_minimized;
 }
 
 // ============================================================ View model
@@ -665,16 +704,21 @@ void MainWindow::StartMeterPolling()
     if (m_meterTimer) return;
     auto queue = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
     m_meterTimer = queue.CreateTimer();
-    m_meterTimer.Interval(m_focused ? std::chrono::milliseconds(16) : std::chrono::milliseconds(100));
     m_meterTimer.IsRepeating(true);
     m_meterTimer.Tick([weak = get_weak()](auto&&, auto&&) {
         if (auto self = weak.get()) {
+            // Minimised, the strip and the readouts are drawn for nobody. The
+            // next visible tick brings the readouts current; the strip simply
+            // carries on from there.
+            if (self->SyncMinimized()) return;
             if (self->m_viewModel) {
                 self->m_viewModel.Tick();
                 self->PushWaveSample(self->m_viewModel.MeterPeak(), self->m_viewModel.MeterHold());
             }
         }
     });
+    m_minimized = m_hwnd && ::IsIconic(m_hwnd);
+    ApplyPollRates();
     m_meterTimer.Start();
 }
 
@@ -693,11 +737,12 @@ void MainWindow::StartPlaybackPolling()
     if (m_playbackTimer) return;
     auto queue = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
     m_playbackTimer = queue.CreateTimer();
-    m_playbackTimer.Interval(m_focused ? std::chrono::milliseconds(kPlaybackTickFocusedMs)
-                                       : std::chrono::milliseconds(kPlaybackTickBlurredMs));
     m_playbackTimer.IsRepeating(true);
     m_playbackTimer.Tick([weak = get_weak()](auto&&, auto&&) {
         if (auto self = weak.get()) {
+            // Minimised, this runs at kHiddenTickMs: still often enough to
+            // notice the end of the file, rarely enough to cost nothing.
+            self->SyncMinimized();
             if (self->m_viewModel) {
                 // The tick is what notices the take ending, so the bar can go
                 // away on its own the moment the file runs out.
@@ -706,6 +751,8 @@ void MainWindow::StartPlaybackPolling()
             }
         }
     });
+    m_minimized = m_hwnd && ::IsIconic(m_hwnd);
+    ApplyPollRates();
     m_playbackTimer.Start();
 }
 
@@ -761,11 +808,19 @@ void MainWindow::UpdateSeekSlider()
     SeekSlider().IsEnabled(seekable);
 
     m_suppressSeek = true;
-    SeekSlider().Maximum(seekable ? duration : 100.0);
+    auto slider = SeekSlider();
+    const double maximum = seekable ? duration : 100.0;
+    if (slider.Maximum() != maximum) slider.Maximum(maximum);
     if (m_seekHoldTicks > 0) {
         --m_seekHoldTicks;
     } else {
-        SeekSlider().Value(std::clamp(m_viewModel.PlaybackPositionMs(), 0.0, SeekSlider().Maximum()));
+        // On anything longer than a few seconds the thumb travels well under
+        // a pixel per tick, and every Value write is a layout pass on the
+        // slider. Wait until the move is one the eye could see.
+        const double target = std::clamp(m_viewModel.PlaybackPositionMs(), 0.0, maximum);
+        const double width = slider.ActualWidth();
+        const double movedPx = width > 0.0 ? std::abs(target - slider.Value()) * width / maximum : 1.0;
+        if (movedPx >= kSeekMinMovePx || target == 0.0 || target == maximum) slider.Value(target);
     }
     m_suppressSeek = false;
 }

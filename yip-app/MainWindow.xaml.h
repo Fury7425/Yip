@@ -91,6 +91,9 @@ private:
     winrt::event_token m_themeToken{};
     HWND m_hwnd{nullptr};
     bool m_focused{true};
+    // Minimised to the taskbar. Nothing in the window can be seen, so the meter
+    // tick does no work and both timers drop to a slow check-in.
+    bool m_minimized{false};
     bool m_tornDown{false};
 
     // ----- backdrop -----
@@ -129,6 +132,11 @@ private:
     void StopMeterPolling();
     void StartPlaybackPolling();
     void StopPlaybackPolling();
+    // Timer intervals for the current focus and minimised state.
+    void ApplyPollRates();
+    // Re-reads the minimised state and re-rates the timers if it changed.
+    // Returns whether the window is minimised.
+    bool SyncMinimized();
     // Show or hide the transport, and start or stop its timer with it.
     void UpdatePlaybackBar();
     void UpdatePlayPauseGlyph();

@@ -23,6 +23,7 @@
 #include <cwctype>
 #include <iomanip>
 #include <sstream>
+#include <unordered_map>
 
 using namespace std::chrono_literals;
 
@@ -48,8 +49,9 @@ constexpr float kSilenceFloor = 1e-7f;
 // transient, short enough not to lie about the current level.
 constexpr float kHoldFallPerTick = 0.02f;
 
-// Don't re-raise a binding for movement the eye cannot resolve.
-constexpr float kMeterEpsilon = 1.0f / 512.0f;
+// Don't re-raise the playback level for movement the eye cannot resolve: the
+// bar is 44 DIP long, so this is about half a DIP of travel.
+constexpr float kPlaybackLevelEpsilon = 1.0f / 88.0f;
 
 // How often the PEAK / RMS dB readouts refresh while recording.
 constexpr std::chrono::milliseconds kLabelInterval{100};
@@ -328,6 +330,17 @@ void MainViewModel::RefreshDevices()
 
 void MainViewModel::RefreshRecordings()
 {
+    // Reading headers is the expensive part of a refresh — FLAC, MP3 and M4A
+    // go through the shell property store — and a refresh runs after every
+    // take, on every window open and on every settings save. A file whose size
+    // and timestamp have not moved since the last pass has not changed, so its
+    // probed text is carried over and only new or rewritten takes are read.
+    std::unordered_map<std::wstring, Row> previous;
+    previous.reserve(m_rows.size());
+    for (auto& r : m_rows) {
+        auto key = r.path.native();
+        previous.emplace(std::move(key), std::move(r));
+    }
     m_rows.clear();
 
     const auto& folder = m_settings.output_folder;
@@ -348,6 +361,16 @@ void MainViewModel::RefreshRecordings()
 
             r.modified = fs::last_write_time(p, ec);
             r.modifiedAt = ec ? std::wstring{} : FormatModified(r.modified);
+
+            // `ec` is from last_write_time: an unreadable stamp proves nothing.
+            const auto hit = previous.find(p.native());
+            if (!ec && hit != previous.end() && hit->second.sizeBytes == r.sizeBytes &&
+                hit->second.modified == r.modified) {
+                r.duration = std::move(hit->second.duration);
+                r.subtitle = std::move(hit->second.subtitle);
+                m_rows.push_back(std::move(r));
+                continue;
+            }
 
             // Read the real headers. Deriving duration from file size and an
             // assumed 48 kHz stereo float32 is wrong for every other format,
@@ -438,14 +461,12 @@ void MainViewModel::Tick()
         hold = (peak >= m_meterHold) ? peak : std::max(peak, m_meterHold - kHoldFallPerTick);
     }
 
-    if (std::abs(peak - m_meterPeak) >= kMeterEpsilon) {
-        m_meterPeak = peak;
-        Raise(L"MeterPeak");
-    }
-    if (std::abs(rms - m_meterRms) >= kMeterEpsilon) {
-        m_meterRms = rms;
-        Raise(L"MeterRms");
-    }
+    // Pulled, not raised. The waveform reads these straight after Tick, and
+    // nothing binds to them; raising all three at 60 Hz was 180 change events
+    // a second, each allocated and run past every listener to be ignored.
+    m_meterPeak = peak;
+    m_meterRms = rms;
+    m_meterHold = hold;
 
     // The dB readouts carry a tenth of a decibel, so at 60 Hz they re-laid out
     // text almost every tick, faster than anyone can read a number. They move
@@ -462,10 +483,6 @@ void MainViewModel::Tick()
             m_rmsLabel = label;
             Raise(L"RmsLabel");
         }
-    }
-    if (std::abs(hold - m_meterHold) >= kMeterEpsilon) {
-        m_meterHold = hold;
-        Raise(L"MeterHold");
     }
 
     if (snapshot.clip_count != m_clipCount) {
@@ -934,7 +951,10 @@ void MainViewModel::PlaybackTick()
     }
 
     const float level = MeterNorm(snapshot.level);
-    if (std::abs(level - m_playbackLevel) >= kMeterEpsilon) {
+    // Always land on zero, though: a bar stuck a hair above empty reads as
+    // a signal that is not there.
+    const bool zeroChanged = (level == 0.0f) != (m_playbackLevel == 0.0f);
+    if (zeroChanged || std::abs(level - m_playbackLevel) >= kPlaybackLevelEpsilon) {
         m_playbackLevel = level;
         Raise(L"PlaybackLevelPercent");
     }

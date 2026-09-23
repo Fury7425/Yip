@@ -43,6 +43,8 @@ namespace yip.viewmodels
 
         // Meter readings, already mapped onto the logarithmic meter scale
         // (0 = YipMeterFloorDb, 1 = full scale) so the view just draws them.
+        // Read after Tick(), not bound: they change every tick and raise no
+        // PropertyChanged.
         Single MeterRms{ get; };
         Single MeterPeak{ get; };
         Single MeterHold{ get; };

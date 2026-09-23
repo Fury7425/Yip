@@ -64,9 +64,17 @@ const FLUSH_TIMEOUT_MS: u64 = 250;
 /// level and a capture level of the same signal read the same.
 const RELEASE_SECONDS: f32 = 0.35;
 
-/// Poll interval for both of the waits above, and for the decoder's wait on
-/// ring space. Never used while idle: no player, no thread, no tick.
+/// Poll interval for both of the waits above. Never used while idle: no
+/// player, no thread, no tick.
 const POLL_MS: u64 = 2;
+
+/// Longest the decoder sleeps waiting for ring space, or parked at the end of
+/// the file. The ring is nearly always full while a take plays or is held, so
+/// a fixed 2 ms wait meant ~500 wake-ups a second for the whole of playback,
+/// pause included. The wait is sized to a quarter of what is still buffered
+/// (see [`ring_wait`]), so it only reaches this with seconds in hand, and it
+/// bounds how late a seek or stop is noticed.
+const RING_WAIT_MAX_MS: u64 = 25;
 
 /// Lock-free playback state. Written by the two playback threads, read by the
 /// UI through `play_state`, so a poll costs no lock and cannot stall either
@@ -485,7 +493,7 @@ fn decoder_loop(
                 // ones, so this would otherwise be waited on forever.
                 pending = 0;
             } else if pending > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(POLL_MS));
+                std::thread::sleep(ring_wait(producer, rate, channels));
             }
             continue;
         }
@@ -502,11 +510,25 @@ fn decoder_loop(
             // ring and then stops; this thread parks until it is asked to seek
             // or to quit, so scrubbing back after the end still works.
             PLAYBACK.eof.store(true, Ordering::Release);
-            std::thread::sleep(std::time::Duration::from_millis(POLL_MS * 8));
+            std::thread::sleep(std::time::Duration::from_millis(RING_WAIT_MAX_MS));
         }
     }
 
     Ok(())
+}
+
+/// How long to wait for the render thread to free ring space: a quarter of
+/// the audio still buffered, within [`POLL_MS`, `RING_WAIT_MAX_MS`]. The
+/// quarter leaves the ring well short of empty whatever the rate, channel
+/// count or timer slack.
+fn ring_wait(producer: &rtrb::Producer<f32>, rate: u32, channels: u16) -> std::time::Duration {
+    let buffered = producer
+        .buffer()
+        .capacity()
+        .saturating_sub(producer.slots()) as u64;
+    let per_sec = u64::from(rate.max(1)) * u64::from(channels.max(1));
+    let buffered_ms = buffered.saturating_mul(1000) / per_sec;
+    std::time::Duration::from_millis((buffered_ms / 4).clamp(POLL_MS, RING_WAIT_MAX_MS))
 }
 
 /// Copy as many whole frames as the ring will take. Returns samples written.
@@ -930,6 +952,27 @@ fn open_endpoint(source: SourceFormat) -> Result<Endpoint, YipError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ring_wait_scales_with_what_is_buffered() {
+        let (mut p, _c) = split(PLAY_RING_CAPACITY_SAMPLES);
+        // Empty ring: nothing in hand, so poll at the floor.
+        assert_eq!(
+            ring_wait(&p, 48_000, 2),
+            std::time::Duration::from_millis(POLL_MS)
+        );
+        // A full ring at 48 kHz stereo holds 2 s: the ceiling applies.
+        while p.push(0.0).is_ok() {}
+        assert_eq!(
+            ring_wait(&p, 48_000, 2),
+            std::time::Duration::from_millis(RING_WAIT_MAX_MS)
+        );
+        // The same ring at 384 kHz 8-channel holds 62 ms: a quarter of it.
+        assert_eq!(
+            ring_wait(&p, 384_000, 8),
+            std::time::Duration::from_millis(15)
+        );
+    }
 
     #[test]
     fn envelope_attacks_instantly() {
