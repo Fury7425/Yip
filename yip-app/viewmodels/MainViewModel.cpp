@@ -620,7 +620,21 @@ winrt::hstring MainViewModel::HotkeyLabel() const
 
 void MainViewModel::SyncRecordingState(bool recording)
 {
-    if (m_isRecording == recording) return;
+    // State events are queued; by the time this one runs the session may have
+    // moved on (stopped and a new take started). Only the live state counts.
+    if (recording != (rec_is_recording() != 0)) return;
+
+    // A take can end by itself — the input device unplugged, the disk full.
+    // audio-core then reports "not recording" but still holds the session, and
+    // rec_stop is what finalises the file and says why. After an ordinary stop
+    // there is no session left and this is a no-op.
+    winrt::hstring fault;
+    if (!recording && rec_stop() != REC_STATUS_OK) fault = LastCoreError(L"Recording stopped unexpectedly");
+
+    if (m_isRecording == recording) {
+        if (!fault.empty()) SetError(fault);
+        return;
+    }
     m_isRecording = recording;
     if (!recording) {
         m_activeRecordingPath.reset();
@@ -628,7 +642,11 @@ void MainViewModel::SyncRecordingState(bool recording)
         // A take stopped from the pill or the tray lands here, not in
         // ToggleRecording; without this the status line went on reading
         // "Recording to …" over an idle window.
-        SetStatus(L"Saved");
+        if (fault.empty()) {
+            SetStatus(L"Saved");
+        } else {
+            SetError(fault);
+        }
     }
     Raise(L"IsRecording");
     Raise(L"RecordButtonText");

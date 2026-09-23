@@ -7,7 +7,6 @@
 
 #include "AudioCoreInterop.h"
 #include "SettingsDialog.xaml.h"
-#include "HotkeyManager.h"
 #include "Settings.h"
 #include "ThemeColors.h"
 #include "resource.h"
@@ -156,11 +155,22 @@ void ApplyWindowIcon(HWND hwnd)
 } // namespace
 
 namespace winrt::yip::implementation {
-MainWindow::MainWindow()
+MainWindow::MainWindow() : MainWindow(nullptr) {}
+
+MainWindow::MainWindow(winrt::yip::viewmodels::MainViewModel const& viewModel)
 {
     InitializeComponent();
 
-    m_viewModel = winrt::make<winrt::yip::viewmodels::implementation::MainViewModel>();
+    // The view model normally belongs to App and outlives this window: closing
+    // to the tray destroys the window, and the take, the transport and the
+    // settings carry on without it. Standalone, the window makes its own.
+    m_viewModel =
+        viewModel ? viewModel : winrt::make<winrt::yip::viewmodels::implementation::MainViewModel>();
+    // A fresh window has an empty search box, so the list must not come back
+    // filtered by whatever was typed into the last one. Brushes may be from a
+    // theme that changed while no window was open.
+    m_viewModel.FilterText(L"");
+    m_viewModel.InvalidateThemeBrushes();
     m_viewModel.RefreshDevices();
     m_viewModel.RefreshRecordings();
 
@@ -178,7 +188,7 @@ MainWindow::MainWindow()
     SetupTitleBar();
     SetupBackdrop();
     Closed([weak = get_weak()](auto&&, auto&&) {
-        if (auto self = weak.get()) self->TeardownBackdrop();
+        if (auto self = weak.get()) self->Teardown();
     });
     WireRecordButtonPress();
     if (auto appWindow = AppWindow()) {
@@ -192,17 +202,11 @@ MainWindow::MainWindow()
 
     UpdateRecordButtonShape();
     UpdateEmptyState();
+    UpdatePlaybackBar();
 
-    // Live device updates via IMMNotificationClient. Callback fires on a
-    // WASAPI worker thread → marshal to UI dispatcher before touching VM.
+    // Device changes, the global hotkey and the view model's own capture-state
+    // sync live in App: they have to work while no window exists.
     auto dispatcher = winrt::Microsoft::UI::Dispatching::DispatcherQueue::GetForCurrentThread();
-    m_deviceWatcher = std::make_unique<::yip::interop::DeviceWatcher>([weak = get_weak(), dispatcher]() {
-        dispatcher.TryEnqueue([weak]() {
-            if (auto self = weak.get()) {
-                if (self->m_viewModel) self->m_viewModel.RefreshDevices();
-            }
-        });
-    });
 
     // Meter polling is driven by audio-core state, not by a free-running timer:
     // idle Yip must not tick at all. Subscribe first, then reconcile in case a
@@ -210,43 +214,52 @@ MainWindow::MainWindow()
     m_stateToken = ::yip::RecordingStateBus::Subscribe(dispatcher, [weak = get_weak()](bool recording) {
         if (auto self = weak.get()) self->OnRecordingStateChanged(recording);
     });
-    OnRecordingStateChanged(::yip::RecordingStateBus::IsRecording());
-
-    // Global start/stop hotkey. WM_HOTKEY is delivered to this window's UI
-    // thread, so the callback can touch the view model directly.
-    if (m_hwnd) {
-        m_hotkey = std::make_unique<::yip::HotkeyManager>(m_hwnd, [weak = get_weak()]() {
-            if (auto self = weak.get()) {
-                if (self->m_viewModel) self->m_viewModel.ToggleRecording();
-            }
-        });
-        ApplyHotkeyFromSettings();
+    if (::yip::RecordingStateBus::IsRecording()) {
+        // A take already running (started from the tray or the hotkey while no
+        // window existed): pick the strip up live.
+        ClearWave();
+        FadeWave(1.0f);
+        StartMeterPolling();
     }
 }
 
 MainWindow::~MainWindow()
 {
+    // Normally already done by Closed. Capture and playback are not this
+    // window's to stop: App::Quit ends both.
+    Teardown();
+}
+
+void MainWindow::Teardown()
+{
+    if (m_tornDown) return;
+    m_tornDown = true;
+
     ::yip::RecordingStateBus::Unsubscribe(m_stateToken);
     m_stateToken = 0;
-    if (m_viewModel && m_vmToken) {
-        m_viewModel.PropertyChanged(m_vmToken);
-        m_vmToken = {};
-    }
+    StopMeterPolling();
+    StopPlaybackPolling();
     if (m_themeToken) {
         Root().ActualThemeChanged(m_themeToken);
         m_themeToken = {};
     }
-    StopMeterPolling();
-    StopPlaybackPolling();
     TeardownBackdrop();
-    m_hotkey.reset();
-    m_deviceWatcher.reset();
-    if (rec_is_recording()) {
-        (void)rec_stop();
+
+    if (!m_viewModel) return;
+    if (m_vmToken) {
+        m_viewModel.PropertyChanged(m_vmToken);
+        m_vmToken = {};
     }
-    // The decoder holds the file open, so it has to let go before the process
-    // does — otherwise the take cannot be moved or deleted until Yip exits.
-    (void)play_stop();
+    // The view model outlives this window, so everything in the window that
+    // listens to it lets go now. Otherwise the view model keeps the dead
+    // window's element tree alive — the memory closing it was meant to free —
+    // and raises into it. Unbinding the lists makes the ComboBox write -1
+    // back through its two-way SelectedIndex; the selection is put back after.
+    const auto selectedDevice = m_viewModel.SelectedDeviceIndex();
+    Bindings->StopTracking();
+    DeviceCombo().ItemsSource(nullptr);
+    RecordingsList().ItemsSource(nullptr);
+    m_viewModel.SelectedDeviceIndex(selectedDevice);
 }
 
 winrt::yip::viewmodels::MainViewModel MainWindow::ViewModel()
@@ -640,19 +653,10 @@ void MainWindow::OnRecordingStateChanged(bool recording)
     if (m_viewModel) {
         // One last pull so the readouts land on the post-stop zero instead of
         // freezing at whatever the final tick read. The strip itself is left
-        // standing: it is the shape of the take that just finished.
+        // standing: it is the shape of the take that just finished. The view
+        // model's own state is synced by App, which also runs windowless.
         m_viewModel.Tick();
         if (m_waveHold) m_waveHold.Opacity(0.0f);
-        m_viewModel.SyncRecordingState(false);
-    }
-}
-
-void MainWindow::ApplyHotkeyFromSettings()
-{
-    if (!m_hotkey || !m_viewModel) return;
-    const bool ok = m_hotkey->Register(m_viewModel.HotkeyMods(), m_viewModel.HotkeyVk());
-    if (!ok) {
-        m_viewModel.ReportHotkeyConflict();
     }
 }
 
@@ -823,8 +827,8 @@ winrt::fire_and_forget MainWindow::OnOpenSettings(winrt::Windows::Foundation::II
                                           dialog.Format(), dialog.BitDepth(), dialog.BitrateKbps(),
                                           dialog.HotkeyMods(), dialog.HotkeyVk(), dialog.PillDot(),
                                           dialog.PillBottom());
-        // Re-grab the combo: the old registration is dropped inside Register().
-        strong->ApplyHotkeyFromSettings();
+        // The hotkey follows on its own: App re-registers when the view model
+        // raises HotkeyVk.
         strong->UpdateEmptyState();
     }
     co_return;

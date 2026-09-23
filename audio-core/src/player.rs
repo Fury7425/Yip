@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Sender, channel};
 use std::thread::JoinHandle;
 
-use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
     AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, IAudioClient,
@@ -36,10 +36,10 @@ use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_MULTITHREADED, CoInitializeEx, CoTaskMemFree,
 };
 use windows::Win32::System::Threading::{
-    AvSetMmThreadCharacteristicsW, CreateEventW, INFINITE, WaitForMultipleObjects,
+    AvSetMmThreadCharacteristicsW, CreateEventW, WaitForMultipleObjects,
 };
 
-use crate::capture::{ComGuard, MmcssGuard, SendHandle, float_wfx, parse_format};
+use crate::capture::{ComGuard, DEVICE_PROBE_MS, MmcssGuard, SendHandle, float_wfx, parse_format};
 use crate::decode::Decoder;
 use crate::devices::default_render_device;
 use crate::error::YipError;
@@ -646,12 +646,15 @@ fn render_loop(
 
     let result = loop {
         // SAFETY: handles array is in scope for the duration of the call.
-        let wait = unsafe { WaitForMultipleObjects(&handles, false, INFINITE) };
+        // Bounded, like capture: an endpoint that goes away can stop signalling,
+        // and an INFINITE wait then held the file and the thread forever. On
+        // a timeout the padding query below is what reports the lost device.
+        let wait = unsafe { WaitForMultipleObjects(&handles, false, DEVICE_PROBE_MS) };
         let idx = wait.0.wrapping_sub(WAIT_OBJECT_0.0);
         if idx == 1 || stop.load(Ordering::Acquire) {
             break Ok(());
         }
-        if idx != 0 {
+        if idx != 0 && wait != WAIT_TIMEOUT {
             break Err(YipError::Wasapi(format!("Wait failed 0x{:08X}", wait.0)));
         }
 
