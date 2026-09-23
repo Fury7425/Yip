@@ -64,9 +64,21 @@ const FLUSH_TIMEOUT_MS: u64 = 250;
 /// level and a capture level of the same signal read the same.
 const RELEASE_SECONDS: f32 = 0.35;
 
-/// Poll interval for both of the waits above, and for the decoder's wait on
-/// ring space. Never used while idle: no player, no thread, no tick.
+/// Poll interval for both of the waits above. Both are short-lived — a start
+/// and a seek — and never run while idle: no player, no thread, no tick.
 const POLL_MS: u64 = 2;
+
+/// How long the decoder parks when the ring is full. The ring holds ~2 s and
+/// the render thread takes ~10 ms from it per engine period, so a full ring
+/// is the steady state for the whole of playback, pauses included. Polling it
+/// every [`POLL_MS`] was ~500 wake-ups a second to find no room; at one render
+/// buffer's length the ring still never drains, and a seek waits at most this
+/// long to be noticed.
+const RING_FULL_WAIT_MS: u64 = 20;
+
+/// How long the decoder parks once the file has run out. It only waits for a
+/// seek back or for `stop`; the render thread plays out the tail on its own.
+const EOF_WAIT_MS: u64 = 50;
 
 /// Lock-free playback state. Written by the two playback threads, read by the
 /// UI through `play_state`, so a poll costs no lock and cannot stall either
@@ -485,7 +497,7 @@ fn decoder_loop(
                 // ones, so this would otherwise be waited on forever.
                 pending = 0;
             } else if pending > 0 {
-                std::thread::sleep(std::time::Duration::from_millis(POLL_MS));
+                std::thread::sleep(std::time::Duration::from_millis(RING_FULL_WAIT_MS));
             }
             continue;
         }
@@ -502,7 +514,7 @@ fn decoder_loop(
             // ring and then stops; this thread parks until it is asked to seek
             // or to quit, so scrubbing back after the end still works.
             PLAYBACK.eof.store(true, Ordering::Release);
-            std::thread::sleep(std::time::Duration::from_millis(POLL_MS * 8));
+            std::thread::sleep(std::time::Duration::from_millis(EOF_WAIT_MS));
         }
     }
 
