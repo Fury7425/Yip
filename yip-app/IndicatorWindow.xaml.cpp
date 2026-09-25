@@ -640,15 +640,66 @@ wge::IGraphicsEffect Composite(wge::IGraphicsEffectSource bottom, wge::IGraphics
 }
 
 /// The pill: the shapes in "Shapes", cut to goo, filled with the "Tint" brush
-/// and rimmed with the "Rim" brush. `Param` is the compositor's
+/// and, with `rim`, rimmed with the "Rim" brush. `Param` is the compositor's
 /// CompositionEffectSourceParameter.
 template <typename Param>
-wge::IGraphicsEffect GooGraph(float sigma)
+wge::IGraphicsEffect GooGraph(float sigma, bool rim)
 {
     const auto cut = [sigma](float offset) { return Threshold(Blur(Param{L"Shapes"}, sigma), offset); };
     auto fill = AlphaMask(Param{L"Tint"}, cut(kGooFillOffset));
-    auto rim = AlphaMask(Param{L"Rim"}, Composite(cut(kGooRimOffset), cut(kGooFillOffset), kCompositeDestinationOut));
-    return Composite(fill, rim, kCompositeSourceOver);
+    if (!rim) return fill;
+    auto ring =
+        AlphaMask(Param{L"Rim"}, Composite(cut(kGooRimOffset), cut(kGooFillOffset), kCompositeDestinationOut));
+    return Composite(fill, ring, kCompositeSourceOver);
+}
+
+// M4: temporary. Under a debugger only, asks the compositor which of the goo's
+// effects and property values it accepts, one at a time, and says so on the
+// debug output. Remove once the goo builds on every compositor it meets.
+void ProbeGooEffects(mucomp::Compositor const& c)
+{
+    if (!::IsDebuggerPresent()) return;
+    using P = mucomp::CompositionEffectSourceParameter;
+    std::array<float, 20> m{};
+    m[15] = kGooGain;
+    m[19] = kGooFillOffset;
+    const auto probe = [&c](wchar_t const* name, wge::IGraphicsEffect const& effect) {
+        std::wstring line = L"Yip goo probe: ";
+        line += name;
+        try {
+            (void)c.CreateEffectFactory(effect);
+            line += L" ok\n";
+        } catch (winrt::hresult_error const& e) {
+            wchar_t hr[24];
+            swprintf_s(hr, L" FAIL 0x%08X\n", static_cast<uint32_t>(e.code()));
+            line += hr;
+        }
+        ::OutputDebugStringW(line.c_str());
+    };
+    probe(L"alphamask", AlphaMask(P{L"A"}, P{L"B"}));
+    probe(L"blur", Blur(P{L"S"}, 4.0f));
+    probe(L"blur-hard", Effect(kGaussianBlurEffectId, {P{L"S"}},
+                               {PropertyValue::CreateSingle(4.0f), PropertyValue::CreateUInt32(1),
+                                PropertyValue::CreateUInt32(1)}));
+    probe(L"blur-speed", Effect(kGaussianBlurEffectId, {P{L"S"}},
+                                {PropertyValue::CreateSingle(4.0f), PropertyValue::CreateUInt32(0),
+                                 PropertyValue::CreateUInt32(0)}));
+    probe(L"matrix", Threshold(P{L"S"}, kGooFillOffset));
+    probe(L"matrix-noclamp", Effect(kColorMatrixEffectId, {P{L"S"}},
+                                    {PropertyValue::CreateSingleArray(m), PropertyValue::CreateUInt32(1),
+                                     PropertyValue::CreateBoolean(false)}));
+    probe(L"matrix-straight", Effect(kColorMatrixEffectId, {P{L"S"}},
+                                     {PropertyValue::CreateSingleArray(m), PropertyValue::CreateUInt32(2),
+                                      PropertyValue::CreateBoolean(true)}));
+    probe(L"matrix-alphamode0", Effect(kColorMatrixEffectId, {P{L"S"}},
+                                       {PropertyValue::CreateSingleArray(m), PropertyValue::CreateUInt32(0),
+                                        PropertyValue::CreateBoolean(true)}));
+    probe(L"matrix-only", Effect(kColorMatrixEffectId, {P{L"S"}}, {PropertyValue::CreateSingleArray(m)}));
+    probe(L"composite-over", Composite(P{L"A"}, P{L"B"}, kCompositeSourceOver));
+    probe(L"composite-destout", Composite(P{L"A"}, P{L"B"}, kCompositeDestinationOut));
+    probe(L"cut", Threshold(Blur(P{L"S"}, 4.0f), kGooFillOffset));
+    probe(L"fill", GooGraph<P>(4.0f, false));
+    probe(L"goo", GooGraph<P>(4.0f, true));
 }
 } // namespace
 
@@ -1054,26 +1105,31 @@ void IndicatorWindow::BuildBackdropBrush()
     if (!m_maskSurface) return;
     auto const& c = m_backdropCompositor;
     const auto scale = static_cast<float>(DpiScale());
-    try {
-        auto mask = c.CreateSurfaceBrush(m_maskSurface);
-        mask.Stretch(wuc::CompositionStretch::Fill);
+    auto mask = c.CreateSurfaceBrush(m_maskSurface);
+    mask.Stretch(wuc::CompositionStretch::Fill);
 
-        // The host backdrop arrives already blurred by the shell; the effect
-        // only cuts it to the shapes — as goo when the pill is goo, so the
-        // blur follows the pill's outline through every merge. This brush is
-        // painted in physical pixels, so the radius is too.
-        const wuc::CompositionEffectSourceParameter backdrop{L"Backdrop"};
-        const wuc::CompositionEffectSourceParameter maskParam{L"Mask"};
-        auto effect = m_gooActive ? AlphaMask(backdrop, Threshold(Blur(maskParam, kGooBlurDip * scale), kGooFillOffset))
-                                  : AlphaMask(backdrop, maskParam);
-        auto brush = c.CreateEffectFactory(effect).CreateBrush();
-        brush.SetSourceParameter(L"Backdrop", c.CreateHostBackdropBrush());
-        brush.SetSourceParameter(L"Mask", mask);
-        m_blurBrush = brush;
-        m_maskScale = scale;
-    } catch (winrt::hresult_error const&) {
-        // No effect support on this compositor: stay on the transparent backdrop.
-        m_blurBrush = nullptr;
+    // The host backdrop arrives already blurred by the shell; the effect only
+    // cuts it to the shapes — as goo when the pill is goo, so the blur follows
+    // the pill's outline through every merge. This brush is painted in
+    // physical pixels, so the radius is too. A compositor that refuses the goo
+    // still gets the plain cut.
+    const wuc::CompositionEffectSourceParameter backdrop{L"Backdrop"};
+    const wuc::CompositionEffectSourceParameter maskParam{L"Mask"};
+    m_blurBrush = nullptr;
+    for (const bool goo : {m_gooActive, false}) {
+        try {
+            auto effect = goo ? AlphaMask(backdrop, Threshold(Blur(maskParam, kGooBlurDip * scale), kGooFillOffset))
+                              : AlphaMask(backdrop, maskParam);
+            auto brush = c.CreateEffectFactory(effect).CreateBrush();
+            brush.SetSourceParameter(L"Backdrop", c.CreateHostBackdropBrush());
+            brush.SetSourceParameter(L"Mask", mask);
+            m_blurBrush = brush;
+            m_maskScale = scale;
+            break;
+        } catch (winrt::hresult_error const&) {
+            // No effect support on this compositor: stay on the transparent
+            // backdrop unless the plain cut works.
+        }
     }
     SyncShapeSurfaces();
 }
@@ -1198,30 +1254,46 @@ void IndicatorWindow::BuildCompositionLayer()
 
 void IndicatorWindow::BuildGooBrush()
 {
-    try {
-        // To the effect a shape is only alpha, so they are drawn opaque white
-        // into a surface at physical pixels: the DPI container scales the DIP
-        // shapes up, and the brush's Fill stretch maps the surface back onto
-        // the window.
-        auto white = m_compositor.CreateColorBrush(winrt::Microsoft::UI::Colors::White());
-        for (auto const& shape : m_blobShapes)
-            shape.FillBrush(white);
-        auto dpi = m_compositor.CreateContainerVisual();
-        dpi.Children().InsertAtTop(m_shapeVisual);
-        auto root = m_compositor.CreateContainerVisual();
-        root.Children().InsertAtTop(dpi);
-        auto surface = m_compositor.CreateVisualSurface();
-        surface.SourceVisual(root);
-        auto shapes = m_compositor.CreateSurfaceBrush(surface);
-        shapes.Stretch(mucomp::CompositionStretch::Fill);
+    ProbeGooEffects(m_compositor);
 
-        // The pill is drawn in DIPs, and so is this radius.
-        auto effect = GooGraph<mucomp::CompositionEffectSourceParameter>(kGooBlurDip);
-        auto brush = m_compositor.CreateEffectFactory(effect).CreateBrush();
-        brush.SetSourceParameter(L"Shapes", shapes);
-        brush.SetSourceParameter(L"Tint", m_tintBrush);
-        brush.SetSourceParameter(L"Rim", m_strokeBrush);
+    // To the effect a shape is only alpha, so they are drawn opaque white into
+    // a surface at physical pixels: the DPI container scales the DIP shapes
+    // up, and the brush's Fill stretch maps the surface back onto the window.
+    auto white = m_compositor.CreateColorBrush(winrt::Microsoft::UI::Colors::White());
+    for (auto const& shape : m_blobShapes)
+        shape.FillBrush(white);
+    auto dpi = m_compositor.CreateContainerVisual();
+    dpi.Children().InsertAtTop(m_shapeVisual);
+    auto root = m_compositor.CreateContainerVisual();
+    root.Children().InsertAtTop(dpi);
+    auto surface = m_compositor.CreateVisualSurface();
+    surface.SourceVisual(root);
+    auto shapes = m_compositor.CreateSurfaceBrush(surface);
+    shapes.Stretch(mucomp::CompositionStretch::Fill);
 
+    // The full goo, then the goo without its rim: a compositor that refuses
+    // the ring's composite still melts the shapes. The pill is drawn in DIPs,
+    // and so is the blur radius.
+    mucomp::CompositionEffectBrush brush{nullptr};
+    for (const bool rim : {true, false}) {
+        try {
+            auto effect = GooGraph<mucomp::CompositionEffectSourceParameter>(kGooBlurDip, rim);
+            brush = m_compositor.CreateEffectFactory(effect).CreateBrush();
+            brush.SetSourceParameter(L"Shapes", shapes);
+            brush.SetSourceParameter(L"Tint", m_tintBrush);
+            if (rim) brush.SetSourceParameter(L"Rim", m_strokeBrush);
+            break;
+        } catch (winrt::hresult_error const& e) {
+            brush = nullptr;
+            std::wstring line = rim ? L"Yip: goo effect refused" : L"Yip: rimless goo effect refused";
+            line += L": ";
+            line += std::wstring_view{e.message()};
+            line += L'\n';
+            ::OutputDebugStringW(line.c_str());
+        }
+    }
+
+    if (brush) {
         m_gooSprite = m_compositor.CreateSpriteVisual();
         m_gooSprite.Size({kWindowW, kWindowH});
         m_gooSprite.Brush(brush);
@@ -1230,18 +1302,19 @@ void IndicatorWindow::BuildGooBrush()
         m_shapeSurface = surface;
         muxh::ElementCompositionPreview::SetElementChildVisual(GooHost(), m_gooSprite);
         m_gooActive = true;
-    } catch (winrt::hresult_error const&) {
-        // No effect support: the shapes are drawn as they are, tint and stroke
-        // on each. They overlap rather than melt, which is all that is lost.
-        m_gooActive = false;
-        if (auto parent = m_shapeVisual.Parent()) parent.Children().Remove(m_shapeVisual);
-        for (auto const& shape : m_blobShapes) {
-            shape.FillBrush(m_tintBrush);
-            shape.StrokeBrush(m_strokeBrush);
-            shape.StrokeThickness(1.0f);
-        }
-        muxh::ElementCompositionPreview::SetElementChildVisual(GooHost(), m_shapeVisual);
+        return;
     }
+
+    // No effect support: the shapes are drawn as they are, tint and stroke on
+    // each. They overlap rather than melt, which is all that is lost.
+    m_gooActive = false;
+    dpi.Children().RemoveAll();
+    for (auto const& shape : m_blobShapes) {
+        shape.FillBrush(m_tintBrush);
+        shape.StrokeBrush(m_strokeBrush);
+        shape.StrokeThickness(1.0f);
+    }
+    muxh::ElementCompositionPreview::SetElementChildVisual(GooHost(), m_shapeVisual);
 }
 
 void IndicatorWindow::SyncShapeSurfaces()
