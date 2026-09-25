@@ -1192,7 +1192,7 @@ void IndicatorWindow::BuildBackdropBrush()
     const wuc::CompositionEffectSourceParameter backdrop{L"Backdrop"};
     const wuc::CompositionEffectSourceParameter maskParam{L"Mask"};
     m_blurBrush = nullptr;
-    for (const bool goo : {m_gooActive, false}) {
+    for (const bool goo : {m_gooActive && !GooFlag(L'm'), false}) {
         try {
             auto effect = goo ? AlphaMask(backdrop, Threshold(Blur(maskParam, kGooBlurDip * scale), kGooFillOffset))
                               : AlphaMask(backdrop, maskParam);
@@ -1351,7 +1351,8 @@ void IndicatorWindow::BuildGooBrush()
 
     // The one-blur goo, then the layered goo, then that without its rim: a
     // compositor that refuses the ring's composite still melts the shapes.
-    m_shapeBrush = shapes;
+    const bool layer = GooFlag(L'l');
+    m_shapeBrush = layer ? nullptr : shapes;
     mucomp::CompositionEffectBrush brush{nullptr};
     for (const auto kind : {GooKind::Fused, GooKind::Layered, GooKind::Rimless}) {
         if (GooFlag(L'p') || (kind == GooKind::Fused && GooFlag(L'o'))) continue;
@@ -1372,6 +1373,18 @@ void IndicatorWindow::BuildGooBrush()
         }
     }
 
+    if (brush && layer) {
+        // Experiment: the effect on a LayerVisual, its unset source the layer's content.
+        dpi.Children().RemoveAll();
+        auto lv = m_compositor.CreateLayerVisual();
+        lv.Size({kWindowW, kWindowH});
+        lv.Children().InsertAtTop(m_shapeVisual);
+        lv.Effect(brush);
+        muxh::ElementCompositionPreview::SetElementChildVisual(GooHost(), lv);
+        m_gooActive = true;
+        GooLog(L"layer visual");
+        return;
+    }
     if (brush) {
         m_gooSprite = m_compositor.CreateSpriteVisual();
         m_gooSprite.Size({kWindowW, kWindowH});
@@ -1405,7 +1418,7 @@ mucomp::CompositionEffectBrush IndicatorWindow::MakeGooBrush(GooKind kind)
     auto effect = fused ? FusedGooGraph<P>(kGooBlurDip, m_tintBrush.Color(), m_strokeBrush.Color())
                         : GooGraph<P>(kGooBlurDip, rim);
     auto brush = m_compositor.CreateEffectFactory(effect).CreateBrush();
-    brush.SetSourceParameter(L"Shapes", m_shapeBrush);
+    if (m_shapeBrush) brush.SetSourceParameter(L"Shapes", m_shapeBrush);
     if (!fused) brush.SetSourceParameter(L"Tint", m_tintBrush);
     if (rim) brush.SetSourceParameter(L"Rim", m_strokeBrush);
     if (fused) {
