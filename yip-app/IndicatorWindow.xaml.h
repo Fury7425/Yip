@@ -78,9 +78,9 @@ private:
     // the surface tint and rimmed with the quiet stroke. Falls back to the
     // shapes drawn plainly if this compositor cannot run the effect.
     void BuildGooBrush();
-    // How the goo is painted: one blur with the colours baked in, the
-    // original three-blur layering, or that without its rim.
-    enum class GooKind : uint8_t { Fused, Layered, Rimless };
+    // How the goo is painted: one blur with the colours baked in, or, where
+    // that graph is refused, without its rim.
+    enum class GooKind : uint8_t { Fused, Rimless };
     winrt::Microsoft::UI::Composition::CompositionEffectBrush MakeGooBrush(GooKind kind);
     // Rebuild the fused goo's brush if the tint or rim colour moved.
     void SyncGooColors();

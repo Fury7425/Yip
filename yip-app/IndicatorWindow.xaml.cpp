@@ -30,8 +30,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>
-#include <string>
 #include <numbers>
 
 using namespace std::chrono_literals;
@@ -517,20 +515,17 @@ void Follow(mucomp::Compositor const& c, mux::UIElement const& element,
 // second copy of the palette, so a miss is visible instead of plausible.
 constexpr winrt::Windows::UI::Color kMissingToken{0xFF, 0x80, 0x80, 0x80};
 
-// Direct2D effect CLSIDs, spelled out so four GUIDs do not pull in
+// Direct2D effect CLSIDs, spelled out so three GUIDs do not pull in
 // d2d1effects_2.h and a dxguid.lib link.
 constexpr GUID kAlphaMaskEffectId{0xc80ecff0, 0x3fd5, 0x4f05, {0x83, 0x28, 0xc5, 0xd1, 0x72, 0x4b, 0x4f, 0x0a}};
 constexpr GUID kGaussianBlurEffectId{0x1feb6d69, 0x2fe6, 0x4ac9, {0x8c, 0x58, 0x1d, 0x7f, 0x93, 0xe7, 0xa6, 0xa5}};
 constexpr GUID kColorMatrixEffectId{0x921f03d6, 0x641c, 0x47df, {0x85, 0x2d, 0xb4, 0xbb, 0x61, 0x53, 0xae, 0x11}};
-constexpr GUID kCompositeEffectId{0x48fc9f51, 0xf6ac, 0x48f1, {0x8b, 0x58, 0x3b, 0x28, 0xac, 0x46, 0xf7, 0x6d}};
 
 // The D2D enum values the effects below are set with.
 constexpr uint32_t kBlurOptimizationBalanced = 1; // D2D1_GAUSSIANBLUR_OPTIMIZATION_BALANCED
 constexpr uint32_t kBorderModeSoft = 0;           // D2D1_BORDER_MODE_SOFT
 constexpr uint32_t kColorMatrixPremultiplied = 1; // D2D1_COLORMATRIX_ALPHA_MODE_PREMULTIPLIED
 constexpr uint32_t kColorMatrixStraight = 2;      // D2D1_COLORMATRIX_ALPHA_MODE_STRAIGHT: the matrix as is
-constexpr uint32_t kCompositeSourceOver = 0;      // D2D1_COMPOSITE_MODE_SOURCE_OVER
-constexpr uint32_t kCompositeDestinationOut = 5;  // D2D1_COMPOSITE_MODE_DESTINATION_OUT
 
 /// A Direct2D effect as a composition effect graph node. Composition reads an
 /// effect through the D2D1 interop metadata, which Win2D would normally
@@ -619,37 +614,11 @@ wge::IGraphicsEffect AlphaMask(wge::IGraphicsEffectSource source, wge::IGraphics
     return Effect(kAlphaMaskEffectId, {std::move(source), std::move(mask)});
 }
 
-// M4: temporary GPU experiment switches, read from YIP_GOO. Removed once
-// measured.
-bool GooFlag(wchar_t flag)
-{
-    static const std::wstring value = [] {
-        wchar_t buf[32]{};
-        ::GetEnvironmentVariableW(L"YIP_GOO", buf, 32);
-        return std::wstring{buf};
-    }();
-    return value.find(flag) != std::wstring::npos;
-}
-
-void GooLog(std::wstring const& line)
-{
-    wchar_t path[MAX_PATH]{};
-    ::GetTempPathW(MAX_PATH, path);
-    std::wstring file{path};
-    file += L"yip-goo.log";
-    FILE* f = nullptr;
-    if (_wfopen_s(&f, file.c_str(), L"a") == 0 && f) {
-        fwprintf(f, L"%s\n", line.c_str());
-        fclose(f);
-    }
-}
-
 wge::IGraphicsEffect Blur(wge::IGraphicsEffectSource source, float sigma)
 {
     return Effect(kGaussianBlurEffectId, {std::move(source)},
-                  {PropertyValue::CreateSingle(sigma),
-                   PropertyValue::CreateUInt32(GooFlag(L'f') ? 0u : kBlurOptimizationBalanced),
-                   PropertyValue::CreateUInt32(GooFlag(L'h') ? 1u : kBorderModeSoft)});
+                  {PropertyValue::CreateSingle(sigma), PropertyValue::CreateUInt32(kBlurOptimizationBalanced),
+                   PropertyValue::CreateUInt32(kBorderModeSoft)});
 }
 
 /// A clamped colour matrix. D2D1_MATRIX_5X4_F, row-major: rows are the input
@@ -675,11 +644,12 @@ wge::IGraphicsEffect Threshold(wge::IGraphicsEffectSource source, float offset)
 }
 
 /// The pill in one blur: the shapes in "Shapes", cut to goo, filled with
-/// `tint` and rimmed with `rim`. The layered graph below blurs the shapes once
-/// per cut, three times a frame; here one matrix makes both cuts at once, the
-/// rim's into red and the fill's into green, and a second mixes those into
-/// the two colours. That needs the colours as numbers rather than brushes, so
-/// the brush is rebuilt when either changes.
+/// `tint` and rimmed with `rim`. One matrix makes both cuts at once, the rim's
+/// into red and the fill's into green, and a second mixes those into
+/// the two colours. (Layered — blur, threshold and composite per cut — a
+/// compositor on an Intel Arc refused the graph as "too complex" and the rim
+/// never showed.) The colours are numbers in the matrix rather than brushes,
+/// so the brush is rebuilt when either changes.
 template <typename Param>
 wge::IGraphicsEffect FusedGooGraph(float sigma, winrt::Windows::UI::Color tint, winrt::Windows::UI::Color rim)
 {
@@ -709,24 +679,13 @@ wge::IGraphicsEffect FusedGooGraph(float sigma, winrt::Windows::UI::Color tint, 
                        kColorMatrixStraight);
 }
 
-/// `top` composited onto `bottom` with a D2D composite mode.
-wge::IGraphicsEffect Composite(wge::IGraphicsEffectSource bottom, wge::IGraphicsEffectSource top, uint32_t mode)
-{
-    return Effect(kCompositeEffectId, {std::move(bottom), std::move(top)}, {PropertyValue::CreateUInt32(mode)});
-}
-
-/// The pill: the shapes in "Shapes", cut to goo, filled with the "Tint" brush
-/// and, with `rim`, rimmed with the "Rim" brush. `Param` is the compositor's
-/// CompositionEffectSourceParameter.
+/// The goo without its rim, for a compositor that refuses the one-blur
+/// graph's straight-alpha matrix: the shapes in "Shapes", cut to goo and
+/// filled with the "Tint" brush.
 template <typename Param>
-wge::IGraphicsEffect GooGraph(float sigma, bool rim)
+wge::IGraphicsEffect RimlessGooGraph(float sigma)
 {
-    const auto cut = [sigma](float offset) { return Threshold(Blur(Param{L"Shapes"}, sigma), offset); };
-    auto fill = AlphaMask(Param{L"Tint"}, cut(kGooFillOffset));
-    if (!rim) return fill;
-    auto ring =
-        AlphaMask(Param{L"Rim"}, Composite(cut(kGooRimOffset), cut(kGooFillOffset), kCompositeDestinationOut));
-    return Composite(fill, ring, kCompositeSourceOver);
+    return AlphaMask(Param{L"Tint"}, Threshold(Blur(Param{L"Shapes"}, sigma), kGooFillOffset));
 }
 
 // M4: temporary. Under a debugger only, asks the compositor which of the goo's
@@ -771,11 +730,9 @@ void ProbeGooEffects(mucomp::Compositor const& c)
                                        {PropertyValue::CreateSingleArray(m), PropertyValue::CreateUInt32(0),
                                         PropertyValue::CreateBoolean(true)}));
     probe(L"matrix-only", Effect(kColorMatrixEffectId, {P{L"S"}}, {PropertyValue::CreateSingleArray(m)}));
-    probe(L"composite-over", Composite(P{L"A"}, P{L"B"}, kCompositeSourceOver));
-    probe(L"composite-destout", Composite(P{L"A"}, P{L"B"}, kCompositeDestinationOut));
     probe(L"cut", Threshold(Blur(P{L"S"}, 4.0f), kGooFillOffset));
-    probe(L"fill", GooGraph<P>(4.0f, false));
-    probe(L"goo", GooGraph<P>(4.0f, true));
+    probe(L"rimless", RimlessGooGraph<P>(4.0f));
+    probe(L"goo", FusedGooGraph<P>(4.0f, kMissingToken, kMissingToken));
 }
 } // namespace
 
@@ -1192,7 +1149,7 @@ void IndicatorWindow::BuildBackdropBrush()
     const wuc::CompositionEffectSourceParameter backdrop{L"Backdrop"};
     const wuc::CompositionEffectSourceParameter maskParam{L"Mask"};
     m_blurBrush = nullptr;
-    for (const bool goo : {m_gooActive && !GooFlag(L'm'), false}) {
+    for (const bool goo : {m_gooActive, false}) {
         try {
             auto effect = goo ? AlphaMask(backdrop, Threshold(Blur(maskParam, kGooBlurDip * scale), kGooFillOffset))
                               : AlphaMask(backdrop, maskParam);
@@ -1349,42 +1306,25 @@ void IndicatorWindow::BuildGooBrush()
     auto shapes = m_compositor.CreateSurfaceBrush(surface);
     shapes.Stretch(mucomp::CompositionStretch::Fill);
 
-    // The one-blur goo, then the layered goo, then that without its rim: a
-    // compositor that refuses the ring's composite still melts the shapes.
-    const bool layer = GooFlag(L'l');
-    m_shapeBrush = layer ? nullptr : shapes;
+    // The one-blur goo, then the goo without its rim.
+    m_shapeBrush = shapes;
     mucomp::CompositionEffectBrush brush{nullptr};
-    for (const auto kind : {GooKind::Fused, GooKind::Layered, GooKind::Rimless}) {
-        if (GooFlag(L'p') || (kind == GooKind::Fused && GooFlag(L'o'))) continue;
+    for (const auto kind : {GooKind::Fused, GooKind::Rimless}) {
         try {
             brush = MakeGooBrush(kind);
             m_gooKind = kind;
-            GooLog(L"built kind " + std::to_wstring(static_cast<int>(kind)));
             break;
         } catch (winrt::hresult_error const& e) {
             brush = nullptr;
-            std::wstring line = L"Yip: goo effect refused (kind ";
-            line += std::to_wstring(static_cast<int>(kind));
-            line += L"): ";
+            std::wstring line =
+                kind == GooKind::Fused ? L"Yip: goo effect refused" : L"Yip: rimless goo effect refused";
+            line += L": ";
             line += std::wstring_view{e.message()};
-            GooLog(line);
             line += L'\n';
             ::OutputDebugStringW(line.c_str());
         }
     }
 
-    if (brush && layer) {
-        // Experiment: the effect on a LayerVisual, its unset source the layer's content.
-        dpi.Children().RemoveAll();
-        auto lv = m_compositor.CreateLayerVisual();
-        lv.Size({kWindowW, kWindowH});
-        lv.Children().InsertAtTop(m_shapeVisual);
-        lv.Effect(brush);
-        muxh::ElementCompositionPreview::SetElementChildVisual(GooHost(), lv);
-        m_gooActive = true;
-        GooLog(L"layer visual");
-        return;
-    }
     if (brush) {
         m_gooSprite = m_compositor.CreateSpriteVisual();
         m_gooSprite.Size({kWindowW, kWindowH});
@@ -1414,16 +1354,15 @@ mucomp::CompositionEffectBrush IndicatorWindow::MakeGooBrush(GooKind kind)
     // The pill is drawn in DIPs, and so is the blur radius.
     using P = mucomp::CompositionEffectSourceParameter;
     const bool fused = kind == GooKind::Fused;
-    const bool rim = kind == GooKind::Layered;
     auto effect = fused ? FusedGooGraph<P>(kGooBlurDip, m_tintBrush.Color(), m_strokeBrush.Color())
-                        : GooGraph<P>(kGooBlurDip, rim);
+                        : RimlessGooGraph<P>(kGooBlurDip);
     auto brush = m_compositor.CreateEffectFactory(effect).CreateBrush();
-    if (m_shapeBrush) brush.SetSourceParameter(L"Shapes", m_shapeBrush);
-    if (!fused) brush.SetSourceParameter(L"Tint", m_tintBrush);
-    if (rim) brush.SetSourceParameter(L"Rim", m_strokeBrush);
+    brush.SetSourceParameter(L"Shapes", m_shapeBrush);
     if (fused) {
         m_gooTint = m_tintBrush.Color();
         m_gooRim = m_strokeBrush.Color();
+    } else {
+        brush.SetSourceParameter(L"Tint", m_tintBrush);
     }
     return brush;
 }
@@ -1451,16 +1390,15 @@ void IndicatorWindow::SyncShapeSurfaces()
     // stretch then maps the surface onto the window exactly.
     const auto scale = static_cast<float>(DpiScale());
     const float2 px{static_cast<float>(client.right), static_cast<float>(client.bottom)};
-    const auto fit = [&](auto const& surface, auto const& root, auto const& dpi, float s) {
+    const auto fit = [&](auto const& surface, auto const& root, auto const& dpi) {
         if (!surface) return;
-        const float2 size{px.x * s / scale, px.y * s / scale};
-        surface.SourceSize(size);
-        root.Size(size);
+        surface.SourceSize(px);
+        root.Size(px);
         dpi.Size({kWindowW, kWindowH});
-        dpi.Scale({s, s, 1.0f});
+        dpi.Scale({scale, scale, 1.0f});
     };
-    fit(m_shapeSurface, m_shapeRoot, m_shapeDpi, GooFlag(L'x') ? 1.0f : scale);
-    fit(m_maskSurface, m_maskRoot, m_maskDpi, GooFlag(L'y') ? 1.0f : scale);
+    fit(m_shapeSurface, m_shapeRoot, m_shapeDpi);
+    fit(m_maskSurface, m_maskRoot, m_maskDpi);
     if (m_gooSprite) m_gooSprite.Size({px.x / scale, px.y / scale});
 
     // The mask's blur radius is in pixels: a new scale needs a new brush.
