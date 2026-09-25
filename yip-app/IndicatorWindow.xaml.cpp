@@ -69,11 +69,13 @@ constexpr int kSavingHoldMs = 350; // how long the Saving frame stays up
 // Motion. The pill's shapes are one goo: the entrance drips from the screen
 // edge, and expanding splits the Pause and Stop discs off the capsule. Every
 // shape motion ends in a small overshoot and spring-back, so the goo lands
-// like a liquid rather than stopping dead.
+// like a liquid rather than stopping dead. Every frame of a motion redraws the
+// goo and the blur behind it at the display's refresh rate, so a motion's
+// length is its GPU cost: measured, the effect itself is a small part of it.
 constexpr int kFadeMs = 180;           // opacity settle between two visible states (Recording <-> Saving)
-constexpr int kDripInMs = 720;         // hidden -> visible: the drop hangs, pinches off and lands
-constexpr int kDripOutMs = 520;        // visible -> hidden: the same drip backwards; nobody waits to watch it go
-constexpr int kSplitMs = 480;          // collapsed <-> expanded, bounce included
+constexpr int kDripInMs = 560;         // hidden -> visible: the drop hangs, pinches off and lands
+constexpr int kDripOutMs = 400;        // visible -> hidden: the same drip backwards; nobody waits to watch it go
+constexpr int kSplitMs = 380;          // collapsed <-> expanded, bounce included
 constexpr float kSplitStagger = 0.12f; // Stop trails Pause out and leads it back in, as a fraction of kSplitMs
 
 // The bounce. A shape reaching its spot runs kBounceTravel past it, stretched
