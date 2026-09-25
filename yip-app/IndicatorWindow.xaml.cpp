@@ -66,19 +66,22 @@ constexpr float kBarGap = 4.0f;
 constexpr float kBarMaxHeight = 18.0f;
 constexpr int kSavingHoldMs = 350; // how long the Saving frame stays up
 
-// Motion. Entrances and the morph use a strong ease-out so the pill moves on
-// the frame it is asked to; exits are shorter than entrances, because nobody
-// is waiting to watch something leave.
-constexpr int kFadeMs = 180;          // opacity settle between two visible states
-constexpr int kShowMs = 220;          // hidden -> visible
-constexpr int kHideMs = 220;          // visible -> hidden, on the soft curve
-constexpr int kMorphMs = 260;         // collapsed <-> expanded
-constexpr int kActionsInMs = 180;     // buttons arriving, after the capsule has started to open
-constexpr int kActionsInDelayMs = 70;
-constexpr int kActionsOutMs = 90;     // buttons leaving, before the capsule closes over them
-constexpr float kShowScale = 0.9f;    // never from zero: nothing appears out of nowhere
-constexpr float kHideScale = 0.96f;
-constexpr float kActionsSlidePx = 8.0f;
+// Motion. The pill's shapes are one goo: the entrance drips from the screen
+// edge, and expanding splits the Pause and Stop discs off the capsule. Every
+// shape motion ends in a small overshoot and spring-back, so the goo lands
+// like a liquid rather than stopping dead.
+constexpr int kFadeMs = 180;           // opacity settle between two visible states (Recording <-> Saving)
+constexpr int kDripInMs = 720;         // hidden -> visible: the drop hangs, pinches off and lands
+constexpr int kDripOutMs = 520;        // visible -> hidden: the same drip backwards; nobody waits to watch it go
+constexpr int kSplitMs = 480;          // collapsed <-> expanded, bounce included
+constexpr float kSplitStagger = 0.12f; // Stop trails Pause out and leads it back in, as a fraction of kSplitMs
+
+// The bounce. A shape reaching its spot runs kBounceTravel past it, stretched
+// along its path, springs back a little the other way, then settles. A shape
+// that only grows swells past its size instead.
+constexpr float kBounceTravel = 5.0f;
+constexpr float kBounceStretch = 5.0f; // added to the width while it overshoots
+constexpr float kBounceSquash = 3.0f;  // taken off the height while it overshoots
 
 // Bottom of the bar meter, in dBFS. Same curve as the main window: on a linear
 // amplitude scale these bars barely leave the floor.
@@ -135,41 +138,103 @@ std::wstring FormatPillElapsed(uint64_t ms) noexcept
     return buf;
 }
 
-struct StateGeom {
-    float w;
-    float h;
-    float opacity;
-};
-
-// Expanded is the largest state in either style, so it is also the window.
-constexpr float kExpandedW = 232.0f;
-constexpr float kExpandedH = 56.0f;
+// Geometry, in DIPs. Collapsed, the readout (dot, meter, clock: ~93 DIP) sits
+// centred in the capsule with room for its round ends. Expanded, the Pause and
+// Stop discs sit beside it, a gap apart; in the dot style the lamp's disc
+// grows to their size and the three sit in a row.
 constexpr float kPillW = 156.0f;
 constexpr float kPillH = 44.0f;
 // The dot style's disc: the 8 DIP lamp with enough glass round it to read on
 // any wallpaper and still take a click.
 constexpr float kDotSize = 24.0f;
+constexpr float kActionDot = 40.0f;
+// Resting gap between shapes. The goo fuses anything closer than about one
+// and a half blur radii, so this has to stay well clear of that or the discs
+// never part.
+constexpr float kSplitGap = 12.0f;
+/// Gap between the resting pill and the edge of the work area it hangs from.
+constexpr float kHomeMarginDip = 12.0f;
+// Room around the resting shapes for the bounce to overshoot into. The window
+// reaches the screen edge itself, so the entrance has an edge to drip from.
+constexpr float kBounceRoom = 12.0f;
+constexpr float kWindowW = kPillW + 2.0f * (kSplitGap + kActionDot) + 2.0f * kBounceRoom;
+constexpr float kWindowH = kHomeMarginDip + kPillH + kBounceRoom;
 
-StateGeom GeometryFor(::yip::IndicatorState s, bool dot) noexcept
+// The goo: the shapes are blurred by kGooBlurDip, then cut where the blurred
+// alpha crosses a threshold (alpha' = kGooGain * alpha + offset, clamped).
+// Apart, each shape keeps its outline; within a couple of blur radii of each
+// other they melt together. The fill cuts at ~0.48, which leaves a straight
+// edge where it was. The rim cuts lower, so its outer edge lands about a
+// quarter of a blur radius (~1 DIP) outside the fill: that ring is the quiet
+// stroke the capsule's Border used to draw.
+constexpr float kGooBlurDip = 4.0f;
+constexpr float kGooGain = 24.0f;
+constexpr float kGooFillOffset = -11.0f;
+constexpr float kGooRimOffset = -9.0f;
+
+/// One shape: centre across the window, the centre's distance from the
+/// screen edge the pill hangs from, and size. Measured from the edge, one set
+/// of numbers serves the pill at the top of the screen and at the bottom.
+struct Blob {
+    float cx;
+    float d;
+    float w;
+    float h;
+};
+
+struct PillLayout {
+    Blob cap;
+    Blob pause;
+    Blob stop;
+};
+
+/// Where the shapes rest. Collapsed, Pause and Stop are tucked away at zero
+/// size inside the capsule's far end (or the dot's middle), which is where
+/// they split from and melt back into.
+PillLayout LayoutFor(bool dot, bool expanded) noexcept
 {
-    // Collapsed, the readout (dot, meter, clock: ~93 DIP) sits centred with room
-    // for the capsule's round ends either side. Expanded, it centres in the
-    // space left of the two 34 DIP buttons, whose outer circle is concentric
-    // with the capsule's end. The hidden states share the collapsed size.
-    using S = ::yip::IndicatorState;
-    const float w = dot ? kDotSize : kPillW;
-    const float h = dot ? kDotSize : kPillH;
-    switch (s) {
-        case S::Idle:
-        case S::Armed:
-        case S::Recording:
-            return {w, h, 1.00f};
-        case S::Saving:
-            return {w, h, 0.85f};
-        case S::Expanded:
-            return {kExpandedW, kExpandedH, 1.00f};
+    constexpr float c = kWindowW * 0.5f;
+    if (!dot) {
+        constexpr float d = kHomeMarginDip + kPillH * 0.5f;
+        if (!expanded) {
+            constexpr Blob tucked{c + kPillW * 0.5f - kPillH * 0.5f, d, 0.0f, 0.0f};
+            return {{c, d, kPillW, kPillH}, tucked, tucked};
+        }
+        constexpr float left = c - (kPillW + 2.0f * (kSplitGap + kActionDot)) * 0.5f;
+        return {{left + kPillW * 0.5f, d, kPillW, kPillH},
+                {left + kPillW + kSplitGap + kActionDot * 0.5f, d, kActionDot, kActionDot},
+                {left + kPillW + 2.0f * kSplitGap + kActionDot * 1.5f, d, kActionDot, kActionDot}};
     }
-    return {w, h, 1.00f};
+    if (!expanded) {
+        constexpr float d = kHomeMarginDip + kDotSize * 0.5f;
+        constexpr Blob tucked{c, d, 0.0f, 0.0f};
+        return {{c, d, kDotSize, kDotSize}, tucked, tucked};
+    }
+    constexpr float d = kHomeMarginDip + kActionDot * 0.5f;
+    constexpr float step = kActionDot + kSplitGap;
+    return {{c - step, d, kActionDot, kActionDot},
+            {c, d, kActionDot, kActionDot},
+            {c + step, d, kActionDot, kActionDot}};
+}
+
+/// A shape shrunk to nothing where `b` is.
+constexpr Blob Gone(Blob const& b) noexcept
+{
+    return {b.cx, b.d, 0.0f, 0.0f};
+}
+
+// Where the edge and the neck go when they are done: back into the screen edge.
+constexpr Blob kIntoEdge{kWindowW * 0.5f, -10.0f, 0.0f, 0.0f};
+
+/// A distance from the screen edge as a window y, in DIPs.
+float BlobY(float d, bool bottom) noexcept
+{
+    return bottom ? kWindowH - d : d;
+}
+
+float OpacityFor(::yip::IndicatorState s) noexcept
+{
+    return s == ::yip::IndicatorState::Saving ? 0.85f : 1.0f;
 }
 
 bool IsShownState(::yip::IndicatorState s) noexcept
@@ -179,9 +244,6 @@ bool IsShownState(::yip::IndicatorState s) noexcept
     using S = ::yip::IndicatorState;
     return s == S::Recording || s == S::Saving || s == S::Expanded;
 }
-
-/// Gap between the pill and the edge of the work area it sits against.
-constexpr float kHomeMarginDip = 12.0f;
 
 // The curves and animation helpers are templated over the compositor: the XAML
 // compositor draws the pill, the system compositor draws the blur behind it,
@@ -201,40 +263,219 @@ auto StrongEaseOut(Compositor const& c)
     return c.CreateCubicBezierEasingFunction(float2{0.23f, 1.0f}, float2{0.32f, 1.0f});
 }
 
-// Drawer-style curve for the capsule changing size on screen: quick off the
-// mark, long soft landing.
+// Drawer-style curve for a shape travelling on screen: quick off the mark,
+// long soft landing.
 template <typename Compositor>
 auto MorphEase(Compositor const& c)
 {
     return c.CreateCubicBezierEasingFunction(float2{0.32f, 0.72f}, float2{0.0f, 1.0f});
 }
 
-template <typename Compositor, typename Target, typename Ease>
+template <typename EasingFunction, typename Compositor>
+winrt::yip::implementation::PillEases<EasingFunction> MakeEases(Compositor const& c)
+{
+    winrt::yip::implementation::PillEases<EasingFunction> e;
+    e.standard = StandardEase(c);
+    e.out = StrongEaseOut(c);
+    e.morph = MorphEase(c);
+    // The drop stretching under its own weight: slow to start, slow to stop.
+    e.inOut = c.CreateCubicBezierEasingFunction(float2{0.65f, 0.0f}, float2{0.35f, 1.0f});
+    e.linear = c.CreateLinearEasingFunction();
+    return e;
+}
+
+enum class Ease : uint8_t { Standard, Out, Morph, InOut, Linear };
+
+template <typename EasingFunction>
+EasingFunction const& Pick(winrt::yip::implementation::PillEases<EasingFunction> const& e, Ease ease) noexcept
+{
+    switch (ease) {
+        case Ease::Out:
+            return e.out;
+        case Ease::Morph:
+            return e.morph;
+        case Ease::InOut:
+            return e.inOut;
+        case Ease::Linear:
+            return e.linear;
+        case Ease::Standard:
+            break;
+    }
+    return e.standard;
+}
+
+/// A keyframe for a shape. `fromCurrent` holds the shape wherever it is when
+/// the motion starts (mid-way through another one included) until time `t`.
+struct BlobKey {
+    float t;
+    Blob b;
+    Ease ease;
+    bool fromCurrent;
+};
+
+struct ScalarKey {
+    float t;
+    float v;
+    Ease ease;
+    bool fromCurrent;
+};
+
+constexpr BlobKey Hold(float t) noexcept
+{
+    return {t, {}, Ease::Linear, true};
+}
+
+constexpr BlobKey At(float t, Blob const& b, Ease ease) noexcept
+{
+    return {t, b, ease, false};
+}
+
+constexpr ScalarKey HoldValue(float t) noexcept
+{
+    return {t, 0.0f, Ease::Linear, true};
+}
+
+constexpr ScalarKey Fade(float t, float v, Ease ease) noexcept
+{
+    return {t, v, ease, false};
+}
+
+float2 BlobOffset(Blob const& b, bool bottom) noexcept
+{
+    return {b.cx - b.w * 0.5f, BlobY(b.d, bottom) - b.h * 0.5f};
+}
+
+/// Put a shape at `b` at once, cancelling any motion on it.
+template <typename Geometry>
+void SetBlob(Geometry const& g, Blob const& b, bool bottom)
+{
+    if (!g) return;
+    g.StopAnimation(L"Size");
+    g.StopAnimation(L"Offset");
+    g.StopAnimation(L"CornerRadius");
+    const float r = std::min(b.w, b.h) * 0.5f;
+    g.Size({b.w, b.h});
+    g.Offset(BlobOffset(b, bottom));
+    g.CornerRadius({r, r});
+}
+
+/// Last key that names a place, for landing a motion at once.
+template <typename Key>
+Key const* LastPlace(std::vector<Key> const& keys) noexcept
+{
+    for (auto it = keys.rbegin(); it != keys.rend(); ++it) {
+        if (!it->fromCurrent) return &*it;
+    }
+    return nullptr;
+}
+
+/// Play `keys` on a shape: size, position and corner radius move together,
+/// the radius always half the shorter side, so every in-between is a capsule.
+template <typename Compositor, typename Geometry, typename EasingFunction>
+void AnimateBlob(Compositor const& c, Geometry const& g, std::vector<BlobKey> const& keys, int ms,
+                 winrt::yip::implementation::PillEases<EasingFunction> const& eases, bool bottom)
+{
+    if (!g || keys.empty()) return;
+    if (ms <= 0 || keys.size() == 1) {
+        if (auto const* last = LastPlace(keys)) SetBlob(g, last->b, bottom);
+        return;
+    }
+    auto size = c.CreateVector2KeyFrameAnimation();
+    auto offset = c.CreateVector2KeyFrameAnimation();
+    auto radius = c.CreateVector2KeyFrameAnimation();
+    for (auto const& k : keys) {
+        auto const& ease = Pick(eases, k.ease);
+        if (k.fromCurrent) {
+            size.InsertExpressionKeyFrame(k.t, L"this.StartingValue", ease);
+            offset.InsertExpressionKeyFrame(k.t, L"this.StartingValue", ease);
+            radius.InsertExpressionKeyFrame(k.t, L"this.StartingValue", ease);
+            continue;
+        }
+        const float r = std::min(k.b.w, k.b.h) * 0.5f;
+        size.InsertKeyFrame(k.t, {k.b.w, k.b.h}, ease);
+        offset.InsertKeyFrame(k.t, BlobOffset(k.b, bottom), ease);
+        radius.InsertKeyFrame(k.t, {r, r}, ease);
+    }
+    const auto duration = std::chrono::milliseconds(ms);
+    size.Duration(duration);
+    offset.Duration(duration);
+    radius.Duration(duration);
+    g.StartAnimation(L"Size", size);
+    g.StartAnimation(L"Offset", offset);
+    g.StartAnimation(L"CornerRadius", radius);
+}
+
+template <typename Compositor, typename Visual, typename EasingFunction>
+void AnimateOpacity(Compositor const& c, Visual const& visual, std::vector<ScalarKey> const& keys, int ms,
+                    winrt::yip::implementation::PillEases<EasingFunction> const& eases)
+{
+    if (!visual || keys.empty()) return;
+    if (ms <= 0 || keys.size() == 1) {
+        if (auto const* last = LastPlace(keys)) {
+            visual.StopAnimation(L"Opacity");
+            visual.Opacity(last->v);
+        }
+        return;
+    }
+    auto anim = c.CreateScalarKeyFrameAnimation();
+    for (auto const& k : keys) {
+        if (k.fromCurrent)
+            anim.InsertExpressionKeyFrame(k.t, L"this.StartingValue", Pick(eases, k.ease));
+        else
+            anim.InsertKeyFrame(k.t, k.v, Pick(eases, k.ease));
+    }
+    anim.Duration(std::chrono::milliseconds(ms));
+    visual.StartAnimation(L"Opacity", anim);
+}
+
+/// Travel from wherever the shape is to `to`, run past it the way it was
+/// heading (`dir`: -1 left, +1 right, 0 for a shape that only grows), spring
+/// back a little, settle. `start` holds it in place that long first.
+std::vector<BlobKey> BounceTo(Blob const& to, float dir, float start)
+{
+    const auto at = [start](float t) { return start + (1.0f - start) * t; };
+    Blob over = to;
+    Blob back = to;
+    if (dir == 0.0f) {
+        over.w = to.w + kBounceStretch;
+        over.h = to.h + kBounceStretch;
+        back.w = to.w - kBounceStretch * 0.4f;
+        back.h = to.h - kBounceStretch * 0.4f;
+    } else {
+        over.cx = to.cx + dir * kBounceTravel;
+        over.w = to.w + kBounceStretch;
+        over.h = to.h - kBounceSquash;
+        back.cx = to.cx - dir * kBounceTravel * 0.3f;
+        back.w = to.w - kBounceStretch * 0.4f;
+        back.h = to.h + kBounceSquash * 0.5f;
+    }
+    std::vector<BlobKey> keys{Hold(0.0f)};
+    if (start > 0.0f) keys.push_back(Hold(start));
+    keys.push_back(At(at(0.55f), over, Ease::Morph));
+    keys.push_back(At(at(0.8f), back, Ease::Standard));
+    keys.push_back(At(1.0f, to, Ease::Standard));
+    return keys;
+}
+
+/// Which way a shape travels between two layouts.
+float Heading(Blob const& from, Blob const& to) noexcept
+{
+    if (to.cx > from.cx + 0.5f) return 1.0f;
+    if (to.cx < from.cx - 0.5f) return -1.0f;
+    return 0.0f;
+}
+
+/// Edge and neck, wherever a cut-short entrance left them, back into the edge.
+std::vector<BlobKey> Retract()
+{
+    return {Hold(0.0f), At(0.3f, kIntoEdge, Ease::Standard)};
+}
+
+template <typename Compositor, typename Target, typename Easing>
 void AnimateScalar(Compositor const& c, Target const& target, wchar_t const* property, float to, int ms,
-                   Ease const& ease, int delayMs = 0)
+                   Easing const& ease, int delayMs = 0)
 {
     auto anim = c.CreateScalarKeyFrameAnimation();
-    anim.InsertKeyFrame(1.0f, to, ease);
-    anim.Duration(std::chrono::milliseconds(std::max(ms, 1)));
-    if (delayMs > 0) anim.DelayTime(std::chrono::milliseconds(delayMs));
-    target.StartAnimation(property, anim);
-}
-
-template <typename Compositor, typename Target, typename Ease>
-void AnimateVector2(Compositor const& c, Target const& target, wchar_t const* property, float2 to, int ms,
-                    Ease const& ease)
-{
-    auto anim = c.CreateVector2KeyFrameAnimation();
-    anim.InsertKeyFrame(1.0f, to, ease);
-    anim.Duration(std::chrono::milliseconds(std::max(ms, 1)));
-    target.StartAnimation(property, anim);
-}
-
-template <typename Compositor, typename Target, typename Ease>
-void AnimateVector3(Compositor const& c, Target const& target, wchar_t const* property, float3 to, int ms,
-                    Ease const& ease, int delayMs = 0)
-{
-    auto anim = c.CreateVector3KeyFrameAnimation();
     anim.InsertKeyFrame(1.0f, to, ease);
     anim.Duration(std::chrono::milliseconds(std::max(ms, 1)));
     if (delayMs > 0) anim.DelayTime(std::chrono::milliseconds(delayMs));
@@ -250,22 +491,47 @@ void SetTranslation(mux::UIElement const& element, float dx, float dy)
     visual.Properties().InsertVector3(L"Translation", float3{dx, dy, 0.0f});
 }
 
+/// Keep an element's composition Translation on `shape`'s centre, given the
+/// centre layout rests the element on. While the shape travels the element
+/// rides along with no layout pass; where they meet the translation is zero.
+void Follow(mucomp::Compositor const& c, mux::UIElement const& element,
+            mucomp::CompositionRoundedRectangleGeometry const& shape, float2 rest)
+{
+    if (!shape) return;
+    auto expr = c.CreateExpressionAnimation(
+        L"Vector3(g.Offset.X + g.Size.X * 0.5 - rest.X, g.Offset.Y + g.Size.Y * 0.5 - rest.Y, 0)");
+    expr.SetReferenceParameter(L"g", shape);
+    expr.SetVector2Parameter(L"rest", rest);
+    muxh::ElementCompositionPreview::GetElementVisual(element).StartAnimation(L"Translation", expr);
+}
+
 // Shown only if a token key is wrong. A deliberate flat grey rather than a
 // second copy of the palette, so a miss is visible instead of plausible.
 constexpr winrt::Windows::UI::Color kMissingToken{0xFF, 0x80, 0x80, 0x80};
 
-// CLSID_D2D1AlphaMask, spelled out so one GUID does not pull in d2d1effects_2.h
-// and a dxguid.lib link.
+// Direct2D effect CLSIDs, spelled out so four GUIDs do not pull in
+// d2d1effects_2.h and a dxguid.lib link.
 constexpr GUID kAlphaMaskEffectId{0xc80ecff0, 0x3fd5, 0x4f05, {0x83, 0x28, 0xc5, 0xd1, 0x72, 0x4b, 0x4f, 0x0a}};
+constexpr GUID kGaussianBlurEffectId{0x1feb6d69, 0x2fe6, 0x4ac9, {0x8c, 0x58, 0x1d, 0x7f, 0x93, 0xe7, 0xa6, 0xa5}};
+constexpr GUID kColorMatrixEffectId{0x921f03d6, 0x641c, 0x47df, {0x85, 0x2d, 0xb4, 0xbb, 0x61, 0x53, 0xae, 0x11}};
+constexpr GUID kCompositeEffectId{0x48fc9f51, 0xf6ac, 0x48f1, {0x8b, 0x58, 0x3b, 0x28, 0xac, 0x46, 0xf7, 0x6d}};
 
-/// Direct2D's alpha-mask effect as a composition effect graph: source 0 is
-/// multiplied by the alpha of source 1. Composition reads the effect through
-/// the D2D1 interop metadata, which Win2D would normally provide; the project
-/// has no Win2D, so this is that metadata by hand.
-struct AlphaMaskEffect : winrt::implements<AlphaMaskEffect, wge::IGraphicsEffect, wge::IGraphicsEffectSource,
-                                           abi_ge::IGraphicsEffectD2D1Interop> {
-    AlphaMaskEffect(wge::IGraphicsEffectSource source, wge::IGraphicsEffectSource mask)
-        : m_sources{std::move(source), std::move(mask)}
+// The D2D enum values the effects below are set with.
+constexpr uint32_t kBlurOptimizationBalanced = 1; // D2D1_GAUSSIANBLUR_OPTIMIZATION_BALANCED
+constexpr uint32_t kBorderModeSoft = 0;           // D2D1_BORDER_MODE_SOFT
+constexpr uint32_t kColorMatrixPremultiplied = 1; // D2D1_COLORMATRIX_ALPHA_MODE_PREMULTIPLIED
+constexpr uint32_t kCompositeSourceOver = 0;      // D2D1_COMPOSITE_MODE_SOURCE_OVER
+constexpr uint32_t kCompositeDestinationOut = 5;  // D2D1_COMPOSITE_MODE_DESTINATION_OUT
+
+/// A Direct2D effect as a composition effect graph node. Composition reads an
+/// effect through the D2D1 interop metadata, which Win2D would normally
+/// provide; the project has no Win2D, so this is that metadata by hand. The
+/// properties are in D2D's own index order, as the property values D2D takes.
+struct D2DEffect : winrt::implements<D2DEffect, wge::IGraphicsEffect, wge::IGraphicsEffectSource,
+                                     abi_ge::IGraphicsEffectD2D1Interop> {
+    D2DEffect(GUID const& id, std::vector<wge::IGraphicsEffectSource> sources,
+              std::vector<winrt::Windows::Foundation::IInspectable> properties)
+        : m_id{id}, m_sources{std::move(sources)}, m_properties{std::move(properties)}
     {
     }
 
@@ -275,11 +541,11 @@ struct AlphaMaskEffect : winrt::implements<AlphaMaskEffect, wge::IGraphicsEffect
     HRESULT STDMETHODCALLTYPE GetEffectId(GUID* id) noexcept override
     {
         if (!id) return E_POINTER;
-        *id = kAlphaMaskEffectId;
+        *id = m_id;
         return S_OK;
     }
 
-    // The effect has no properties, so there is nothing to name or animate.
+    // Nothing is animated, so no property needs a name.
     HRESULT STDMETHODCALLTYPE GetNamedPropertyMapping(LPCWSTR, UINT*,
                                                       abi_ge::GRAPHICS_EFFECT_PROPERTY_MAPPING*) noexcept override
     {
@@ -289,13 +555,22 @@ struct AlphaMaskEffect : winrt::implements<AlphaMaskEffect, wge::IGraphicsEffect
     HRESULT STDMETHODCALLTYPE GetPropertyCount(UINT* count) noexcept override
     {
         if (!count) return E_POINTER;
-        *count = 0;
+        *count = static_cast<UINT>(m_properties.size());
         return S_OK;
     }
 
-    HRESULT STDMETHODCALLTYPE GetProperty(UINT, ABI::Windows::Foundation::IPropertyValue**) noexcept override
+    HRESULT STDMETHODCALLTYPE GetProperty(UINT index, ABI::Windows::Foundation::IPropertyValue** value) noexcept override
     {
-        return E_BOUNDS;
+        if (!value) return E_POINTER;
+        *value = nullptr;
+        if (index >= m_properties.size()) return E_BOUNDS;
+        try {
+            auto property = m_properties[index].as<winrt::Windows::Foundation::IPropertyValue>();
+            *value = static_cast<ABI::Windows::Foundation::IPropertyValue*>(winrt::detach_abi(property));
+            return S_OK;
+        } catch (...) {
+            return winrt::to_hresult();
+        }
     }
 
     HRESULT STDMETHODCALLTYPE GetSource(UINT index, abi_ge::IGraphicsEffectSource** source) noexcept override
@@ -315,12 +590,247 @@ struct AlphaMaskEffect : winrt::implements<AlphaMaskEffect, wge::IGraphicsEffect
     }
 
 private:
+    GUID m_id;
     winrt::hstring m_name;
-    std::array<wge::IGraphicsEffectSource, 2> m_sources;
+    std::vector<wge::IGraphicsEffectSource> m_sources;
+    std::vector<winrt::Windows::Foundation::IInspectable> m_properties;
 };
+
+using winrt::Windows::Foundation::PropertyValue;
+
+wge::IGraphicsEffect Effect(GUID const& id, std::vector<wge::IGraphicsEffectSource> sources,
+                            std::vector<winrt::Windows::Foundation::IInspectable> properties = {})
+{
+    return winrt::make<D2DEffect>(id, std::move(sources), std::move(properties));
+}
+
+/// `source` multiplied by the alpha of `mask`.
+wge::IGraphicsEffect AlphaMask(wge::IGraphicsEffectSource source, wge::IGraphicsEffectSource mask)
+{
+    return Effect(kAlphaMaskEffectId, {std::move(source), std::move(mask)});
+}
+
+wge::IGraphicsEffect Blur(wge::IGraphicsEffectSource source, float sigma)
+{
+    return Effect(kGaussianBlurEffectId, {std::move(source)},
+                  {PropertyValue::CreateSingle(sigma), PropertyValue::CreateUInt32(kBlurOptimizationBalanced),
+                   PropertyValue::CreateUInt32(kBorderModeSoft)});
+}
+
+/// Opaque white wherever `source`'s alpha crosses the goo's threshold.
+wge::IGraphicsEffect Threshold(wge::IGraphicsEffectSource source, float offset)
+{
+    // D2D1_MATRIX_5X4_F, row-major: rows are the input R, G, B, A and a
+    // constant; columns the output R, G, B, A.
+    std::array<float, 20> m{};
+    m[15] = kGooGain; // A <- A
+    m[16] = 1.0f;     // R <- 1
+    m[17] = 1.0f;     // G <- 1
+    m[18] = 1.0f;     // B <- 1
+    m[19] = offset;   // A <- + offset
+    return Effect(kColorMatrixEffectId, {std::move(source)},
+                  {PropertyValue::CreateSingleArray(m), PropertyValue::CreateUInt32(kColorMatrixPremultiplied),
+                   PropertyValue::CreateBoolean(true)});
+}
+
+/// `top` composited onto `bottom` with a D2D composite mode.
+wge::IGraphicsEffect Composite(wge::IGraphicsEffectSource bottom, wge::IGraphicsEffectSource top, uint32_t mode)
+{
+    return Effect(kCompositeEffectId, {std::move(bottom), std::move(top)}, {PropertyValue::CreateUInt32(mode)});
+}
+
+/// The pill: the shapes in "Shapes", cut to goo, filled with the "Tint" brush
+/// and, with `rim`, rimmed with the "Rim" brush. `Param` is the compositor's
+/// CompositionEffectSourceParameter.
+template <typename Param>
+wge::IGraphicsEffect GooGraph(float sigma, bool rim)
+{
+    const auto cut = [sigma](float offset) { return Threshold(Blur(Param{L"Shapes"}, sigma), offset); };
+    auto fill = AlphaMask(Param{L"Tint"}, cut(kGooFillOffset));
+    if (!rim) return fill;
+    auto ring =
+        AlphaMask(Param{L"Rim"}, Composite(cut(kGooRimOffset), cut(kGooFillOffset), kCompositeDestinationOut));
+    return Composite(fill, ring, kCompositeSourceOver);
+}
+
+// M4: temporary. Under a debugger only, asks the compositor which of the goo's
+// effects and property values it accepts, one at a time, and says so on the
+// debug output. Remove once the goo builds on every compositor it meets.
+void ProbeGooEffects(mucomp::Compositor const& c)
+{
+    if (!::IsDebuggerPresent()) return;
+    using P = mucomp::CompositionEffectSourceParameter;
+    std::array<float, 20> m{};
+    m[15] = kGooGain;
+    m[19] = kGooFillOffset;
+    const auto probe = [&c](wchar_t const* name, wge::IGraphicsEffect const& effect) {
+        std::wstring line = L"Yip goo probe: ";
+        line += name;
+        try {
+            (void)c.CreateEffectFactory(effect);
+            line += L" ok\n";
+        } catch (winrt::hresult_error const& e) {
+            wchar_t hr[24];
+            swprintf_s(hr, L" FAIL 0x%08X\n", static_cast<uint32_t>(e.code()));
+            line += hr;
+        }
+        ::OutputDebugStringW(line.c_str());
+    };
+    probe(L"alphamask", AlphaMask(P{L"A"}, P{L"B"}));
+    probe(L"blur", Blur(P{L"S"}, 4.0f));
+    probe(L"blur-hard", Effect(kGaussianBlurEffectId, {P{L"S"}},
+                               {PropertyValue::CreateSingle(4.0f), PropertyValue::CreateUInt32(1),
+                                PropertyValue::CreateUInt32(1)}));
+    probe(L"blur-speed", Effect(kGaussianBlurEffectId, {P{L"S"}},
+                                {PropertyValue::CreateSingle(4.0f), PropertyValue::CreateUInt32(0),
+                                 PropertyValue::CreateUInt32(0)}));
+    probe(L"matrix", Threshold(P{L"S"}, kGooFillOffset));
+    probe(L"matrix-noclamp", Effect(kColorMatrixEffectId, {P{L"S"}},
+                                    {PropertyValue::CreateSingleArray(m), PropertyValue::CreateUInt32(1),
+                                     PropertyValue::CreateBoolean(false)}));
+    probe(L"matrix-straight", Effect(kColorMatrixEffectId, {P{L"S"}},
+                                     {PropertyValue::CreateSingleArray(m), PropertyValue::CreateUInt32(2),
+                                      PropertyValue::CreateBoolean(true)}));
+    probe(L"matrix-alphamode0", Effect(kColorMatrixEffectId, {P{L"S"}},
+                                       {PropertyValue::CreateSingleArray(m), PropertyValue::CreateUInt32(0),
+                                        PropertyValue::CreateBoolean(true)}));
+    probe(L"matrix-only", Effect(kColorMatrixEffectId, {P{L"S"}}, {PropertyValue::CreateSingleArray(m)}));
+    probe(L"composite-over", Composite(P{L"A"}, P{L"B"}, kCompositeSourceOver));
+    probe(L"composite-destout", Composite(P{L"A"}, P{L"B"}, kCompositeDestinationOut));
+    probe(L"cut", Threshold(Blur(P{L"S"}, 4.0f), kGooFillOffset));
+    probe(L"fill", GooGraph<P>(4.0f, false));
+    probe(L"goo", GooGraph<P>(4.0f, true));
+}
 } // namespace
 
 namespace winrt::yip::implementation {
+/// One motion of the pill: a track per shape (empty leaves that shape alone),
+/// plus the readout's and the buttons' opacity.
+struct PillChoreo {
+    int ms{0};
+    std::array<std::vector<BlobKey>, kPillBlobCount> blobs;
+    std::vector<ScalarKey> readout;
+    std::vector<ScalarKey> actions;
+
+    std::vector<BlobKey>& operator[](PillBlob b) { return blobs[static_cast<size_t>(b)]; }
+};
+
+namespace {
+/// The entrance: a drop swells out of the screen edge, hangs from it on a
+/// neck that thins and snaps, lands with a squash, and bounces to rest. Without
+/// the goo the edge and neck would be lumps of their own, so they stay out.
+PillChoreo DripIn(bool dot, bool goo)
+{
+    const auto T = LayoutFor(dot, false).cap;
+    const float c = T.cx;
+    PillChoreo ch;
+    ch.ms = kDripInMs;
+    if (goo) {
+        ch[PillBlob::Edge] = {At(0.0f, {c, -8.0f, 0.0f, 16.0f}, Ease::Linear),
+                              At(0.16f, {c, -6.0f, 56.0f, 22.0f}, Ease::Standard),
+                              At(0.40f, {c, -6.0f, 40.0f, 20.0f}, Ease::Standard),
+                              At(0.58f, {c, -8.0f, 16.0f, 12.0f}, Ease::Standard),
+                              At(0.74f, kIntoEdge, Ease::Standard)};
+        ch[PillBlob::Neck] = {At(0.0f, {c, 0.0f, 0.0f, 0.0f}, Ease::Linear),
+                              At(0.16f, {c, 4.0f, 12.0f, 14.0f}, Ease::Standard),
+                              At(0.40f, {c, T.d * 0.4f, 10.0f, T.d * 0.8f}, Ease::Standard),
+                              At(0.58f, {c, 3.0f, 6.0f, 10.0f}, Ease::Out),
+                              At(0.74f, kIntoEdge, Ease::Standard)};
+    } else {
+        ch[PillBlob::Edge] = {At(0.0f, kIntoEdge, Ease::Linear)};
+        ch[PillBlob::Neck] = {At(0.0f, kIntoEdge, Ease::Linear)};
+    }
+    ch[PillBlob::Cap] = {At(0.0f, {c, 0.0f, 10.0f, 10.0f}, Ease::Linear),
+                         At(0.16f, {c, 9.0f, 22.0f, 22.0f}, Ease::Standard),
+                         At(0.40f, {c, T.d * 0.8f, std::min(T.w, 28.0f), T.h * 0.95f}, Ease::InOut),
+                         At(0.56f, {c, T.d + 7.0f, T.w * 1.08f, T.h * 0.8f}, Ease::Out),
+                         At(0.72f, {c, T.d - 3.0f, T.w * 0.96f, T.h * 1.08f}, Ease::Standard),
+                         At(0.86f, {c, T.d + 1.0f, T.w * 1.015f, T.h * 0.97f}, Ease::Standard),
+                         At(1.0f, T, Ease::Standard)};
+    ch[PillBlob::Pause] = {At(0.0f, Gone(T), Ease::Linear)};
+    ch[PillBlob::Stop] = {At(0.0f, Gone(T), Ease::Linear)};
+    ch.readout = {Fade(0.0f, 0.0f, Ease::Linear), Fade(0.56f, 0.0f, Ease::Linear), Fade(0.86f, 1.0f, Ease::Out)};
+    ch.actions = {Fade(0.0f, 0.0f, Ease::Linear)};
+    return ch;
+}
+
+/// The exit: the entrance backwards, starting from wherever the pill is.
+PillChoreo DripOut(bool dot, bool goo)
+{
+    const auto in = DripIn(dot, goo);
+    const auto rest = LayoutFor(dot, false).cap;
+    PillChoreo ch;
+    ch.ms = kDripOutMs;
+    for (auto blob : {PillBlob::Edge, PillBlob::Neck, PillBlob::Cap}) {
+        auto const& keys = in.blobs[static_cast<size_t>(blob)];
+        auto& out = ch[blob];
+        for (auto it = keys.rbegin(); it != keys.rend(); ++it)
+            out.push_back(At(1.0f - it->t, it->b, Ease::Standard));
+        if (!out.empty() && out.front().t > 0.0f) out.insert(out.begin(), At(0.0f, out.front().b, Ease::Linear));
+    }
+    // The drop leaves from where it is, not from where it would rest.
+    ch[PillBlob::Cap].front() = Hold(0.0f);
+    ch[PillBlob::Pause] = {Hold(0.0f), At(0.3f, Gone(rest), Ease::Standard)};
+    ch[PillBlob::Stop] = {Hold(0.0f), At(0.3f, Gone(rest), Ease::Standard)};
+    ch.readout = {HoldValue(0.0f), Fade(0.2f, 0.0f, Ease::Standard)};
+    ch.actions = {HoldValue(0.0f), Fade(0.15f, 0.0f, Ease::Standard)};
+    return ch;
+}
+
+/// Expand: Pause and Stop bud out of the capsule's far end (or the dot's
+/// middle), stretch, pinch off and bounce into place; Stop a beat behind.
+PillChoreo Split(bool dot)
+{
+    const auto from = LayoutFor(dot, false);
+    const auto to = LayoutFor(dot, true);
+    PillChoreo ch;
+    ch.ms = kSplitMs;
+    ch[PillBlob::Edge] = Retract();
+    ch[PillBlob::Neck] = Retract();
+    ch[PillBlob::Cap] = BounceTo(to.cap, Heading(from.cap, to.cap), 0.0f);
+    ch[PillBlob::Pause] = BounceTo(to.pause, Heading(from.pause, to.pause), 0.0f);
+    ch[PillBlob::Stop] = BounceTo(to.stop, Heading(from.stop, to.stop), kSplitStagger);
+    ch.readout = {HoldValue(0.0f), Fade(0.3f, 1.0f, Ease::Out)};
+    ch.actions = {HoldValue(0.0f), HoldValue(0.45f), Fade(0.85f, 1.0f, Ease::Out)};
+    return ch;
+}
+
+/// Collapse: Stop melts into Pause, Pause into the capsule, and the capsule
+/// wobbles as it takes them in.
+PillChoreo Merge(bool dot)
+{
+    const auto from = LayoutFor(dot, true);
+    const auto to = LayoutFor(dot, false);
+    PillChoreo ch;
+    ch.ms = kSplitMs;
+    ch[PillBlob::Edge] = Retract();
+    ch[PillBlob::Neck] = Retract();
+    ch[PillBlob::Stop] = {Hold(0.0f), At(0.7f, to.stop, Ease::Morph), At(1.0f, to.stop, Ease::Linear)};
+    ch[PillBlob::Pause] = {Hold(0.0f), Hold(kSplitStagger), At(0.82f, to.pause, Ease::Morph),
+                           At(1.0f, to.pause, Ease::Linear)};
+    ch[PillBlob::Cap] = BounceTo(to.cap, Heading(from.cap, to.cap), kSplitStagger);
+    ch.readout = {HoldValue(0.0f), Fade(0.3f, 1.0f, Ease::Out)};
+    ch.actions = {HoldValue(0.0f), Fade(0.2f, 0.0f, Ease::Out)};
+    return ch;
+}
+
+/// Back to rest from wherever the shapes are: an exit called off half way.
+PillChoreo Settle(bool dot, bool expanded)
+{
+    const auto to = LayoutFor(dot, expanded);
+    PillChoreo ch;
+    ch.ms = kSplitMs;
+    ch[PillBlob::Edge] = Retract();
+    ch[PillBlob::Neck] = Retract();
+    ch[PillBlob::Cap] = BounceTo(to.cap, 0.0f, 0.0f);
+    ch[PillBlob::Pause] = {Hold(0.0f), At(0.8f, to.pause, Ease::Morph), At(1.0f, to.pause, Ease::Linear)};
+    ch[PillBlob::Stop] = {Hold(0.0f), At(0.8f, to.stop, Ease::Morph), At(1.0f, to.stop, Ease::Linear)};
+    ch.readout = {HoldValue(0.0f), Fade(0.4f, 1.0f, Ease::Out)};
+    ch.actions = {HoldValue(0.0f), Fade(0.4f, expanded ? 1.0f : 0.0f, Ease::Out)};
+    return ch;
+}
+} // namespace
+
 IndicatorWindow::IndicatorWindow()
 {
     InitializeComponent();
@@ -331,8 +841,6 @@ IndicatorWindow::IndicatorWindow()
         m_dotStyle = settings.pill_dot;
         m_bottom = settings.pill_bottom;
     }
-    m_contentPadding = PillContent().Padding();
-
     // Grab the HWND. Required for tool-window style + click-through flip.
     if (auto native = try_as<::IWindowNative>()) {
         native->get_WindowHandle(&m_hwnd);
@@ -344,14 +852,16 @@ IndicatorWindow::IndicatorWindow()
     // and the default corner preference with it.
     ApplyFrameless();
 
+    // Before the backdrop: the mask behind the pill is cut the same way as
+    // the pill, and whether that is goo depends on the pill's effect building.
+    BuildCompositionLayer();
+
     // Not acrylic. DWM draws a system backdrop across the whole window
     // rectangle, rounded only by its own 8px corner and ignoring the window
     // region, so behind a capsule acrylic showed as light corners and a light
-    // rim. The blur is cut to the capsule by an alpha mask instead, and outside
-    // the capsule the window stays fully transparent.
+    // rim. The blur is cut to the shapes by an alpha mask instead, and outside
+    // them the window stays fully transparent.
     ApplyBackdrop();
-
-    BuildCompositionLayer();
     ApplyClickThrough(m_persisted.click_through);
     PlacePillAtHome();
 
@@ -548,63 +1058,87 @@ void IndicatorWindow::ApplyBackdrop()
     }
 }
 
+void IndicatorWindow::BuildMaskShapes()
+{
+    if (m_maskVisual || !m_backdropCompositor) return;
+    auto const& c = m_backdropCompositor;
+
+    // The pill's shapes again, on this compositor, drawn into a visual surface.
+    // The DPI container rasterises them at physical pixels, so the mask's edge
+    // lines up with the pill's. Not a colour on screen: to the mask, opaque
+    // white just means alpha 1.
+    auto white = c.CreateColorBrush(winrt::Microsoft::UI::Colors::White());
+    auto visual = c.CreateShapeVisual();
+    visual.Size({kWindowW, kWindowH});
+    for (size_t i = 0; i < kPillBlobCount; ++i) {
+        auto geometry = c.CreateRoundedRectangleGeometry();
+        // Rebuilt mid-take when effects come back on: start where the pill is.
+        if (auto const& twin = m_blobs[i]) {
+            geometry.Size(twin.Size());
+            geometry.Offset(twin.Offset());
+            geometry.CornerRadius(twin.CornerRadius());
+        }
+        auto shape = c.CreateSpriteShape(geometry);
+        shape.FillBrush(white);
+        visual.Shapes().Append(shape);
+        m_maskBlobs[i] = geometry;
+    }
+    visual.Opacity(PillVisual().Opacity());
+
+    auto dpi = c.CreateContainerVisual();
+    dpi.Children().InsertAtTop(visual);
+    auto root = c.CreateContainerVisual();
+    root.Children().InsertAtTop(dpi);
+    auto surface = c.CreateVisualSurface();
+    surface.SourceVisual(root);
+
+    m_maskVisual = visual;
+    m_maskDpi = dpi;
+    m_maskRoot = root;
+    m_maskSurface = surface;
+    m_backdropEases = MakeEases<wuc::CompositionEasingFunction>(c);
+}
+
 void IndicatorWindow::BuildBackdropBrush()
 {
+    BuildMaskShapes();
+    if (!m_maskSurface) return;
     auto const& c = m_backdropCompositor;
-    try {
-        // The mask is a capsule drawn into a visual surface. The DPI container
-        // rasterises it at physical pixels, so its antialiased edge lines up
-        // with the Border's; the shape visual under it mirrors the pill's
-        // opacity and scale.
-        auto shape = c.CreateRoundedRectangleGeometry();
-        auto fill = c.CreateSpriteShape(shape);
-        // Not a colour on screen: to the mask, opaque white just means alpha 1.
-        fill.FillBrush(c.CreateColorBrush(winrt::Microsoft::UI::Colors::White()));
-        auto visual = c.CreateShapeVisual();
-        visual.Shapes().Append(fill);
-        auto dpi = c.CreateContainerVisual();
-        dpi.Children().InsertAtTop(visual);
-        auto root = c.CreateContainerVisual();
-        root.Children().InsertAtTop(dpi);
-        auto surface = c.CreateVisualSurface();
-        surface.SourceVisual(root);
-        auto mask = c.CreateSurfaceBrush(surface);
-        mask.Stretch(wuc::CompositionStretch::Fill);
+    const auto scale = static_cast<float>(DpiScale());
+    auto mask = c.CreateSurfaceBrush(m_maskSurface);
+    mask.Stretch(wuc::CompositionStretch::Fill);
 
-        // The host backdrop arrives already blurred by the shell; the effect
-        // only cuts it to the capsule.
-        auto effect = winrt::make<AlphaMaskEffect>(wuc::CompositionEffectSourceParameter{L"Backdrop"},
-                                                   wuc::CompositionEffectSourceParameter{L"Mask"});
-        auto brush = c.CreateEffectFactory(effect).CreateBrush();
-        brush.SetSourceParameter(L"Backdrop", c.CreateHostBackdropBrush());
-        brush.SetSourceParameter(L"Mask", mask);
-
-        // Rebuilt mid-take when effects come back on: start where the pill is.
-        auto pill = PillVisual();
-        visual.Opacity(pill.Opacity());
-        visual.Scale(pill.Scale());
-        visual.CenterPoint(pill.CenterPoint());
-
-        m_maskShape = shape;
-        m_maskVisual = visual;
-        m_maskDpi = dpi;
-        m_maskRoot = root;
-        m_maskSurface = surface;
-        m_backdropEaseOut = StrongEaseOut(c);
-        m_backdropEase = StandardEase(c);
-        m_backdropEaseMorph = MorphEase(c);
-        m_blurBrush = brush;
-        ResetBackdropShape();
-    } catch (winrt::hresult_error const&) {
-        // No effect support on this compositor: stay on the transparent backdrop.
-        m_blurBrush = nullptr;
+    // The host backdrop arrives already blurred by the shell; the effect only
+    // cuts it to the shapes — as goo when the pill is goo, so the blur follows
+    // the pill's outline through every merge. This brush is painted in
+    // physical pixels, so the radius is too. A compositor that refuses the goo
+    // still gets the plain cut.
+    const wuc::CompositionEffectSourceParameter backdrop{L"Backdrop"};
+    const wuc::CompositionEffectSourceParameter maskParam{L"Mask"};
+    m_blurBrush = nullptr;
+    for (const bool goo : {m_gooActive, false}) {
+        try {
+            auto effect = goo ? AlphaMask(backdrop, Threshold(Blur(maskParam, kGooBlurDip * scale), kGooFillOffset))
+                              : AlphaMask(backdrop, maskParam);
+            auto brush = c.CreateEffectFactory(effect).CreateBrush();
+            brush.SetSourceParameter(L"Backdrop", c.CreateHostBackdropBrush());
+            brush.SetSourceParameter(L"Mask", mask);
+            m_blurBrush = brush;
+            m_maskScale = scale;
+            break;
+        } catch (winrt::hresult_error const&) {
+            // No effect support on this compositor: stay on the transparent
+            // backdrop unless the plain cut works.
+        }
     }
+    SyncShapeSurfaces();
 }
 
 void IndicatorWindow::ApplySurfaceTint()
 {
-    PillFrame().Background(
-        ::yip::theme::Brush(m_blurActive ? L"YipIndicatorSurfaceBlurredBrush" : L"YipIndicatorSurfaceBrush"));
+    if (!m_tintBrush) return;
+    m_tintBrush.Color(::yip::theme::Color(
+        m_blurActive ? L"YipIndicatorSurfaceBlurredBrush" : L"YipIndicatorSurfaceBrush", kMissingToken));
 }
 
 void IndicatorWindow::ApplyAlwaysOnTop()
@@ -637,24 +1171,30 @@ void IndicatorWindow::ApplyClickThrough(bool enable)
 
 void IndicatorWindow::BuildCompositionLayer()
 {
-    auto pillVisual = muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
-    m_compositor = pillVisual.Compositor();
-    m_ease = StandardEase(m_compositor);
-    m_easeOut = StrongEaseOut(m_compositor);
-    m_easeMorph = MorphEase(m_compositor);
+    m_compositor = PillVisual().Compositor();
+    m_eases = MakeEases<mucomp::CompositionEasingFunction>(m_compositor);
 
-    // The morph clip. Built once, attached only while a size change runs.
-    m_clipGeometry = m_compositor.CreateRoundedRectangleGeometry();
-    m_clip = m_compositor.CreateGeometricClip(m_clipGeometry);
+    // The content rides its shapes via composition Translation (Follow), so no
+    // layout pass runs per frame.
+    muxh::ElementCompositionPreview::SetIsTranslationEnabled(PillFrame(), true);
+    muxh::ElementCompositionPreview::SetIsTranslationEnabled(PauseButton(), true);
+    muxh::ElementCompositionPreview::SetIsTranslationEnabled(StopButton(), true);
 
-    // The readout glides and the buttons slide during a morph; both move via
-    // composition Translation so no layout pass runs per frame.
-    muxh::ElementCompositionPreview::SetIsTranslationEnabled(ReadoutGroup(), true);
-    muxh::ElementCompositionPreview::SetIsTranslationEnabled(ExpandedActions(), true);
-
-    // Brushes first: the bars and the dot below are handed one as they are
-    // created.
+    // Brushes first: the bars, the dot and the goo below are handed one as
+    // they are created.
     ResolveThemeBrushes();
+    m_tintBrush = m_compositor.CreateColorBrush(kMissingToken);
+    ApplySurfaceTint();
+
+    // The pill's shapes, all at nothing until the first show poses them.
+    m_shapeVisual = m_compositor.CreateShapeVisual();
+    m_shapeVisual.Size({kWindowW, kWindowH});
+    for (size_t i = 0; i < kPillBlobCount; ++i) {
+        m_blobs[i] = m_compositor.CreateRoundedRectangleGeometry();
+        m_blobShapes[i] = m_compositor.CreateSpriteShape(m_blobs[i]);
+        m_shapeVisual.Shapes().Append(m_blobShapes[i]);
+    }
+    BuildGooBrush();
 
     // Child visual tree for the meter bars, parented to the meter host (which
     // XAML layout places inside the readout group).
@@ -710,6 +1250,100 @@ void IndicatorWindow::BuildCompositionLayer()
     dotClipGeo.Offset({0.0f, 0.0f});
     m_dotVisual.Clip(m_compositor.CreateGeometricClip(dotClipGeo));
     dotContainer.Children().InsertAtTop(m_dotVisual);
+}
+
+void IndicatorWindow::BuildGooBrush()
+{
+    ProbeGooEffects(m_compositor);
+
+    // To the effect a shape is only alpha, so they are drawn opaque white into
+    // a surface at physical pixels: the DPI container scales the DIP shapes
+    // up, and the brush's Fill stretch maps the surface back onto the window.
+    auto white = m_compositor.CreateColorBrush(winrt::Microsoft::UI::Colors::White());
+    for (auto const& shape : m_blobShapes)
+        shape.FillBrush(white);
+    auto dpi = m_compositor.CreateContainerVisual();
+    dpi.Children().InsertAtTop(m_shapeVisual);
+    auto root = m_compositor.CreateContainerVisual();
+    root.Children().InsertAtTop(dpi);
+    auto surface = m_compositor.CreateVisualSurface();
+    surface.SourceVisual(root);
+    auto shapes = m_compositor.CreateSurfaceBrush(surface);
+    shapes.Stretch(mucomp::CompositionStretch::Fill);
+
+    // The full goo, then the goo without its rim: a compositor that refuses
+    // the ring's composite still melts the shapes. The pill is drawn in DIPs,
+    // and so is the blur radius.
+    mucomp::CompositionEffectBrush brush{nullptr};
+    for (const bool rim : {true, false}) {
+        try {
+            auto effect = GooGraph<mucomp::CompositionEffectSourceParameter>(kGooBlurDip, rim);
+            brush = m_compositor.CreateEffectFactory(effect).CreateBrush();
+            brush.SetSourceParameter(L"Shapes", shapes);
+            brush.SetSourceParameter(L"Tint", m_tintBrush);
+            if (rim) brush.SetSourceParameter(L"Rim", m_strokeBrush);
+            break;
+        } catch (winrt::hresult_error const& e) {
+            brush = nullptr;
+            std::wstring line = rim ? L"Yip: goo effect refused" : L"Yip: rimless goo effect refused";
+            line += L": ";
+            line += std::wstring_view{e.message()};
+            line += L'\n';
+            ::OutputDebugStringW(line.c_str());
+        }
+    }
+
+    if (brush) {
+        m_gooSprite = m_compositor.CreateSpriteVisual();
+        m_gooSprite.Size({kWindowW, kWindowH});
+        m_gooSprite.Brush(brush);
+        m_shapeDpi = dpi;
+        m_shapeRoot = root;
+        m_shapeSurface = surface;
+        muxh::ElementCompositionPreview::SetElementChildVisual(GooHost(), m_gooSprite);
+        m_gooActive = true;
+        return;
+    }
+
+    // No effect support: the shapes are drawn as they are, tint and stroke on
+    // each. They overlap rather than melt, which is all that is lost.
+    m_gooActive = false;
+    dpi.Children().RemoveAll();
+    for (auto const& shape : m_blobShapes) {
+        shape.FillBrush(m_tintBrush);
+        shape.StrokeBrush(m_strokeBrush);
+        shape.StrokeThickness(1.0f);
+    }
+    muxh::ElementCompositionPreview::SetElementChildVisual(GooHost(), m_shapeVisual);
+}
+
+void IndicatorWindow::SyncShapeSurfaces()
+{
+    if (!m_hwnd) return;
+    RECT client{};
+    if (!::GetClientRect(m_hwnd, &client) || client.right <= 0 || client.bottom <= 0) return;
+
+    // Each surface is the window's size in physical pixels and the shapes are
+    // in window DIPs: the DPI container scales them up. The brushes' Fill
+    // stretch then maps the surface onto the window exactly.
+    const auto scale = static_cast<float>(DpiScale());
+    const float2 px{static_cast<float>(client.right), static_cast<float>(client.bottom)};
+    const auto fit = [&](auto const& surface, auto const& root, auto const& dpi) {
+        if (!surface) return;
+        surface.SourceSize(px);
+        root.Size(px);
+        dpi.Size({kWindowW, kWindowH});
+        dpi.Scale({scale, scale, 1.0f});
+    };
+    fit(m_shapeSurface, m_shapeRoot, m_shapeDpi);
+    fit(m_maskSurface, m_maskRoot, m_maskDpi);
+    if (m_gooSprite) m_gooSprite.Size({px.x / scale, px.y / scale});
+
+    // The mask's blur radius is in pixels: a new scale needs a new brush.
+    if (m_blurBrush && m_gooActive && scale != m_maskScale) {
+        m_blurBrush = nullptr;
+        ApplyBackdrop();
+    }
 }
 
 void IndicatorWindow::UpdateFromMeter()
@@ -843,7 +1477,7 @@ void IndicatorWindow::StopMeterAnimations()
         bar.StopAnimation(L"Size.Y");
         // Fall back to the resting height.
         auto anim = m_compositor.CreateScalarKeyFrameAnimation();
-        anim.InsertKeyFrame(1.0f, BarHeight(kBarRestScale), m_ease);
+        anim.InsertKeyFrame(1.0f, BarHeight(kBarRestScale), m_eases.standard);
         anim.Duration(std::chrono::milliseconds(kFadeMs));
         bar.StartAnimation(L"Size.Y", anim);
     }
@@ -876,6 +1510,8 @@ void IndicatorWindow::ResolveThemeBrushes()
     apply(m_barLiveBrush, L"YipIndicatorMeterBarLiveBrush");
     apply(m_dotNeutralBrush, L"YipIndicatorDotIdleBrush");
     apply(m_dotRecordBrush, L"YipIndicatorDotLiveBrush");
+    // The goo's rim. Its fill is the surface tint, set by ApplySurfaceTint.
+    apply(m_strokeBrush, L"YipIndicatorStrokeQuietBrush");
 
     // Four flat grey sticks beside a red dot read as a smudge at pill size.
     // Colouring them off the shared ramp makes the pill say the same thing
@@ -969,8 +1605,6 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
         // Placed while still hidden: this is the only time the HWND moves, so
         // nothing on screen can catch it half done.
         if (!m_windowVisible) PlacePillAtHome();
-        // Size before show, or the first frame lands at the previous size.
-        ApplyLayoutFor(s);
         ShowPill(animate);
         return;
     }
@@ -979,73 +1613,68 @@ void IndicatorWindow::TransitionTo(::yip::IndicatorState s, bool animate)
         return;
     }
     ApplyLayoutFor(s);
-    SetPillFade(GeometryFor(s, m_dotStyle).opacity, 1.0f);
+    SetPillOpacity(OpacityFor(s));
 }
 
-bool IndicatorWindow::DetailShownFor(::yip::IndicatorState s) const noexcept
+void IndicatorWindow::ApplyLayoutFor(::yip::IndicatorState s)
 {
-    return !m_dotStyle || s == ::yip::IndicatorState::Expanded;
-}
-
-void IndicatorWindow::ApplyLayoutFor(::yip::IndicatorState s, ClipPolicy clip)
-{
-    // Collapsed, not transparent: at Opacity 0 the buttons still took their
-    // width, which pushed the readout off centre.
-    const bool wantActions = (s == ::yip::IndicatorState::Expanded);
-    ExpandedActions().Visibility(wantActions ? mux::Visibility::Visible : mux::Visibility::Collapsed);
-    ExpandedActions().IsHitTestVisible(wantActions);
-
-    // The dot style's collapsed disc is narrower than the padding, so the
-    // padding goes with the meter and clock or the dot is pushed off centre.
-    const bool wantDetail = DetailShownFor(s);
-    const bool detailWasHidden = ReadoutDetail().Visibility() == mux::Visibility::Collapsed;
-    ReadoutDetail().Visibility(wantDetail ? mux::Visibility::Visible : mux::Visibility::Collapsed);
-    if (wantDetail && detailWasHidden && m_recording) SyncReadoutNow();
-    PillContent().Padding(wantDetail ? m_contentPadding : mux::Thickness{});
-
-    auto actions = muxh::ElementCompositionPreview::GetElementVisual(ExpandedActions());
-    actions.StopAnimation(L"Opacity");
-    actions.Opacity(1.0f);
-    auto detail = muxh::ElementCompositionPreview::GetElementVisual(ReadoutDetail());
-    detail.StopAnimation(L"Opacity");
-    detail.Opacity(1.0f);
-    SetTranslation(ExpandedActions(), 0.0f, 0.0f);
-    SetTranslation(ReadoutGroup(), 0.0f, 0.0f);
-    if (clip == ClipPolicy::Clear) {
-        ClearClip();
-        m_morphing = false;
+    // Whatever was moving, this is where it lands.
+    ++m_shapeGen;
+    const bool expanded = (s == ::yip::IndicatorState::Expanded);
+    const auto layout = LayoutFor(m_dotStyle, expanded);
+    const std::array<Blob, kPillBlobCount> rest{kIntoEdge, kIntoEdge, layout.cap, layout.pause, layout.stop};
+    for (size_t i = 0; i < kPillBlobCount; ++i) {
+        SetBlob(m_blobs[i], rest[i], m_bottom);
+        SetBlob(m_maskBlobs[i], rest[i], m_bottom);
     }
+    PlaceContent(s);
 
-    SyncFrameToState(s, clip);
+    const auto land = [](mucomp::Visual const& visual, float opacity) {
+        visual.StopAnimation(L"Opacity");
+        visual.Opacity(opacity);
+    };
+    land(muxh::ElementCompositionPreview::GetElementVisual(ReadoutGroup()), 1.0f);
+    for (auto const& button : {PauseButton(), StopButton()}) {
+        // Collapsed, not transparent: a button nobody can see must not still be
+        // a tab stop.
+        button.Visibility(expanded ? mux::Visibility::Visible : mux::Visibility::Collapsed);
+        button.IsHitTestVisible(expanded);
+        land(muxh::ElementCompositionPreview::GetElementVisual(button), expanded ? 1.0f : 0.0f);
+    }
+    // At rest the content sits exactly where layout put it: a follow's
+    // sub-pixel remainder would leave the clock's text soft.
+    SetTranslation(PillFrame(), 0.0f, 0.0f);
+    SetTranslation(PauseButton(), 0.0f, 0.0f);
+    SetTranslation(StopButton(), 0.0f, 0.0f);
+    ApplyHitRegion(s);
 }
 
-void IndicatorWindow::SyncFrameToState(::yip::IndicatorState s, ClipPolicy clip)
+void IndicatorWindow::PlaceContent(::yip::IndicatorState s)
 {
-    const auto g = GeometryFor(s, m_dotStyle);
+    const auto layout = LayoutFor(m_dotStyle, s == ::yip::IndicatorState::Expanded);
 
-    // Only the Border changes size. The HWND used to be resized with it, and
-    // that could never be made seamless: DWM applies a window's new rectangle
-    // on its own schedule while the island's content arrives a frame or more
-    // later, so every expand and collapse showed the old capsule jumping
-    // sideways in the new window for a frame. The window now stays at the
-    // expanded size for as long as it is on screen and layout moves the
-    // Border inside it, in the same frame as the clip that hides the change.
-    const double radius = g.h * 0.5;
-    PillFrame().Width(g.w);
-    PillFrame().Height(g.h);
-    PillFrame().CornerRadius({radius, radius, radius, radius});
+    // The meter and clock ride the capsule; the dot style is the lamp alone.
+    const bool detailWasHidden = ReadoutDetail().Visibility() == mux::Visibility::Collapsed;
+    ReadoutDetail().Visibility(m_dotStyle ? mux::Visibility::Collapsed : mux::Visibility::Visible);
+    if (!m_dotStyle && detailWasHidden && m_recording) SyncReadoutNow();
 
-    // Keep means a morph owns the mask's capsule right now: the surface still
-    // has to follow the Border, but the shape drawn into it is animating and
-    // must not be snapped to the new size under it.
-    if (clip == ClipPolicy::Clear)
-        ResetBackdropShape();
-    else
-        SyncBackdropSurface();
+    PillFrame().Width(layout.cap.w);
+    PillFrame().Height(layout.cap.h);
+    const auto put = [this](mux::UIElement const& element, Blob const& b, float w, float h) {
+        muxc::Canvas::SetLeft(element, b.cx - w * 0.5f);
+        muxc::Canvas::SetTop(element, BlobY(b.d, m_bottom) - h * 0.5f);
+    };
+    put(PillFrame(), layout.cap, layout.cap.w, layout.cap.h);
+    put(PauseButton(), layout.pause, kActionDot, kActionDot);
+    put(StopButton(), layout.stop, kActionDot, kActionDot);
+    // Arranged now, in the same frame as the follows below: otherwise an
+    // element would sit at its old spot with its new translation for a frame.
+    PillCanvas().UpdateLayout();
 
-    // Growing now and shrinking only when a closing morph has finished is
-    // always safe: the region never cuts a pixel the capsule is drawing.
-    ApplyHitRegion(g.w, g.h);
+    const auto centre = [this](Blob const& b) { return float2{b.cx, BlobY(b.d, m_bottom)}; };
+    Follow(m_compositor, PillFrame(), m_blobs[static_cast<size_t>(PillBlob::Cap)], centre(layout.cap));
+    Follow(m_compositor, PauseButton(), m_blobs[static_cast<size_t>(PillBlob::Pause)], centre(layout.pause));
+    Follow(m_compositor, StopButton(), m_blobs[static_cast<size_t>(PillBlob::Stop)], centre(layout.stop));
 }
 
 void IndicatorWindow::ApplyPillSettings(bool dot, bool bottom)
@@ -1056,8 +1685,9 @@ void IndicatorWindow::ApplyPillSettings(bool dot, bool bottom)
 
     // Orphan whatever motion is running: everything below lands in one step.
     ++m_motionGen;
+    ++m_shapeGen;
     if (!m_shown && m_windowVisible) {
-        // A fade-out whose completion was just orphaned would never hide the
+        // An exit whose completion was just orphaned would never hide the
         // window; finish it now instead.
         HideWindow();
     }
@@ -1065,45 +1695,90 @@ void IndicatorWindow::ApplyPillSettings(bool dot, bool bottom)
     if (m_windowVisible) {
         PlacePillAtHome();
         ApplyLayoutFor(m_state);
-        const auto g = GeometryFor(m_state, m_dotStyle);
-        const auto anchor = Anchor();
-        SetPillCentre(g.w * anchor.x, g.h * anchor.y);
-        SetPillFade(g.opacity, 1.0f);
+        SetPillOpacity(OpacityFor(m_state));
     }
     // Hidden, the next show places and lays out the pill anyway.
 }
 
 // =========================================================== Motion
 
+int IndicatorWindow::MotionMs(int ms) const
+{
+    return m_uiSettings.AnimationsEnabled() ? ms : 0;
+}
+
+void IndicatorWindow::Play(PillChoreo const& choreo, std::function<void(IndicatorWindow&)> landed)
+{
+    const auto gen = ++m_shapeGen;
+    const int ms = MotionMs(choreo.ms);
+    mucomp::CompositionScopedBatch batch{nullptr};
+    if (ms > 0) batch = m_compositor.CreateScopedBatch(mucomp::CompositionBatchTypes::Animation);
+
+    for (size_t i = 0; i < kPillBlobCount; ++i) {
+        AnimateBlob(m_compositor, m_blobs[i], choreo.blobs[i], ms, m_eases, m_bottom);
+        AnimateBlob(m_backdropCompositor, m_maskBlobs[i], choreo.blobs[i], ms, m_backdropEases, m_bottom);
+    }
+    AnimateOpacity(m_compositor, muxh::ElementCompositionPreview::GetElementVisual(ReadoutGroup()), choreo.readout,
+                   ms, m_eases);
+    for (auto const& button : {PauseButton(), StopButton()}) {
+        AnimateOpacity(m_compositor, muxh::ElementCompositionPreview::GetElementVisual(button), choreo.actions, ms,
+                       m_eases);
+    }
+
+    if (!batch) {
+        if (landed) landed(*this);
+        return;
+    }
+    batch.End();
+    batch.Completed([weak = get_weak(), gen, landed = std::move(landed)](auto&&, auto&&) {
+        if (auto self = weak.get(); self && self->m_shapeGen == gen && landed) landed(*self);
+    });
+}
+
 void IndicatorWindow::ShowPill(bool animate)
 {
     m_shown = true;
-    const auto g = GeometryFor(m_state, m_dotStyle);
-    // Grows out of its anchor — away from the screen edge it is pinned to, not
-    // outward from its middle.
-    const auto anchor = Anchor();
-    SetPillCentre(g.w * anchor.x, g.h * anchor.y);
+    const bool expanded = (m_state == ::yip::IndicatorState::Expanded);
 
-    if (!animate) {
+    if (!animate || MotionMs(kDripInMs) == 0) {
         RevokeFirstFrame();
-        SetPillFade(g.opacity, 1.0f);
+        ApplyLayoutFor(m_state);
+        SetPillOpacity(OpacityFor(m_state));
         if (!m_windowVisible) ShowWindow();
         return;
     }
 
-    // A pill still fading out is picked up from wherever it has got to.
-    if (!m_windowVisible) {
-        SetPillFade(0.0f, kShowScale);
-        ShowWindow();
-        StartShowFadeOnFirstFrame();
+    for (auto const& button : {PauseButton(), StopButton()}) {
+        button.Visibility(expanded ? mux::Visibility::Visible : mux::Visibility::Collapsed);
+        button.IsHitTestVisible(expanded);
+    }
+    ApplyHitRegionWhole();
+    PlaceContent(m_state);
+
+    // A pill still dripping out is called back from wherever it has got to.
+    if (m_windowVisible) {
+        RevokeFirstFrame();
+        AnimatePillOpacity(OpacityFor(m_state), kFadeMs);
+        Play(Settle(m_dotStyle, expanded), [](IndicatorWindow& self) { self.ApplyLayoutFor(self.m_state); });
         return;
     }
-    RevokeFirstFrame();
-    AnimatePillOpacity(g.opacity, kShowMs);
-    AnimatePillScale(1.0f, kShowMs);
+
+    // The drop's first frame is posed while the window is still hidden; the
+    // drip itself waits for XAML to draw.
+    SetPillOpacity(OpacityFor(m_state));
+    auto pose = DripIn(m_dotStyle, m_gooActive);
+    pose.ms = 0;
+    for (auto& keys : pose.blobs) {
+        if (keys.size() > 1) keys.resize(1);
+    }
+    pose.readout.resize(std::min<size_t>(pose.readout.size(), 1));
+    pose.actions.resize(std::min<size_t>(pose.actions.size(), 1));
+    Play(pose, nullptr);
+    ShowWindow();
+    StartShowOnFirstFrame();
 }
 
-void IndicatorWindow::StartShowFadeOnFirstFrame()
+void IndicatorWindow::StartShowOnFirstFrame()
 {
     RevokeFirstFrame();
     m_firstFrameToken = mux::Media::CompositionTarget::Rendering([weak = get_weak()](auto&&, auto&&) {
@@ -1111,11 +1786,11 @@ void IndicatorWindow::StartShowFadeOnFirstFrame()
         if (!self) return;
         self->RevokeFirstFrame();
         // A hide since the show owns the pill now. Any other transition in
-        // between left it at opacity 0 and the entry scale, so still bring it
-        // in — to whatever state it is in by now.
+        // between left the drop posed at its first frame, so still bring it
+        // in; it lands on whatever state the pill is in by then.
         if (!self->m_shown) return;
-        self->AnimatePillOpacity(GeometryFor(self->m_state, self->m_dotStyle).opacity, kShowMs);
-        self->AnimatePillScale(1.0f, kShowMs);
+        self->Play(DripIn(self->m_dotStyle, self->m_gooActive),
+                   [](IndicatorWindow& pill) { pill.ApplyLayoutFor(pill.m_state); });
     });
 }
 
@@ -1131,284 +1806,65 @@ void IndicatorWindow::HidePill(bool animate)
     m_shown = false;
     RevokeFirstFrame();
     if (!m_windowVisible) return;
-    if (!animate) {
+    if (!animate || MotionMs(kDripOutMs) == 0) {
         HideWindow();
         return;
     }
 
-    const auto w = static_cast<float>(PillFrame().Width());
-    const auto h = static_cast<float>(PillFrame().Height());
-    const auto anchor = Anchor();
-    SetPillCentre(w * anchor.x, h * anchor.y);
-
+    PauseButton().IsHitTestVisible(false);
+    StopButton().IsHitTestVisible(false);
+    ApplyHitRegionWhole();
     const auto gen = m_motionGen;
-    auto batch = m_compositor.CreateScopedBatch(mucomp::CompositionBatchTypes::Animation);
-    AnimatePillOpacity(0.0f, kHideMs, true);
-    AnimatePillScale(kHideScale, kHideMs, true);
-    batch.End();
-    batch.Completed([weak = get_weak(), gen](auto&&, auto&&) {
-        if (auto self = weak.get(); self && self->m_motionGen == gen && !self->m_shown) {
-            self->HideWindow();
-        }
+    Play(DripOut(m_dotStyle, m_gooActive), [gen](IndicatorWindow& self) {
+        if (self.m_motionGen == gen && !self.m_shown) self.HideWindow();
     });
 }
 
 void IndicatorWindow::MorphPill(::yip::IndicatorState from, ::yip::IndicatorState to)
 {
-    const auto a = GeometryFor(from, m_dotStyle);
-    const auto b = GeometryFor(to, m_dotStyle);
-    const bool sameSize = a.w == b.w && a.h == b.h;
+    AnimatePillOpacity(OpacityFor(to), kFadeMs);
 
-    // A morph already in flight left the HWND at one size and the clip
-    // somewhere between two others. Land it before anything below measures:
-    // `a` has to be a size the pill actually has, or the capsule jumps to a
-    // width it never had and morphs out of that.
-    //
-    // Unless the new state is the same size as the one the morph is heading
-    // for (Recording -> Saving as a take stops mid-collapse): then the morph
-    // is already going to the right place. Landing it here would drop the clip
-    // and shrink the window region at once, while XAML still draws the old
-    // layout for a few frames — seen as the expanded pill cut square to the
-    // collapsed width. Hand the morph to this transition instead; its
-    // completion lays out `m_state`, which is now `to`.
-    if (m_morphing && sameSize) {
-        m_morphOwner = m_motionGen;
-        AnimatePillOpacity(b.opacity, kFadeMs);
-        return;
+    // Recording <-> Saving: the same shapes. A merge still carrying the discs
+    // home keeps going and lands on the new state.
+    const bool expand = (to == ::yip::IndicatorState::Expanded);
+    if ((from == ::yip::IndicatorState::Expanded) == expand) return;
+
+    ApplyHitRegionWhole();
+    for (auto const& button : {PauseButton(), StopButton()}) {
+        // Showing now, so they can fade in as their discs arrive. Leaving, hit
+        // testing goes with the fade, not with the landing — a button nobody
+        // can see must not still be a button.
+        if (expand) button.Visibility(mux::Visibility::Visible);
+        button.IsHitTestVisible(expand);
     }
-    if (m_morphing) {
-        ApplyLayoutFor(from);
-        PillFrame().UpdateLayout();
-    }
-
-    if (sameSize) {
-        ApplyLayoutFor(to);
-        AnimatePillOpacity(b.opacity, kFadeMs);
-        return;
-    }
-
-    // The Border takes whichever of the two sizes is larger and a rounded clip
-    // draws the capsule between them. Where the tracked point sits in each
-    // layout is measured, and the gap between the two is played out as a
-    // composition translation, so the readout glides rather than teleports.
-    // `anchor` says which part of the pill stays put on screen: layout keeps
-    // the Border centred and flush with that edge, so a size change moves its
-    // origin by exactly the part of the change on the far side of the anchor.
-    const auto anchor = Anchor();
-    const float dw = b.w - a.w;
-    const float dh = b.h - a.h;
-    const auto before = TrackedCentre();
-    auto readout = muxh::ElementCompositionPreview::GetElementVisual(ReadoutGroup());
-    auto actions = muxh::ElementCompositionPreview::GetElementVisual(ExpandedActions());
-    auto detail = muxh::ElementCompositionPreview::GetElementVisual(ReadoutDetail());
-    const bool detailArrives = !DetailShownFor(from) && DetailShownFor(to);
-    const bool detailLeaves = DetailShownFor(from) && !DetailShownFor(to);
-    const auto id = ++m_morphId;
-    m_morphOwner = m_motionGen;
-
-    auto batch = m_compositor.CreateScopedBatch(mucomp::CompositionBatchTypes::Animation);
-    AnimatePillOpacity(b.opacity, kFadeMs);
-
-    if (dw >= 0.0f) {
-        // Opening: hold the old outline first, *then* take the new layout, then
-        // let the outline go. All of it lands in the same frame, so the larger
-        // Border is never seen unclipped.
-        SetClip(a.w, a.h, dw * anchor.x, dh * anchor.y);
-        ApplyLayoutFor(to, ClipPolicy::Keep);
-        PillFrame().UpdateLayout();
-        const auto after = TrackedCentre();
-
-        SetTranslation(ReadoutGroup(), before.X - after.X + dw * anchor.x,
-                       before.Y - after.Y + dh * anchor.y);
-        AnimateVector3(m_compositor, readout, L"Translation", {0.0f, 0.0f, 0.0f}, kMorphMs, m_easeMorph);
-
-        AnimateClip(b.w, b.h, 0.0f, 0.0f);
-
-        // The buttons arrive once there is room for them, sliding out from
-        // behind the readout.
-        actions.Opacity(0.0f);
-        SetTranslation(ExpandedActions(), -kActionsSlidePx, 0.0f);
-        AnimateScalar(m_compositor, actions, L"Opacity", 1.0f, kActionsInMs, m_easeOut, kActionsInDelayMs);
-        AnimateVector3(m_compositor, actions, L"Translation", {0.0f, 0.0f, 0.0f}, kActionsInMs, m_easeOut,
-                       kActionsInDelayMs);
-
-        // Out of a dot, the meter and clock unfold beside it on the same beat.
-        if (detailArrives) {
-            detail.Opacity(0.0f);
-            AnimateScalar(m_compositor, detail, L"Opacity", 1.0f, kActionsInMs, m_easeOut, kActionsInDelayMs);
-        }
-
-        batch.End();
-        batch.Completed([weak = get_weak(), id](auto&&, auto&&) {
-            if (auto self = weak.get(); self && self->OwnsMorph(id)) {
-                self->ClearClip();
-                self->m_morphing = false;
-            }
-        });
-        m_morphing = true;
-        return;
-    }
-
-    // Closing: the buttons leave first, the outline closes over them, and only
-    // then does the Border shrink and the layout change underneath. Hit
-    // testing goes with the fade, not with the layout pass 170 ms later — a
-    // button nobody can see must not still be a button.
-    ExpandedActions().IsHitTestVisible(false);
-    AnimateScalar(m_compositor, actions, L"Opacity", 0.0f, kActionsOutMs, m_easeOut);
-    if (detailLeaves) AnimateScalar(m_compositor, detail, L"Opacity", 0.0f, kActionsOutMs, m_easeOut);
-
-    // In the collapsed layout the tracked point is centred in the new outline:
-    // the readout in the pill style, the lone dot in the dot style.
-    const float tx = -dw * anchor.x + b.w * 0.5f - before.X;
-    const float ty = -dh * anchor.y + b.h * 0.5f - before.Y;
-    AnimateVector3(m_compositor, readout, L"Translation", {tx, ty, 0.0f}, kMorphMs, m_easeMorph);
-
-    SetClip(a.w, a.h, 0.0f, 0.0f);
-    AnimateClip(b.w, b.h, -dw * anchor.x, -dh * anchor.y);
-
-    batch.End();
-    batch.Completed([weak = get_weak(), id](auto&&, auto&&) {
-        if (auto self = weak.get(); self && self->OwnsMorph(id)) self->ApplyLayoutFor(self->m_state);
-    });
-    m_morphing = true;
-}
-
-void IndicatorWindow::SetClip(float w, float h, float x, float y)
-{
-    if (!m_clipGeometry) return;
-    m_clipGeometry.StopAnimation(L"Size");
-    m_clipGeometry.StopAnimation(L"Offset");
-    m_clipGeometry.StopAnimation(L"CornerRadius");
-    m_clipGeometry.Size({w, h});
-    m_clipGeometry.Offset({x, y});
-    m_clipGeometry.CornerRadius({h * 0.5f, h * 0.5f});
-    PillVisual().Clip(m_clip);
-    SetBackdropShape(w, h, x, y);
-}
-
-void IndicatorWindow::AnimateClip(float w, float h, float x, float y)
-{
-    if (!m_clipGeometry) return;
-    AnimateVector2(m_compositor, m_clipGeometry, L"Size", {w, h}, kMorphMs, m_easeMorph);
-    AnimateVector2(m_compositor, m_clipGeometry, L"Offset", {x, y}, kMorphMs, m_easeMorph);
-    AnimateVector2(m_compositor, m_clipGeometry, L"CornerRadius", {h * 0.5f, h * 0.5f}, kMorphMs, m_easeMorph);
-
-    if (!m_maskShape) return;
-    AnimateVector2(m_backdropCompositor, m_maskShape, L"Size", {w, h}, kMorphMs, m_backdropEaseMorph);
-    AnimateVector2(m_backdropCompositor, m_maskShape, L"Offset", {x, y}, kMorphMs, m_backdropEaseMorph);
-    AnimateVector2(m_backdropCompositor, m_maskShape, L"CornerRadius", {h * 0.5f, h * 0.5f}, kMorphMs,
-                   m_backdropEaseMorph);
-}
-
-void IndicatorWindow::ClearClip()
-{
-    if (!m_clipGeometry) return;
-    m_clipGeometry.StopAnimation(L"Size");
-    m_clipGeometry.StopAnimation(L"Offset");
-    m_clipGeometry.StopAnimation(L"CornerRadius");
-    PillVisual().Clip(nullptr);
-    // Set, not merely stopped: the mask runs on the other compositor and may
-    // still be a frame short of where the clip landed.
-    ResetBackdropShape();
+    PlaceContent(to);
+    Play(expand ? Split(m_dotStyle) : Merge(m_dotStyle),
+         [](IndicatorWindow& self) { self.ApplyLayoutFor(self.m_state); });
 }
 
 mucomp::Visual IndicatorWindow::PillVisual()
 {
-    return muxh::ElementCompositionPreview::GetElementVisual(PillFrame());
+    return muxh::ElementCompositionPreview::GetElementVisual(Root());
 }
 
-void IndicatorWindow::SetPillCentre(float x, float y)
+void IndicatorWindow::SetPillOpacity(float opacity)
 {
-    PillVisual().CenterPoint({x, y, 0.0f});
-    if (m_maskVisual) m_maskVisual.CenterPoint({x, y, 0.0f});
-}
-
-void IndicatorWindow::SetPillFade(float opacity, float scale)
-{
-    const auto land = [opacity, scale](auto const& visual) {
+    const auto land = [opacity](auto const& visual) {
         visual.StopAnimation(L"Opacity");
-        visual.StopAnimation(L"Scale");
         visual.Opacity(opacity);
-        visual.Scale({scale, scale, 1.0f});
     };
     land(PillVisual());
     if (m_maskVisual) land(m_maskVisual);
 }
 
-void IndicatorWindow::AnimatePillOpacity(float to, int ms, bool soft)
+void IndicatorWindow::AnimatePillOpacity(float to, int ms)
 {
-    AnimateScalar(m_compositor, PillVisual(), L"Opacity", to, ms, soft ? m_ease : m_easeOut);
-    if (m_maskVisual) {
-        AnimateScalar(m_backdropCompositor, m_maskVisual, L"Opacity", to, ms,
-                      soft ? m_backdropEase : m_backdropEaseOut);
+    if (MotionMs(ms) == 0) {
+        SetPillOpacity(to);
+        return;
     }
-}
-
-void IndicatorWindow::AnimatePillScale(float to, int ms, bool soft)
-{
-    AnimateVector3(m_compositor, PillVisual(), L"Scale", {to, to, 1.0f}, ms, soft ? m_ease : m_easeOut);
-    if (m_maskVisual) {
-        AnimateVector3(m_backdropCompositor, m_maskVisual, L"Scale", {to, to, 1.0f}, ms,
-                       soft ? m_backdropEase : m_backdropEaseOut);
-    }
-}
-
-void IndicatorWindow::SetBackdropShape(float w, float h, float x, float y)
-{
-    if (!m_maskShape) return;
-    m_maskShape.StopAnimation(L"Size");
-    m_maskShape.StopAnimation(L"Offset");
-    m_maskShape.StopAnimation(L"CornerRadius");
-    m_maskShape.Size({w, h});
-    m_maskShape.Offset({x, y});
-    m_maskShape.CornerRadius({h * 0.5f, h * 0.5f});
-}
-
-void IndicatorWindow::SyncBackdropSurface()
-{
-    if (!m_maskSurface || !m_hwnd) return;
-    const auto w = static_cast<float>(PillFrame().Width());
-    const auto h = static_cast<float>(PillFrame().Height());
-    if (!(w > 0.0f && h > 0.0f)) return; // NaN until the first SyncFrameToState
-    RECT client{};
-    if (!::GetClientRect(m_hwnd, &client) || client.right <= 0 || client.bottom <= 0) return;
-
-    // The surface is the window's size in physical pixels and the shape is in
-    // PillFrame DIPs: the DPI container scales it up and offsets it to where
-    // layout put the Border. The brush's Fill stretch then maps the surface
-    // onto the window exactly, whatever units the backdrop is painted in.
-    const auto scale = static_cast<float>(DpiScale());
-    const float2 px{static_cast<float>(client.right), static_cast<float>(client.bottom)};
-    const auto origin = FrameOrigin(w, h);
-    m_maskSurface.SourceSize(px);
-    m_maskRoot.Size(px);
-    m_maskDpi.Offset({origin.x * scale, origin.y * scale, 0.0f});
-    m_maskDpi.Size({w, h});
-    m_maskDpi.Scale({scale, scale, 1.0f});
-    m_maskVisual.Size({w, h});
-}
-
-void IndicatorWindow::ResetBackdropShape()
-{
-    SyncBackdropSurface();
-    if (!m_maskShape) return;
-    const auto w = static_cast<float>(PillFrame().Width());
-    const auto h = static_cast<float>(PillFrame().Height());
-    if (!(w > 0.0f && h > 0.0f)) return;
-    SetBackdropShape(w, h, 0.0f, 0.0f);
-}
-
-winrt::Windows::Foundation::Point IndicatorWindow::TrackedCentre()
-{
-    // In the pill style the readout keeps its shape through a morph, so its
-    // centre will do. In the dot style it grows out of the dot and folds back
-    // into it, so the dot is what has to stay still.
-    const mux::FrameworkElement element =
-        m_dotStyle ? mux::FrameworkElement{DotHost()} : mux::FrameworkElement{ReadoutGroup()};
-    const auto origin =
-        element.TransformToVisual(PillFrame()).TransformPoint(winrt::Windows::Foundation::Point{0.0f, 0.0f});
-    return {origin.X + static_cast<float>(element.ActualWidth()) * 0.5f,
-            origin.Y + static_cast<float>(element.ActualHeight()) * 0.5f};
+    AnimateScalar(m_compositor, PillVisual(), L"Opacity", to, ms, m_eases.out);
+    if (m_maskVisual) AnimateScalar(m_backdropCompositor, m_maskVisual, L"Opacity", to, ms, m_backdropEases.out);
 }
 
 // ================================================================= Pointer
@@ -1425,16 +1881,6 @@ void IndicatorWindow::OnPillPointerPressed(winrt::Windows::Foundation::IInspecta
         ApplyClickThrough(!m_persisted.click_through);
         (void)m_persisted.Save();
     }
-}
-
-void IndicatorWindow::OnActionsTapped(winrt::Windows::Foundation::IInspectable const& /*sender*/,
-                                      muxi::TappedRoutedEventArgs const& args)
-{
-    // A Button raises Click and does not mark the Tapped gesture handled, so a
-    // press on Pause or Stop still bubbled up to PillFrame and collapsed the
-    // pill on the same frame. The buttons answer through Click; the tap ends
-    // here.
-    args.Handled(true);
 }
 
 void IndicatorWindow::OnPillTapped(winrt::Windows::Foundation::IInspectable const& /*sender*/,
@@ -1488,47 +1934,50 @@ double IndicatorWindow::DpiScale() const noexcept
     return dpi > 0 ? static_cast<double>(dpi) / 96.0 : 1.0;
 }
 
-float2 IndicatorWindow::Anchor() const noexcept
+void IndicatorWindow::ApplyHitRegion(::yip::IndicatorState s)
 {
-    return {0.5f, m_bottom ? 1.0f : 0.0f};
-}
+    if (!m_hwnd) return;
 
-float2 IndicatorWindow::FrameOrigin(float w, float h) const
-{
-    // Centred across the window and flush with the anchored edge, which is
-    // what the Border's alignment asks layout for. Snapped to whole physical
-    // pixels the way layout rounding places it, so the blur mask and the mouse
-    // region land on the Border's edge rather than half a pixel off it.
-    RECT client{};
-    if (!m_hwnd || !::GetClientRect(m_hwnd, &client)) return {0.0f, 0.0f};
-    const auto scale = static_cast<float>(DpiScale());
-    const float windowW = static_cast<float>(client.right) / scale;
-    const float windowH = static_cast<float>(client.bottom) / scale;
-    const auto snap = [scale](float v) { return std::round(v * scale) / scale; };
-    const auto anchor = Anchor();
-    return {snap((windowW - w) * anchor.x), snap((windowH - h) * anchor.y)};
-}
-
-void IndicatorWindow::ApplyHitRegion(float w, float h)
-{
-    if (!m_hwnd || !(w > 0.0f && h > 0.0f)) return;
-
-    // The window is sized for the expanded pill, so around a collapsed one it
-    // is mostly transparent pixels — which still take the mouse, because the
-    // window is not layered. A rectangle rather than the capsule: a region is
-    // aliased, and a rounded one once chewed the Border's antialiased edge
-    // into steps. A pixel of slack keeps that edge well inside it.
+    // The window is sized for the expanded pill and its bounce, so around the
+    // resting shapes it is mostly transparent pixels — which still take the
+    // mouse, because the window is not layered. A rectangle per shape rather
+    // than the shape itself: a region is aliased, and a rounded one once
+    // chewed the capsule's antialiased edge into steps. The slack keeps that
+    // edge, and the ~1 DIP rim outside it, well inside the region, which clips
+    // drawing as well as the mouse.
+    const bool expanded = (s == ::yip::IndicatorState::Expanded);
+    const auto layout = LayoutFor(m_dotStyle, expanded);
     const double scale = DpiScale();
-    const auto origin = FrameOrigin(w, h);
-    const int left = static_cast<int>(std::floor(origin.x * scale)) - 1;
-    const int top = static_cast<int>(std::floor(origin.y * scale)) - 1;
-    const int right = static_cast<int>(std::ceil((origin.x + w) * scale)) + 1;
-    const int bottom = static_cast<int>(std::ceil((origin.y + h) * scale)) + 1;
+    const int slack = static_cast<int>(std::ceil(2.0 * scale));
 
-    HRGN region = ::CreateRectRgn(left, top, right, bottom);
+    HRGN region = ::CreateRectRgn(0, 0, 0, 0);
     if (!region) return;
+    const auto add = [&](Blob const& b) {
+        if (!(b.w > 0.0f && b.h > 0.0f)) return;
+        const double x = b.cx - b.w * 0.5;
+        const double y = BlobY(b.d, m_bottom) - b.h * 0.5;
+        HRGN part = ::CreateRectRgn(static_cast<int>(std::floor(x * scale)) - slack,
+                                    static_cast<int>(std::floor(y * scale)) - slack,
+                                    static_cast<int>(std::ceil((x + b.w) * scale)) + slack,
+                                    static_cast<int>(std::ceil((y + b.h) * scale)) + slack);
+        if (!part) return;
+        (void)::CombineRgn(region, region, part, RGN_OR);
+        ::DeleteObject(part);
+    };
+    add(layout.cap);
+    if (expanded) {
+        add(layout.pause);
+        add(layout.stop);
+    }
     // On success the window owns the region; only a refusal leaves it ours.
     if (!::SetWindowRgn(m_hwnd, region, TRUE)) ::DeleteObject(region);
+}
+
+void IndicatorWindow::ApplyHitRegionWhole()
+{
+    // While shapes move nothing is at rest to cut around, and a region would
+    // clip whatever overshoots it.
+    if (m_hwnd) (void)::SetWindowRgn(m_hwnd, nullptr, TRUE);
 }
 
 void IndicatorWindow::PlacePillAtHome()
@@ -1539,23 +1988,23 @@ void IndicatorWindow::PlacePillAtHome()
     auto primary = muw::DisplayArea::Primary();
     if (!appWindow || !primary) return;
 
-    PillFrame().VerticalAlignment(m_bottom ? mux::VerticalAlignment::Bottom : mux::VerticalAlignment::Top);
-
     // WorkArea is physical pixels, so the DIP sizes are scaled first. Rounded
-    // up, so the expanded Border always fits inside the window. Twice at most:
-    // the first move can carry the window onto a display with another DPI, and
-    // the size has to be worked out in that display's pixels.
+    // up, so every shape always fits inside the window. Flush with the work
+    // area's edge: the pill's own margin is inside the window, which is what
+    // gives the entrance an edge to drip from. Twice at most: the first move
+    // can carry the window onto a display with another DPI, and the size has
+    // to be worked out in that display's pixels.
     const auto work = primary.WorkArea();
     for (int pass = 0; pass < 2; ++pass) {
         const double scale = DpiScale();
-        const int w = static_cast<int>(std::ceil(kExpandedW * scale));
-        const int h = static_cast<int>(std::ceil(kExpandedH * scale));
-        const int margin = static_cast<int>(std::lround(kHomeMarginDip * scale));
+        const int w = static_cast<int>(std::ceil(kWindowW * scale));
+        const int h = static_cast<int>(std::ceil(kWindowH * scale));
         const int x = work.X + (work.Width - w) / 2;
-        const int y = m_bottom ? work.Y + work.Height - h - margin : work.Y + margin;
+        const int y = m_bottom ? work.Y + work.Height - h : work.Y;
         appWindow.MoveAndResize({x, y, w, h});
         if (DpiScale() == scale) break;
     }
+    SyncShapeSurfaces();
 }
 
 // =========================================================== Visibility

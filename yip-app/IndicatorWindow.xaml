@@ -9,33 +9,52 @@
 
     <Grid x:Name="Root" Background="Transparent">
         <!--
-            The window is sized once, for the largest state, and never changes
-            while the pill is on screen: IndicatorWindow::SyncFrameToState sizes
-            this Border per state inside it. Centred across, flush with whichever
-            screen edge the pill hangs from (VerticalAlignment is set from code).
-            Size and radius are set from code before the first show.
+            The pill's surface. Nothing in XAML draws a capsule: every shape
+            (the capsule or lamp disc, the Pause and Stop discs, and the edge
+            and neck the entrance drips from) is a composition geometry, and
+            one goo effect over all of them paints this host's child visual.
+            Shapes near each other melt together; that is the whole effect.
         -->
-        <Border
-            x:Name="PillFrame"
-            Background="{ThemeResource YipIndicatorSurfaceBrush}"
-            BorderBrush="{ThemeResource YipIndicatorStrokeQuietBrush}"
-            BorderThickness="1"
-            HorizontalAlignment="Center"
-            VerticalAlignment="Top"
-            PointerPressed="OnPillPointerPressed"
-            Tapped="OnPillTapped">
+        <Border x:Name="GooHost" IsHitTestVisible="False" />
 
-            <Grid x:Name="PillContent" Padding="{StaticResource YipIndicatorPadding}">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />     <!-- readout, centred in what is left -->
-                    <ColumnDefinition Width="Auto" />  <!-- expanded actions -->
-                </Grid.ColumnDefinitions>
+        <!--
+            Content and hit targets only. IndicatorWindow::PlaceContent puts
+            each element where its shape comes to rest; while a shape moves,
+            an expression keeps the element's composition Translation on the
+            shape's centre, so no layout pass runs per frame.
+        -->
+        <Canvas x:Name="PillCanvas">
+            <Canvas.Resources>
+                <!-- The discs are the buttons' surface; the Button template
+                     only adds a hover and press tint on top of them. -->
+                <StaticResource x:Key="ButtonBackgroundPointerOver" ResourceKey="YipIndicatorActionFillBrush" />
+                <StaticResource x:Key="ButtonBackgroundPressed" ResourceKey="YipIndicatorActionFillBrush" />
+                <StaticResource x:Key="ButtonForegroundPointerOver" ResourceKey="YipIndicatorActionInkBrush" />
+                <StaticResource x:Key="ButtonForegroundPressed" ResourceKey="YipIndicatorActionInkBrush" />
+                <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+                <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
+                <Style x:Key="PillActionButton" TargetType="Button">
+                    <Setter Property="Width" Value="40" />
+                    <Setter Property="Height" Value="40" />
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="CornerRadius" Value="20" />
+                    <Setter Property="BorderThickness" Value="0" />
+                    <Setter Property="Background" Value="Transparent" />
+                    <Setter Property="Foreground" Value="{ThemeResource YipIndicatorActionInkBrush}" />
+                    <Setter Property="HorizontalContentAlignment" Value="Center" />
+                    <Setter Property="VerticalContentAlignment" Value="Center" />
+                </Style>
+            </Canvas.Resources>
 
-                <!-- Dot, meter and clock travel as one group. With the actions
-                     collapsed the star column is the whole pill, so the group sits
-                     dead centre; expanded, it centres in the space left of them.
-                     In the dot style the detail collapses and the dot is all
-                     there is. -->
+            <!-- The capsule (pill style) or lamp disc (dot style): a tap
+                 target the size of its shape, with the readout centred in it. -->
+            <Border
+                x:Name="PillFrame"
+                Background="Transparent"
+                PointerPressed="OnPillPointerPressed"
+                Tapped="OnPillTapped">
+                <!-- Dot, meter and clock travel as one group. In the dot style
+                     the detail collapses and the lamp is all there is. -->
                 <StackPanel x:Name="ReadoutGroup"
                             Orientation="Horizontal"
                             HorizontalAlignment="Center"
@@ -68,54 +87,31 @@
                                    AutomationProperties.Name="Elapsed recording time" />
                     </StackPanel>
                 </StackPanel>
+            </Border>
 
-                <StackPanel x:Name="ExpandedActions"
-                            Grid.Column="1"
-                            Orientation="Horizontal"
-                            Spacing="6"
-                            Margin="8,0,0,0"
-                            VerticalAlignment="Center"
-                            Visibility="Collapsed"
-                            IsHitTestVisible="False"
-                            Tapped="OnActionsTapped">
-                    <StackPanel.Resources>
-                        <!-- Round glass buttons, as drawn in .design/Pill.dc.html. -->
-                        <Style x:Key="PillActionButton" TargetType="Button">
-                            <Setter Property="Width" Value="34" />
-                            <Setter Property="Height" Value="34" />
-                            <Setter Property="Padding" Value="0" />
-                            <Setter Property="CornerRadius" Value="17" />
-                            <Setter Property="BorderThickness" Value="1" />
-                            <Setter Property="Background" Value="{ThemeResource YipIndicatorActionFillBrush}" />
-                            <Setter Property="BorderBrush" Value="{ThemeResource YipIndicatorActionStrokeBrush}" />
-                            <Setter Property="Foreground" Value="{ThemeResource YipIndicatorActionInkBrush}" />
-                            <Setter Property="HorizontalContentAlignment" Value="Center" />
-                            <Setter Property="VerticalContentAlignment" Value="Center" />
-                        </Style>
-                    </StackPanel.Resources>
-                    <!-- Hold before stop: pausing is the recoverable one, so it
-                         takes the inner slot where the thumb lands first, and
-                         the irreversible button is the one further out. -->
-                    <Button x:Name="PauseButton"
-                            Style="{StaticResource PillActionButton}"
-                            Click="OnPauseClicked"
-                            AutomationProperties.Name="Pause"
-                            ToolTipService.ToolTip="Pause">
-                        <FontIcon x:Name="PauseGlyph"
-                                  FontFamily="Segoe Fluent Icons"
-                                  Glyph="&#xE769;"
-                                  FontSize="13" />
-                    </Button>
-                    <Button x:Name="StopButton"
-                            Style="{StaticResource PillActionButton}"
-                            Click="OnStopClicked"
-                            AutomationProperties.Name="Stop"
-                            ToolTipService.ToolTip="Stop">
-                        <Rectangle Width="9" Height="9" RadiusX="2" RadiusY="2"
-                                   Fill="{ThemeResource YipIndicatorActionInkBrush}" />
-                    </Button>
-                </StackPanel>
-            </Grid>
-        </Border>
+            <!-- Hold before stop: pausing is the recoverable one, so it takes
+                 the inner slot, and the irreversible button sits further out.
+                 Each rides its own disc, which splits off the capsule. -->
+            <Button x:Name="PauseButton"
+                    Style="{StaticResource PillActionButton}"
+                    Visibility="Collapsed"
+                    Click="OnPauseClicked"
+                    AutomationProperties.Name="Pause"
+                    ToolTipService.ToolTip="Pause">
+                <FontIcon x:Name="PauseGlyph"
+                          FontFamily="Segoe Fluent Icons"
+                          Glyph="&#xE769;"
+                          FontSize="13" />
+            </Button>
+            <Button x:Name="StopButton"
+                    Style="{StaticResource PillActionButton}"
+                    Visibility="Collapsed"
+                    Click="OnStopClicked"
+                    AutomationProperties.Name="Stop"
+                    ToolTipService.ToolTip="Stop">
+                <Rectangle Width="9" Height="9" RadiusX="2" RadiusY="2"
+                           Fill="{ThemeResource YipIndicatorActionInkBrush}" />
+            </Button>
+        </Canvas>
     </Grid>
 </Window>
