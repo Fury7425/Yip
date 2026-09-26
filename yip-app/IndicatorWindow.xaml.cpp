@@ -69,11 +69,13 @@ constexpr int kSavingHoldMs = 350; // how long the Saving frame stays up
 // Motion. The pill's shapes are one goo: the entrance drips from the screen
 // edge, and expanding splits the Pause and Stop discs off the capsule. Every
 // shape motion ends in a small overshoot and spring-back, so the goo lands
-// like a liquid rather than stopping dead.
+// like a liquid rather than stopping dead. Every frame of a motion redraws the
+// goo and the blur behind it at the display's refresh rate, so a motion's
+// length is its GPU cost: measured, the effect itself is a small part of it.
 constexpr int kFadeMs = 180;           // opacity settle between two visible states (Recording <-> Saving)
-constexpr int kDripInMs = 720;         // hidden -> visible: the drop hangs, pinches off and lands
-constexpr int kDripOutMs = 520;        // visible -> hidden: the same drip backwards; nobody waits to watch it go
-constexpr int kSplitMs = 480;          // collapsed <-> expanded, bounce included
+constexpr int kDripInMs = 560;         // hidden -> visible: the drop hangs, pinches off and lands
+constexpr int kDripOutMs = 400;        // visible -> hidden: the same drip backwards; nobody waits to watch it go
+constexpr int kSplitMs = 380;          // collapsed <-> expanded, bounce included
 constexpr float kSplitStagger = 0.12f; // Stop trails Pause out and leads it back in, as a fraction of kSplitMs
 
 // The bounce. A shape reaching its spot runs kBounceTravel past it, stretched
@@ -144,6 +146,10 @@ std::wstring FormatPillElapsed(uint64_t ms) noexcept
 // grows to their size and the three sit in a row.
 constexpr float kPillW = 156.0f;
 constexpr float kPillH = 44.0f;
+// Expanded, the capsule gives up some of its length to the discs it sheds, so
+// the goo reads as one amount of liquid divided rather than two discs made
+// from nothing. Still room for the readout at "H:MM:SS" (~108 DIP).
+constexpr float kPillSplitW = 124.0f;
 // The dot style's disc: the 8 DIP lamp with enough glass round it to read on
 // any wallpaper and still take a click.
 constexpr float kDotSize = 24.0f;
@@ -157,7 +163,7 @@ constexpr float kHomeMarginDip = 12.0f;
 // Room around the resting shapes for the bounce to overshoot into. The window
 // reaches the screen edge itself, so the entrance has an edge to drip from.
 constexpr float kBounceRoom = 12.0f;
-constexpr float kWindowW = kPillW + 2.0f * (kSplitGap + kActionDot) + 2.0f * kBounceRoom;
+constexpr float kWindowW = std::max(kPillW, kPillSplitW + 2.0f * (kSplitGap + kActionDot)) + 2.0f * kBounceRoom;
 constexpr float kWindowH = kHomeMarginDip + kPillH + kBounceRoom;
 
 // The goo: the shapes are blurred by kGooBlurDip, then cut where the blurred
@@ -189,21 +195,23 @@ struct PillLayout {
 };
 
 /// Where the shapes rest. Collapsed, Pause and Stop are tucked away at zero
-/// size inside the capsule's far end (or the dot's middle), which is where
-/// they split from and melt back into.
+/// size inside the capsule (or the dot's middle), which is where they split
+/// from and melt back into. In the pill style that is the round end the
+/// shorter, expanded capsule comes to rest with, so the discs travel out of
+/// the capsule while it draws back from them.
 PillLayout LayoutFor(bool dot, bool expanded) noexcept
 {
     constexpr float c = kWindowW * 0.5f;
     if (!dot) {
         constexpr float d = kHomeMarginDip + kPillH * 0.5f;
+        constexpr float left = c - (kPillSplitW + 2.0f * (kSplitGap + kActionDot)) * 0.5f;
         if (!expanded) {
-            constexpr Blob tucked{c + kPillW * 0.5f - kPillH * 0.5f, d, 0.0f, 0.0f};
+            constexpr Blob tucked{left + kPillSplitW - kPillH * 0.5f, d, 0.0f, 0.0f};
             return {{c, d, kPillW, kPillH}, tucked, tucked};
         }
-        constexpr float left = c - (kPillW + 2.0f * (kSplitGap + kActionDot)) * 0.5f;
-        return {{left + kPillW * 0.5f, d, kPillW, kPillH},
-                {left + kPillW + kSplitGap + kActionDot * 0.5f, d, kActionDot, kActionDot},
-                {left + kPillW + 2.0f * kSplitGap + kActionDot * 1.5f, d, kActionDot, kActionDot}};
+        return {{left + kPillSplitW * 0.5f, d, kPillSplitW, kPillH},
+                {left + kPillSplitW + kSplitGap + kActionDot * 0.5f, d, kActionDot, kActionDot},
+                {left + kPillSplitW + 2.0f * kSplitGap + kActionDot * 1.5f, d, kActionDot, kActionDot}};
     }
     if (!expanded) {
         constexpr float d = kHomeMarginDip + kDotSize * 0.5f;
@@ -509,19 +517,17 @@ void Follow(mucomp::Compositor const& c, mux::UIElement const& element,
 // second copy of the palette, so a miss is visible instead of plausible.
 constexpr winrt::Windows::UI::Color kMissingToken{0xFF, 0x80, 0x80, 0x80};
 
-// Direct2D effect CLSIDs, spelled out so four GUIDs do not pull in
+// Direct2D effect CLSIDs, spelled out so three GUIDs do not pull in
 // d2d1effects_2.h and a dxguid.lib link.
 constexpr GUID kAlphaMaskEffectId{0xc80ecff0, 0x3fd5, 0x4f05, {0x83, 0x28, 0xc5, 0xd1, 0x72, 0x4b, 0x4f, 0x0a}};
 constexpr GUID kGaussianBlurEffectId{0x1feb6d69, 0x2fe6, 0x4ac9, {0x8c, 0x58, 0x1d, 0x7f, 0x93, 0xe7, 0xa6, 0xa5}};
 constexpr GUID kColorMatrixEffectId{0x921f03d6, 0x641c, 0x47df, {0x85, 0x2d, 0xb4, 0xbb, 0x61, 0x53, 0xae, 0x11}};
-constexpr GUID kCompositeEffectId{0x48fc9f51, 0xf6ac, 0x48f1, {0x8b, 0x58, 0x3b, 0x28, 0xac, 0x46, 0xf7, 0x6d}};
 
 // The D2D enum values the effects below are set with.
 constexpr uint32_t kBlurOptimizationBalanced = 1; // D2D1_GAUSSIANBLUR_OPTIMIZATION_BALANCED
 constexpr uint32_t kBorderModeSoft = 0;           // D2D1_BORDER_MODE_SOFT
 constexpr uint32_t kColorMatrixPremultiplied = 1; // D2D1_COLORMATRIX_ALPHA_MODE_PREMULTIPLIED
-constexpr uint32_t kCompositeSourceOver = 0;      // D2D1_COMPOSITE_MODE_SOURCE_OVER
-constexpr uint32_t kCompositeDestinationOut = 5;  // D2D1_COMPOSITE_MODE_DESTINATION_OUT
+constexpr uint32_t kColorMatrixStraight = 2;      // D2D1_COLORMATRIX_ALPHA_MODE_STRAIGHT: the matrix as is
 
 /// A Direct2D effect as a composition effect graph node. Composition reads an
 /// effect through the D2D1 interop metadata, which Win2D would normally
@@ -617,40 +623,71 @@ wge::IGraphicsEffect Blur(wge::IGraphicsEffectSource source, float sigma)
                    PropertyValue::CreateUInt32(kBorderModeSoft)});
 }
 
+/// A clamped colour matrix. D2D1_MATRIX_5X4_F, row-major: rows are the input
+/// R, G, B, A and a constant; columns the output R, G, B, A.
+wge::IGraphicsEffect ColorMatrix(wge::IGraphicsEffectSource source, std::array<float, 20> const& m,
+                                 uint32_t alphaMode)
+{
+    return Effect(kColorMatrixEffectId, {std::move(source)},
+                  {PropertyValue::CreateSingleArray(m), PropertyValue::CreateUInt32(alphaMode),
+                   PropertyValue::CreateBoolean(true)});
+}
+
 /// Opaque white wherever `source`'s alpha crosses the goo's threshold.
 wge::IGraphicsEffect Threshold(wge::IGraphicsEffectSource source, float offset)
 {
-    // D2D1_MATRIX_5X4_F, row-major: rows are the input R, G, B, A and a
-    // constant; columns the output R, G, B, A.
     std::array<float, 20> m{};
     m[15] = kGooGain; // A <- A
     m[16] = 1.0f;     // R <- 1
     m[17] = 1.0f;     // G <- 1
     m[18] = 1.0f;     // B <- 1
     m[19] = offset;   // A <- + offset
-    return Effect(kColorMatrixEffectId, {std::move(source)},
-                  {PropertyValue::CreateSingleArray(m), PropertyValue::CreateUInt32(kColorMatrixPremultiplied),
-                   PropertyValue::CreateBoolean(true)});
+    return ColorMatrix(std::move(source), m, kColorMatrixPremultiplied);
 }
 
-/// `top` composited onto `bottom` with a D2D composite mode.
-wge::IGraphicsEffect Composite(wge::IGraphicsEffectSource bottom, wge::IGraphicsEffectSource top, uint32_t mode)
-{
-    return Effect(kCompositeEffectId, {std::move(bottom), std::move(top)}, {PropertyValue::CreateUInt32(mode)});
-}
-
-/// The pill: the shapes in "Shapes", cut to goo, filled with the "Tint" brush
-/// and, with `rim`, rimmed with the "Rim" brush. `Param` is the compositor's
-/// CompositionEffectSourceParameter.
+/// The pill in one blur: the shapes in "Shapes", cut to goo, filled with
+/// `tint` and rimmed with `rim`. One matrix makes both cuts at once, the rim's
+/// into red and the fill's into green, and a second mixes those into
+/// the two colours. (Layered — blur, threshold and composite per cut — a
+/// compositor on an Intel Arc refused the graph as "too complex" and the rim
+/// never showed.) The colours are numbers in the matrix rather than brushes,
+/// so the brush is rebuilt when either changes.
 template <typename Param>
-wge::IGraphicsEffect GooGraph(float sigma, bool rim)
+wge::IGraphicsEffect FusedGooGraph(float sigma, winrt::Windows::UI::Color tint, winrt::Windows::UI::Color rim)
 {
-    const auto cut = [sigma](float offset) { return Threshold(Blur(Param{L"Shapes"}, sigma), offset); };
-    auto fill = AlphaMask(Param{L"Tint"}, cut(kGooFillOffset));
-    if (!rim) return fill;
-    auto ring =
-        AlphaMask(Param{L"Rim"}, Composite(cut(kGooRimOffset), cut(kGooFillOffset), kCompositeDestinationOut));
-    return Composite(fill, ring, kCompositeSourceOver);
+    std::array<float, 20> cut{};
+    cut[12] = kGooGain;       // R <- A
+    cut[13] = kGooGain;       // G <- A
+    cut[16] = kGooRimOffset;  // R <- + rim offset
+    cut[17] = kGooFillOffset; // G <- + fill offset
+    cut[19] = 1.0f;           // A <- 1, so premultiplied and straight agree for the mix
+    // The rim cut R contains the fill cut G, and where the fill has begun the
+    // rim is already whole, so rim over the band and tint inside is
+    // R * rim + G * (tint - rim), in premultiplied colour. (Over the fill's
+    // own antialiased pixel the old graph let the rim show a touch less
+    // through the translucent tint; nothing a person can see.)
+    const auto premul = [](winrt::Windows::UI::Color c) {
+        const float a = c.A / 255.0f;
+        return std::array<float, 4>{c.R / 255.0f * a, c.G / 255.0f * a, c.B / 255.0f * a, a};
+    };
+    const auto t = premul(tint);
+    const auto r = premul(rim);
+    std::array<float, 20> mix{};
+    for (size_t i = 0; i < 4; ++i) {
+        mix[i] = r[i];            // from R
+        mix[4 + i] = t[i] - r[i]; // from G
+    }
+    return ColorMatrix(ColorMatrix(Blur(Param{L"Shapes"}, sigma), cut, kColorMatrixPremultiplied), mix,
+                       kColorMatrixStraight);
+}
+
+/// The goo without its rim, for a compositor that refuses the one-blur
+/// graph's straight-alpha matrix: the shapes in "Shapes", cut to goo and
+/// filled with the "Tint" brush.
+template <typename Param>
+wge::IGraphicsEffect RimlessGooGraph(float sigma)
+{
+    return AlphaMask(Param{L"Tint"}, Threshold(Blur(Param{L"Shapes"}, sigma), kGooFillOffset));
 }
 
 // M4: temporary. Under a debugger only, asks the compositor which of the goo's
@@ -695,11 +732,9 @@ void ProbeGooEffects(mucomp::Compositor const& c)
                                        {PropertyValue::CreateSingleArray(m), PropertyValue::CreateUInt32(0),
                                         PropertyValue::CreateBoolean(true)}));
     probe(L"matrix-only", Effect(kColorMatrixEffectId, {P{L"S"}}, {PropertyValue::CreateSingleArray(m)}));
-    probe(L"composite-over", Composite(P{L"A"}, P{L"B"}, kCompositeSourceOver));
-    probe(L"composite-destout", Composite(P{L"A"}, P{L"B"}, kCompositeDestinationOut));
     probe(L"cut", Threshold(Blur(P{L"S"}, 4.0f), kGooFillOffset));
-    probe(L"fill", GooGraph<P>(4.0f, false));
-    probe(L"goo", GooGraph<P>(4.0f, true));
+    probe(L"rimless", RimlessGooGraph<P>(4.0f));
+    probe(L"goo", FusedGooGraph<P>(4.0f, kMissingToken, kMissingToken));
 }
 } // namespace
 
@@ -1139,6 +1174,8 @@ void IndicatorWindow::ApplySurfaceTint()
     if (!m_tintBrush) return;
     m_tintBrush.Color(::yip::theme::Color(
         m_blurActive ? L"YipIndicatorSurfaceBlurredBrush" : L"YipIndicatorSurfaceBrush", kMissingToken));
+    // The one-blur goo carries its colours in the effect, not in brushes.
+    SyncGooColors();
 }
 
 void IndicatorWindow::ApplyAlwaysOnTop()
@@ -1271,21 +1308,18 @@ void IndicatorWindow::BuildGooBrush()
     auto shapes = m_compositor.CreateSurfaceBrush(surface);
     shapes.Stretch(mucomp::CompositionStretch::Fill);
 
-    // The full goo, then the goo without its rim: a compositor that refuses
-    // the ring's composite still melts the shapes. The pill is drawn in DIPs,
-    // and so is the blur radius.
+    // The one-blur goo, then the goo without its rim.
+    m_shapeBrush = shapes;
     mucomp::CompositionEffectBrush brush{nullptr};
-    for (const bool rim : {true, false}) {
+    for (const auto kind : {GooKind::Fused, GooKind::Rimless}) {
         try {
-            auto effect = GooGraph<mucomp::CompositionEffectSourceParameter>(kGooBlurDip, rim);
-            brush = m_compositor.CreateEffectFactory(effect).CreateBrush();
-            brush.SetSourceParameter(L"Shapes", shapes);
-            brush.SetSourceParameter(L"Tint", m_tintBrush);
-            if (rim) brush.SetSourceParameter(L"Rim", m_strokeBrush);
+            brush = MakeGooBrush(kind);
+            m_gooKind = kind;
             break;
         } catch (winrt::hresult_error const& e) {
             brush = nullptr;
-            std::wstring line = rim ? L"Yip: goo effect refused" : L"Yip: rimless goo effect refused";
+            std::wstring line =
+                kind == GooKind::Fused ? L"Yip: goo effect refused" : L"Yip: rimless goo effect refused";
             line += L": ";
             line += std::wstring_view{e.message()};
             line += L'\n';
@@ -1315,6 +1349,36 @@ void IndicatorWindow::BuildGooBrush()
         shape.StrokeThickness(1.0f);
     }
     muxh::ElementCompositionPreview::SetElementChildVisual(GooHost(), m_shapeVisual);
+}
+
+mucomp::CompositionEffectBrush IndicatorWindow::MakeGooBrush(GooKind kind)
+{
+    // The pill is drawn in DIPs, and so is the blur radius.
+    using P = mucomp::CompositionEffectSourceParameter;
+    const bool fused = kind == GooKind::Fused;
+    auto effect = fused ? FusedGooGraph<P>(kGooBlurDip, m_tintBrush.Color(), m_strokeBrush.Color())
+                        : RimlessGooGraph<P>(kGooBlurDip);
+    auto brush = m_compositor.CreateEffectFactory(effect).CreateBrush();
+    brush.SetSourceParameter(L"Shapes", m_shapeBrush);
+    if (fused) {
+        m_gooTint = m_tintBrush.Color();
+        m_gooRim = m_strokeBrush.Color();
+    } else {
+        brush.SetSourceParameter(L"Tint", m_tintBrush);
+    }
+    return brush;
+}
+
+void IndicatorWindow::SyncGooColors()
+{
+    if (!m_gooSprite || m_gooKind != GooKind::Fused) return;
+    if (m_tintBrush.Color() == m_gooTint && m_strokeBrush.Color() == m_gooRim) return;
+    try {
+        m_gooSprite.Brush(MakeGooBrush(GooKind::Fused));
+    } catch (winrt::hresult_error const&) {
+        // Built once already, so this compositor takes the graph; keep the
+        // old colours rather than lose the pill.
+    }
 }
 
 void IndicatorWindow::SyncShapeSurfaces()

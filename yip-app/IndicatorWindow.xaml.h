@@ -78,6 +78,12 @@ private:
     // the surface tint and rimmed with the quiet stroke. Falls back to the
     // shapes drawn plainly if this compositor cannot run the effect.
     void BuildGooBrush();
+    // How the goo is painted: one blur with the colours baked in, or, where
+    // that graph is refused, without its rim.
+    enum class GooKind : uint8_t { Fused, Rimless };
+    winrt::Microsoft::UI::Composition::CompositionEffectBrush MakeGooBrush(GooKind kind);
+    // Rebuild the fused goo's brush if the tint or rim colour moved.
+    void SyncGooColors();
     // Composition holds Colors, not {ThemeResource} bindings, so the tokens
     // have to be re-read whenever the system theme flips.
     void ResolveThemeBrushes();
@@ -223,6 +229,11 @@ private:
     // plainly, where the drip's edge and neck would show as lumps and are
     // left out.
     bool m_gooActive{false};
+    GooKind m_gooKind{GooKind::Fused};
+    winrt::Microsoft::UI::Composition::CompositionSurfaceBrush m_shapeBrush{nullptr};
+    // The colours the fused goo's brush was built with.
+    winrt::Windows::UI::Color m_gooTint{};
+    winrt::Windows::UI::Color m_gooRim{};
     winrt::Microsoft::UI::Composition::SpriteVisual m_dotVisual{nullptr};
     std::array<winrt::Microsoft::UI::Composition::SpriteVisual, 4> m_barVisuals{nullptr, nullptr, nullptr,
                                                                                 nullptr};
