@@ -244,7 +244,7 @@ jobs:
           New-Item -ItemType Directory -Force installer/out | Out-Null
           & "${{ steps.iscc.outputs.path }}" `
             "/DYipSourceDir=$((Resolve-Path dist).Path)" `
-            "/DYipVersion=0.1.0" `
+            "/DYipVersion=1.0.0" `
             "/DYipArch=x64" `
             installer/yip.iss
 

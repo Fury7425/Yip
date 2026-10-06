@@ -7,7 +7,7 @@ installer does not build anything itself.
 ```powershell
 cmake --preset release
 cmake --build --preset release
-iscc /DYipSourceDir=..\build\release\yip-app\Release /DYipVersion=0.1.0 installer\yip.iss
+iscc /DYipSourceDir=..\build\release\yip-app\Release /DYipVersion=1.0.0 installer\yip.iss
 ```
 
 The result lands in `installer/out/yip-setup-<version>-<arch>.exe`.
@@ -44,7 +44,7 @@ wrong regardless. **This lowers the odds; it does not fix the problem.**
 The actual fix is an Authenticode signature:
 
 ```powershell
-iscc /DYipSourceDir=... /DYipVersion=0.1.0 `
+iscc /DYipSourceDir=... /DYipVersion=1.0.0 `
      /DYipSignTool=yipsign `
      "/Syipsign=signtool.exe sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f cert.pfx /p $env:CERT_PW $f" `
      installer\yip.iss

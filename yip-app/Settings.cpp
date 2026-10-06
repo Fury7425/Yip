@@ -113,6 +113,9 @@ Settings Settings::Load()
     if (obj.HasKey(L"pill_edge")) {
         s.pill_bottom = obj.GetNamedString(L"pill_edge", L"top") == L"bottom";
     }
+    if (obj.HasKey(L"show_indicator")) {
+        s.show_indicator = obj.GetNamedBoolean(L"show_indicator", true);
+    }
     return s;
 }
 
@@ -129,6 +132,7 @@ bool Settings::Save() const
     obj.SetNamedValue(L"hotkey_vk", wdj::JsonValue::CreateNumberValue(static_cast<double>(hotkey_vk)));
     obj.SetNamedValue(L"pill_style", wdj::JsonValue::CreateStringValue(pill_dot ? L"dot" : L"pill"));
     obj.SetNamedValue(L"pill_edge", wdj::JsonValue::CreateStringValue(pill_bottom ? L"bottom" : L"top"));
+    obj.SetNamedValue(L"show_indicator", wdj::JsonValue::CreateBooleanValue(show_indicator));
 
     const auto path = SettingsPath();
     std::error_code ec;

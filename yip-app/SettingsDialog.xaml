@@ -55,6 +55,29 @@
                   HorizontalScrollBarVisibility="Disabled"
                   Padding="0,0,12,0">
         <StackPanel Spacing="8" MaxWidth="376">
+            <!-- ===================== General ===================== -->
+            <TextBlock Text="GENERAL" Style="{StaticResource SettingsSection}" />
+
+            <Border Style="{StaticResource SettingsGroup}">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="Start with Windows" Style="{StaticResource SettingsLabel}" />
+                        <TextBlock Style="{StaticResource SettingsHint}"
+                                   Text="Starts Yip in the notification area when you sign in." />
+                    </StackPanel>
+                    <ToggleSwitch x:Name="StartAtLoginToggle"
+                                  Grid.Column="1"
+                                  MinWidth="0"
+                                  OnContent=""
+                                  OffContent=""
+                                  AutomationProperties.Name="Start with Windows" />
+                </Grid>
+            </Border>
+
             <!-- ===================== Recording ===================== -->
             <TextBlock Text="RECORDING" Style="{StaticResource SettingsSection}" />
 
@@ -207,33 +230,53 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
 
                     <StackPanel Spacing="2" VerticalAlignment="Center">
+                        <TextBlock Text="Show indicator" Style="{StaticResource SettingsLabel}" />
+                        <TextBlock Style="{StaticResource SettingsHint}"
+                                   Text="The floating pill shown while recording." />
+                    </StackPanel>
+                    <ToggleSwitch x:Name="ShowIndicatorToggle"
+                                  Grid.Column="1"
+                                  MinWidth="0"
+                                  IsOn="True"
+                                  OnContent=""
+                                  OffContent=""
+                                  AutomationProperties.Name="Show indicator" />
+
+                    <Rectangle Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
+
+                    <StackPanel Grid.Row="2" Spacing="2" VerticalAlignment="Center">
                         <TextBlock Text="Style" Style="{StaticResource SettingsLabel}" />
                         <TextBlock Style="{StaticResource SettingsHint}"
                                    Text="Dot shows only the recording light. Click it for the timer and controls." />
                     </StackPanel>
                     <ComboBox x:Name="PillStyleCombo"
+                              Grid.Row="2"
                               Grid.Column="1"
                               Width="128"
                               VerticalAlignment="Center"
                               SelectedIndex="0"
+                              IsEnabled="{Binding IsOn, ElementName=ShowIndicatorToggle}"
                               CornerRadius="{StaticResource YipControlCornerRadius}"
                               AutomationProperties.Name="Indicator style">
                         <ComboBoxItem Content="Pill" />
                         <ComboBoxItem Content="Dot" />
                     </ComboBox>
 
-                    <Rectangle Grid.Row="1" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
+                    <Rectangle Grid.Row="3" Grid.ColumnSpan="2" Style="{StaticResource SettingsDivider}" />
 
-                    <TextBlock Grid.Row="2" Text="Position" Style="{StaticResource SettingsLabel}" />
+                    <TextBlock Grid.Row="4" Text="Position" Style="{StaticResource SettingsLabel}" />
                     <ComboBox x:Name="PillEdgeCombo"
-                              Grid.Row="2"
+                              Grid.Row="4"
                               Grid.Column="1"
                               Width="128"
                               VerticalAlignment="Center"
                               SelectedIndex="0"
+                              IsEnabled="{Binding IsOn, ElementName=ShowIndicatorToggle}"
                               CornerRadius="{StaticResource YipControlCornerRadius}"
                               AutomationProperties.Name="Indicator position">
                         <ComboBoxItem Content="Top" />

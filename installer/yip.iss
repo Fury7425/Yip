@@ -5,13 +5,13 @@
 ; runtime prerequisite, no MSIX, no elevation.
 ;
 ; Build:
-;   iscc /DYipSourceDir=..\build\release\yip-app\Release /DYipVersion=0.1.0 yip.iss
+;   iscc /DYipSourceDir=..\build\release\yip-app\Release /DYipVersion=1.0.0 yip.iss
 
 #ifndef YipSourceDir
   #define YipSourceDir "..\build\release\yip-app\Release"
 #endif
 #ifndef YipVersion
-  #define YipVersion "0.1.0"
+  #define YipVersion "1.0.0"
 #endif
 #ifndef YipArch
   #define YipArch "x64"

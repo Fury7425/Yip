@@ -147,6 +147,7 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
 
     bool PillDot() const noexcept { return m_settings.pill_dot; }
     bool PillBottom() const noexcept { return m_settings.pill_bottom; }
+    bool ShowIndicator() const noexcept { return m_settings.show_indicator; }
 
     winrt::hstring FilterText() const noexcept { return m_filterText; }
     void FilterText(winrt::hstring const& v);
@@ -159,7 +160,8 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     void ToggleRecording();
     void ApplySettings(winrt::hstring const& folder, uint32_t sampleRate, uint16_t channels, uint16_t format,
                        uint16_t bitDepth, uint16_t bitrateKbps, uint32_t hotkeyMods, uint32_t hotkeyVk,
-                       bool pillDot, bool pillBottom);
+                       bool pillDot, bool pillBottom, bool showIndicator,
+                       bool startAtLogin);
     void RevealRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
     void OpenRecordingExternally(winrt::yip::viewmodels::RecordingEntry const& entry);
     bool DeleteRecording(winrt::yip::viewmodels::RecordingEntry const& entry);

@@ -5,6 +5,7 @@
 #include "HotkeyManager.h"
 #include "MainWindow.xaml.h"
 #include "IndicatorWindow.xaml.h"
+#include "Startup.h"
 #include "TrayIcon.h"
 
 #include <DispatcherQueue.h>
@@ -83,6 +84,13 @@ void App::OnLaunched(winrt::Microsoft::UI::Xaml::LaunchActivatedEventArgs const&
     SetupTray();
     SetupHotkey();
 
+    // Started at sign-in: stay in the notification area, no window.
+    if (std::wstring_view{::GetCommandLineW()}.find(::yip::startup::kBackgroundArg) !=
+        std::wstring_view::npos) {
+        RestartIdleTimer();
+        return;
+    }
+
     CreateMainWindow();
     m_window.Activate();
 }
@@ -145,6 +153,18 @@ void App::OnViewModelPropertyChanged(winrt::Windows::Foundation::IInspectable co
     // ApplySettings raises HotkeyMods then HotkeyVk; re-registering once, on
     // the second, sees both. Register() drops the old combo first.
     if (args.PropertyName() == L"HotkeyVk") ApplyHotkey();
+
+    if (args.PropertyName() == L"ShowIndicator") {
+        if (!m_viewModel.ShowIndicator()) {
+            // Mid-take included: closing it hands its memory back at once.
+            if (m_indicator) {
+                m_indicator.Close();
+                m_indicator = nullptr;
+            }
+        } else if (::rec_is_recording()) {
+            EnsureIndicator();
+        }
+    }
 }
 
 // ============================================================ Capture state
@@ -166,7 +186,7 @@ void App::OnRecordingStateChanged(bool recording)
 
 void App::EnsureIndicator()
 {
-    if (m_indicator || m_quitting) return;
+    if (m_indicator || m_quitting || !m_viewModel.ShowIndicator()) return;
     // Its constructor reads the live state and transitions straight into
     // Recording; it never needs Activate(), since visibility is driven by
     // AppWindow.Show()/Hide() inside it.

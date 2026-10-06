@@ -8,6 +8,7 @@
 #include "AudioCoreInterop.h"
 #include "SettingsDialog.xaml.h"
 #include "Settings.h"
+#include "Startup.h"
 #include "ThemeColors.h"
 #include "resource.h"
 
@@ -912,6 +913,8 @@ winrt::fire_and_forget MainWindow::OnOpenSettings(winrt::Windows::Foundation::II
     dialog.HotkeyVk(strong->m_viewModel.HotkeyVk());
     dialog.PillDot(strong->m_viewModel.PillDot());
     dialog.PillBottom(strong->m_viewModel.PillBottom());
+    dialog.ShowIndicator(strong->m_viewModel.ShowIndicator());
+    dialog.StartAtLogin(::yip::startup::IsEnabled());
 
     // ContentDialog needs an XamlRoot in WinAppSDK.
     dialog.XamlRoot(strong->Content().XamlRoot());
@@ -921,7 +924,8 @@ winrt::fire_and_forget MainWindow::OnOpenSettings(winrt::Windows::Foundation::II
         strong->m_viewModel.ApplySettings(dialog.OutputFolder(), dialog.SampleRate(), dialog.Channels(),
                                           dialog.Format(), dialog.BitDepth(), dialog.BitrateKbps(),
                                           dialog.HotkeyMods(), dialog.HotkeyVk(), dialog.PillDot(),
-                                          dialog.PillBottom());
+                                          dialog.PillBottom(), dialog.ShowIndicator(),
+                                          dialog.StartAtLogin());
         // The hotkey follows on its own: App re-registers when the view model
         // raises HotkeyVk.
         strong->UpdateEmptyState();

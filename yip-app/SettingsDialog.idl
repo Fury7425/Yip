@@ -15,5 +15,7 @@ namespace yip
         UInt32 HotkeyVk;
         Boolean PillDot;
         Boolean PillBottom;
+        Boolean ShowIndicator;
+        Boolean StartAtLogin;
     }
 }

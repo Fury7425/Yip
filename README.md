@@ -106,7 +106,7 @@ app you can run directly.
 ### Installer
 
 ```powershell
-iscc /DYipSourceDir=..\build\release\yip-app\Release /DYipVersion=0.1.0 installer\yip.iss
+iscc /DYipSourceDir=..\build\release\yip-app\Release /DYipVersion=1.0.0 installer\yip.iss
 ```
 
 The installer is written to `installer/out/yip-setup-<version>-<arch>.exe`.

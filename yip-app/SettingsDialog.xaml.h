@@ -36,6 +36,12 @@ struct SettingsDialog : SettingsDialogT<SettingsDialog> {
     bool PillBottom() const noexcept;
     void PillBottom(bool v);
 
+    bool ShowIndicator() const noexcept;
+    void ShowIndicator(bool v);
+
+    bool StartAtLogin() const noexcept;
+    void StartAtLogin(bool v);
+
     winrt::fire_and_forget OnPickFolder(winrt::Windows::Foundation::IInspectable const& sender,
                                         winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
 
@@ -67,6 +73,8 @@ private:
     uint32_t m_hotkeyVk{0x52};        // 'R'
     bool m_pillDot{false};
     bool m_pillBottom{false};
+    bool m_showIndicator{true};
+    bool m_startAtLogin{false};
 };
 } // namespace winrt::yip::implementation
 

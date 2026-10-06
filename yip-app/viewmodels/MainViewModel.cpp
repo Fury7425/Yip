@@ -8,6 +8,7 @@
 #include "HotkeyManager.h"
 #include "Markers.h"
 #include "RecordingFormat.h"
+#include "Startup.h"
 #include "ThemeColors.h"
 #include "WavProbe.h"
 
@@ -585,7 +586,8 @@ void MainViewModel::ToggleRecording()
 
 void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleRate, uint16_t channels,
                                   uint16_t format, uint16_t bitDepth, uint16_t bitrateKbps,
-                                  uint32_t hotkeyMods, uint32_t hotkeyVk, bool pillDot, bool pillBottom)
+                                  uint32_t hotkeyMods, uint32_t hotkeyVk, bool pillDot, bool pillBottom,
+                                  bool showIndicator, bool startAtLogin)
 {
     m_settings.output_folder = std::wstring{folder};
     m_settings.sample_rate = sampleRate;
@@ -600,11 +602,15 @@ void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleR
     }
     m_settings.pill_dot = pillDot;
     m_settings.pill_bottom = pillBottom;
+    m_settings.show_indicator = showIndicator;
 
     std::error_code ec;
     fs::create_directories(m_settings.output_folder, ec);
     if (!m_settings.Save()) {
         SetError(L"Could not write settings.json");
+    }
+    if (startAtLogin != ::yip::startup::IsEnabled() && !::yip::startup::SetEnabled(startAtLogin)) {
+        SetError(L"Could not change the start-with-Windows setting");
     }
 
     Raise(L"OutputFolder");
@@ -619,6 +625,7 @@ void MainViewModel::ApplySettings(winrt::hstring const& folder, uint32_t sampleR
     Raise(L"HotkeyLabel");
     Raise(L"PillDot");
     Raise(L"PillBottom");
+    Raise(L"ShowIndicator");
     RefreshRecordings();
     if (!HasError()) SetStatus(L"Settings saved");
 }

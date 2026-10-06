@@ -33,6 +33,8 @@ struct Settings {
     // below the top. Both follow a save live, mid-take included.
     bool pill_dot{false};
     bool pill_bottom{false};
+    // Off: no pill at all, takes included. A change lands live, mid-take too.
+    bool show_indicator{true};
 
     // Returns the path to the settings file, creating parent dirs.
     static std::filesystem::path SettingsPath();

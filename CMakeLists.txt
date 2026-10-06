@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.27)
 
 project(yip
     LANGUAGES CXX
-    VERSION 0.1.0
+    VERSION 1.0.0
     DESCRIPTION "Yip — native Windows audio recorder"
 )
 

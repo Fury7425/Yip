@@ -216,6 +216,28 @@ void SettingsDialog::PillBottom(bool v)
     ApplyToControls();
 }
 
+bool SettingsDialog::ShowIndicator() const noexcept
+{
+    ReadFromControls();
+    return m_showIndicator;
+}
+void SettingsDialog::ShowIndicator(bool v)
+{
+    m_showIndicator = v;
+    ApplyToControls();
+}
+
+bool SettingsDialog::StartAtLogin() const noexcept
+{
+    ReadFromControls();
+    return m_startAtLogin;
+}
+void SettingsDialog::StartAtLogin(bool v)
+{
+    m_startAtLogin = v;
+    ApplyToControls();
+}
+
 void SettingsDialog::ApplyHotkeyToControls()
 {
     if (HotkeyBox()) {
@@ -352,6 +374,12 @@ void SettingsDialog::ApplyToControls()
     if (PillEdgeCombo()) {
         PillEdgeCombo().SelectedIndex(m_pillBottom ? 1 : 0);
     }
+    if (ShowIndicatorToggle()) {
+        ShowIndicatorToggle().IsOn(m_showIndicator);
+    }
+    if (StartAtLoginToggle()) {
+        StartAtLoginToggle().IsOn(m_startAtLogin);
+    }
     ApplyHotkeyToControls();
 }
 
@@ -402,6 +430,12 @@ void SettingsDialog::ReadFromControls() const
     }
     if (self->PillEdgeCombo()) {
         self->m_pillBottom = self->PillEdgeCombo().SelectedIndex() == 1;
+    }
+    if (self->ShowIndicatorToggle()) {
+        self->m_showIndicator = self->ShowIndicatorToggle().IsOn();
+    }
+    if (self->StartAtLoginToggle()) {
+        self->m_startAtLogin = self->StartAtLoginToggle().IsOn();
     }
 }
 
