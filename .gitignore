@@ -54,6 +54,10 @@ desktop.ini
 # Generated C headers from cbindgen
 audio-core/include/audio_core.h
 
-# Local tooling and design scratch
+# Local tooling
 .claude/
-.design/
+
+# Assembled design canvas — build output. The .dc.html artboards beside it are
+# the source and stay tracked.
+.design/*.html
+!.design/*.dc.html

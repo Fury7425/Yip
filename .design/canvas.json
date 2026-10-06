@@ -1,0 +1,47 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 620,
+      "h": 780,
+      "title": "Main — idle"
+    },
+    {
+      "file": "Recording.dc.html",
+      "x": 720,
+      "y": 0,
+      "w": 620,
+      "h": 780,
+      "title": "Main — recording"
+    },
+    {
+      "file": "Pill.dc.html",
+      "x": 1440,
+      "y": 0,
+      "w": 700,
+      "h": 430,
+      "title": "Floating pill"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "how-to",
+      "x": 0,
+      "y": -210,
+      "w": 620,
+      "text": "This is Yip as it actually ships right now — every colour, radius, size and font here is the live value from App.xaml.\n\nChange anything you like: click an element, use the properties panel, drag things around, retype text. Then hit Save.\n\nTell me you've saved and I'll read it back and make the app match exactly. No more guessing from screenshots."
+    },
+    {
+      "id": "wallpaper",
+      "x": 1440,
+      "y": 480,
+      "w": 700,
+      "text": "The desktop behind these is deliberately bright and busy, like yours. Judging contrast over a dark backdrop is exactly what made the first pass unreadable — so tune it here and it will transfer."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}
