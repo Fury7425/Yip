@@ -13,12 +13,26 @@ inline constexpr wchar_t kBackgroundArg[] = L"--background";
 namespace detail {
 inline constexpr wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
 inline constexpr wchar_t kValue[] = L"Yip";
+// Task Manager / Settings > Startup apps record an off switch here, and Windows
+// then ignores the Run value however it is written. Low bit of byte 0 set = off.
+inline constexpr wchar_t kApprovedKey[] =
+    L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
+
+inline bool DisabledByUser()
+{
+    BYTE state[12]{};
+    DWORD size = sizeof(state);
+    return ::RegGetValueW(HKEY_CURRENT_USER, kApprovedKey, kValue, RRF_RT_REG_BINARY, nullptr, state,
+                          &size) == ERROR_SUCCESS &&
+           size > 0 && (state[0] & 1) != 0;
+}
 } // namespace detail
 
 inline bool IsEnabled()
 {
     return ::RegGetValueW(HKEY_CURRENT_USER, detail::kRunKey, detail::kValue, RRF_RT_REG_SZ, nullptr, nullptr,
-                          nullptr) == ERROR_SUCCESS;
+                          nullptr) == ERROR_SUCCESS &&
+           !detail::DisabledByUser();
 }
 
 inline bool SetEnabled(bool enabled)
@@ -31,6 +45,8 @@ inline bool SetEnabled(bool enabled)
     const auto n = ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
     if (n == 0 || n >= MAX_PATH) return false;
     const std::wstring cmd = std::wstring{L"\""} + exe + L"\" " + kBackgroundArg;
+    // Clear a stale off switch, or the new Run value would still be ignored.
+    ::RegDeleteKeyValueW(HKEY_CURRENT_USER, detail::kApprovedKey, detail::kValue);
     return ::RegSetKeyValueW(HKEY_CURRENT_USER, detail::kRunKey, detail::kValue, REG_SZ, cmd.c_str(),
                              static_cast<DWORD>((cmd.size() + 1) * sizeof(wchar_t))) == ERROR_SUCCESS;
 }

@@ -88,7 +88,17 @@ Source: "{#YipSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdi
 Name: "{group}\Yip"; Filename: "{app}\yip-app.exe"
 Name: "{group}\Uninstall Yip"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\Yip"; Filename: "{app}\yip-app.exe"; Tasks: desktopicon
-Name: "{userstartup}\Yip"; Filename: "{app}\yip-app.exe"; Tasks: startupicon
+
+[InstallDelete]
+; Older installers made a Startup-folder shortcut with no --background, which
+; opened the window at sign-in and raced the Run value.
+Type: files; Name: "{userstartup}\Yip.lnk"
+
+[Registry]
+; Same Run value the Settings switch writes (see yip-app/Startup.h), so the two
+; agree, and Yip starts in the notification area instead of opening a window.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Yip"; \
+    ValueData: """{app}\yip-app.exe"" --background"; Flags: uninsdeletevalue; Tasks: startupicon
 
 [Run]
 Filename: "{app}\yip-app.exe"; Description: "Launch Yip"; Flags: nowait postinstall skipifsilent
