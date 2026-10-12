@@ -989,6 +989,7 @@ void IndicatorWindow::Teardown()
     m_stateToken = 0;
     ::yip::Settings::SetSavedHandler(nullptr);
     RevokeFirstFrame();
+    UnhookForeground();
     if (m_themeToken) {
         Root().ActualThemeChanged(m_themeToken);
         m_themeToken = {};
@@ -2073,6 +2074,24 @@ void IndicatorWindow::PlacePillAtHome()
 
 // =========================================================== Visibility
 
+namespace
+{
+// The one pill on screen; the WinEvent callback carries no context. Set and
+// cleared on the UI thread, which is also where the hook calls back.
+HWND g_topmostHwnd = nullptr;
+
+// TOPMOST once at show was not enough: another always-on-top window, or a
+// fullscreen app, activated mid-take lands above the pill and it stays buried.
+// Putting it back on top of the band on each foreground change costs nothing
+// while the user is not switching windows.
+void CALLBACK OnForegroundChanged(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD)
+{
+    if (g_topmostHwnd) {
+        ::SetWindowPos(g_topmostHwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+}
+} // namespace
+
 void IndicatorWindow::ShowWindow()
 {
     if (!m_hwnd) return;
@@ -2086,15 +2105,30 @@ void IndicatorWindow::ShowWindow()
     // Re-assert TOPMOST + NoActivate after show, in case the Win32
     // show path clobbered them.
     ::SetWindowPos(m_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    g_topmostHwnd = m_hwnd;
+    if (!m_foregroundHook) {
+        m_foregroundHook = ::SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
+                                             OnForegroundChanged, 0, 0, WINEVENT_OUTOFCONTEXT);
+    }
 }
 
 void IndicatorWindow::HideWindow()
 {
     if (!m_hwnd) return;
+    UnhookForeground();
     auto wid = AppWindow().Id();
     auto appWindow = muw::AppWindow::GetFromWindowId(wid);
     if (appWindow) appWindow.Hide();
     m_windowVisible = false;
+}
+
+void IndicatorWindow::UnhookForeground()
+{
+    if (m_foregroundHook) {
+        ::UnhookWinEvent(m_foregroundHook);
+        m_foregroundHook = nullptr;
+    }
+    if (g_topmostHwnd == m_hwnd) g_topmostHwnd = nullptr;
 }
 
 // =========================================================== Auto-collapse
