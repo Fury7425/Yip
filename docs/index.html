@@ -272,6 +272,19 @@
     .plate { padding-top: 1.6rem; }
   }
 
+  /* versus */
+  @media (min-width: 721px) { .vs th, .vs td { padding: .95rem 1.4rem; } }
+  .vs thead th:nth-child(2) { color: var(--red-ink); }
+  .vs td:first-child { font: 400 .7rem/1.6 var(--mono); text-transform: uppercase; color: var(--ink-3); width: 22%; }
+  .vs td { font-size: 1rem; }
+  .vs td:nth-child(3) { color: var(--ink-2); }
+  @media (max-width: 720px) {
+    .vs tbody tr { grid-template-columns: 1fr 1fr; row-gap: .35rem; }
+    .vs td:first-child { grid-column: 1 / -1; width: auto; }
+    .vs td:nth-child(2)::before { content: "Yip"; display: block; font: 400 .62rem/1.6 var(--mono); text-transform: uppercase; color: var(--red-ink); }
+    .vs td:nth-child(3)::before { content: "Sound Recorder"; display: block; font: 400 .62rem/1.6 var(--mono); text-transform: uppercase; color: var(--ink-3); }
+  }
+
   /* signal chain */
   .chain {
     display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -520,10 +533,36 @@
     </div>
   </section>
 
-  <section class="part" id="inside">
+  <section class="part" id="versus">
     <div class="wrap">
       <div class="part-head">
         <span class="num">§4</span>
+        <div>
+          <h2>Yip vs. Sound Recorder</h2>
+          <p>Windows already ships a recorder. It is a fine app to open and use. Yip is built for recording without leaving what you were doing.</p>
+        </div>
+      </div>
+      <div class="plate">
+        <table class="vs">
+          <thead><tr><th></th><th>Yip</th><th>Sound Recorder</th></tr></thead>
+          <tbody>
+            <tr><td>Start a take</td><td>Ctrl+Alt+R from any app</td><td>Open the app, click Record</td></tr>
+            <tr><td>While you work</td><td>A small pill stays on top with time, level, Pause and Stop</td><td>Status lives in its own window</td></tr>
+            <tr><td>Between takes</td><td>Waits in the tray at 0% CPU, window memory handed back</td><td>Not running until you open it</td></tr>
+            <tr><td>Quality</td><td>Exact bit depth (16 / 24 / 32-bit float) or bitrate</td><td>Auto, Best, High or Medium presets</td></tr>
+            <tr><td>Meter</td><td>Log scale, peak hold, clip lamp, dropped-frame count</td><td>Live waveform</td></tr>
+            <tr><td>Markers</td><td>None</td><td>Yes, during recording</td></tr>
+            <tr><td>Built from</td><td>WinUI 3 and a Rust engine. No network calls</td><td>Microsoft Store app</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="part" id="inside">
+    <div class="wrap">
+      <div class="part-head">
+        <span class="num">§5</span>
         <div>
           <h2>Inside</h2>
           <p>Native parts only. No web view, no runtime to install, no garbage collector anywhere near the audio.</p>
@@ -546,7 +585,7 @@
   <section class="part" id="keys">
     <div class="wrap">
       <div class="part-head">
-        <span class="num">§5</span>
+        <span class="num">§6</span>
         <div><h2>Keys</h2></div>
       </div>
       <div class="shortcuts">
@@ -562,13 +601,13 @@
   <section class="part" id="get">
     <div class="wrap">
       <div class="part-head">
-        <span class="num">§6</span>
+        <span class="num">§7</span>
         <div><h2>Get it</h2></div>
       </div>
       <div class="get">
         <ol class="steps">
           <li><div>
-            <p>Download <code>yip-setup-x64</code> from the latest <a href="https://github.com/Fury7425/Yip/actions/workflows/ci.yml">build</a>.</p>
+            <p>Download <code>yip-setup</code> for x64 or ARM64 from the <a href="https://github.com/Fury7425/Yip/releases/latest">latest release</a>.</p>
           </div></li>
           <li><div>
             <p>Run it. It installs for you alone, so there’s no admin prompt.</p>
