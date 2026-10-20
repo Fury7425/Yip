@@ -576,7 +576,7 @@
       </div>
       <div class="figures">
         <div class="fig"><b>0<small>%</small></b><span>CPU while idle. Nothing ticks until a take starts.</span></div>
-        <div class="fig"><b>20<small>Hz</small></b><span>Meter refresh on the pill — enough to read, not enough to keep the GPU awake.</span></div>
+        <div class="fig"><b>25<small>Hz</small></b><span>Meter refresh on the pill — enough to read, not enough to keep the GPU awake.</span></div>
         <div class="fig"><b>0</b><span>Locks between the microphone and the file. A lock-free ring carries every sample.</span></div>
       </div>
     </div>
@@ -705,7 +705,7 @@
     const s = Math.floor(ms / 1000);
     return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
   };
-  // 20 Hz, like the real pill: enough to read, no more.
+  // 25 Hz, like the real pill: enough to read, no more.
   const tick = () => {
     const now = performance.now();
     if (state === 'rec') elapsed += now - last;
@@ -728,7 +728,7 @@
     pauseBtn.textContent = 'Pause';
     document.body.classList.add('rec');
     hint.innerHTML = '<b>● Recording</b> (pretend). Tap the pill, or press it again to stop.';
-    clearInterval(timer); timer = setInterval(tick, 50); tick();
+    clearInterval(timer); timer = setInterval(tick, 40); tick();
   };
   const stop = () => {
     clearInterval(timer);
