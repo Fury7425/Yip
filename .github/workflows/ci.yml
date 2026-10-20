@@ -208,10 +208,14 @@ jobs:
           retention-days: 14
 
   installer:
-    name: installer (Inno Setup, x64)
+    name: installer (Inno Setup, ${{ matrix.arch }})
     runs-on: windows-latest
-    needs: native
+    needs: [native, native-arm64]
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x64, arm64]
     defaults:
       run:
         shell: pwsh
@@ -221,7 +225,7 @@ jobs:
       - name: Download yip-app build
         uses: actions/download-artifact@v4
         with:
-          name: yip-app-x64
+          name: yip-app-${{ matrix.arch }}
           path: dist
 
       - name: Locate or install Inno Setup
@@ -245,13 +249,13 @@ jobs:
           & "${{ steps.iscc.outputs.path }}" `
             "/DYipSourceDir=$((Resolve-Path dist).Path)" `
             "/DYipVersion=1.0.0" `
-            "/DYipArch=x64" `
+            "/DYipArch=${{ matrix.arch }}" `
             installer/yip.iss
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: yip-setup-x64
+          name: yip-setup-${{ matrix.arch }}
           path: installer/out/*.exe
           if-no-files-found: error
           retention-days: 14
