@@ -156,6 +156,7 @@ private:
 
     // ----- Visibility -----
     void ShowWindow();
+    void UnhookForeground();
     void HideWindow();
 
     // ----- Auto-collapse -----
@@ -205,6 +206,8 @@ private:
     // differ while the pill is fading out.
     bool m_shown{false};
     bool m_windowVisible{false};
+    // Re-asserts TOPMOST on every foreground change while the pill is shown.
+    HWINEVENTHOOK m_foregroundHook{nullptr};
     // One-shot CompositionTarget::Rendering hook for the show fade; empty
     // when none is pending.
     winrt::event_token m_firstFrameToken{};
