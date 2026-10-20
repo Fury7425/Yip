@@ -409,7 +409,7 @@
   <div class="wrap mono">
     <span class="mark"><i></i>Yip / operating notes</span>
     <span class="meta">
-      <span>Rev. 0.1</span>
+      <span>v1.0</span>
       <span>Windows 10 2004+ · x64 · ARM64</span>
       <a href="https://github.com/Fury7425/Yip">Source ↗</a>
     </span>
@@ -432,7 +432,7 @@
             <p class="keys-hint mono" id="hint">Go on — this page answers to it too.</p>
           </div>
           <div class="ctas rise d4">
-            <a class="btn solid" href="#get"><span class="r"></span>Get Yip for Windows</a>
+            <a class="btn solid" id="get-btn" href="https://github.com/Fury7425/Yip/releases/latest"><span class="r"></span><span id="get-label">Get Yip for Windows</span></a>
             <a class="btn ghost" href="https://github.com/Fury7425/Yip">Read the source</a>
           </div>
         </div>
@@ -686,6 +686,21 @@
   tag.style.left = (start + end) / 2 / 10 + '%';
   tag.textContent = '▼ yip';
   svg.parentNode.appendChild(tag);
+
+  /* ── download button: straight to the right installer when the browser
+     says which CPU this is (Chromium's UA client hints); otherwise the
+     release page, where both are listed ── */
+  const VERSION = '1.0.0';
+  if (navigator.userAgentData?.platform === 'Windows') {
+    navigator.userAgentData.getHighEntropyValues(['architecture', 'bitness']).then(h => {
+      const arch = h.architecture === 'arm' ? 'arm64'
+                 : h.architecture === 'x86' && h.bitness === '64' ? 'x64' : null;
+      if (!arch) return;
+      document.getElementById('get-btn').href =
+        `https://github.com/Fury7425/Yip/releases/download/v${VERSION}/yip-setup-${VERSION}-${arch}.exe`;
+      document.getElementById('get-label').textContent = `Get Yip ${VERSION.slice(0, 3)} for Windows (${arch === 'arm64' ? 'ARM64' : 'x64'})`;
+    }).catch(() => {});
+  }
 
   /* ── struck-through words ── */
   const io = new IntersectionObserver(es => es.forEach(e => {
