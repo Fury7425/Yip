@@ -27,8 +27,8 @@ Press a hotkey, talk, press it again.
 [Build from source](#build-from-source)
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/media/hero-dark.png">
-  <img src="docs/media/hero-light.png" alt="Yip main window: elapsed clock, level meter and the recordings list" width="820">
+  <img src="docs/media/hero-light.png" alt="Yip main window: elapsed clock, level meter and the recordings list" width="300">
+  <img src="docs/media/hero-dark.png" alt="Yip main window: elapsed clock, level meter and the recordings list" width="300">
 </picture>
 
 </div>
