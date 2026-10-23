@@ -54,12 +54,13 @@ single dot that holds just the recording light.
 
 <p align="center">
   <img src="docs/media/pill-dot.png" alt="The pill in dot style" width="240">
+  <img src="docs/media/pill-pill.png" alt="The pill in dot style" width="240">
 </p>
 
 ### Built-in playback
 
 <p align="center">
-  <img src="docs/media/playback.png" alt="Transport strip under the recordings list with play/pause, scrubber and level" width="820">
+  <img src="docs/media/playback.png" alt="Transport strip under the recordings list with play/pause, scrubber and level" width="620">
 </p>
 
 Click a recording to play it. The transport has play/pause, a scrubber and a
@@ -69,7 +70,7 @@ engine as capture runs it in reverse.
 ### Four formats, no extra encoders
 
 <p align="center">
-  <img src="docs/media/settings.png" alt="Settings dialog with format, quality, hotkey and recordings folder" width="620">
+  <img src="docs/media/settings.png" alt="Settings dialog with format, quality, hotkey and recordings folder" width="400">
 </p>
 
 | Format | Settings                    | Good for |
