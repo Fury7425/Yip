@@ -44,6 +44,13 @@
                         <FontIcon Glyph="&#xE8C8;" />
                     </MenuFlyoutItem.Icon>
                 </MenuFlyoutItem>
+                <!-- The key is the window's F2 accelerator; this only shows it. -->
+                <MenuFlyoutItem Text="Rename" Click="OnRenameItem"
+                                KeyboardAcceleratorTextOverride="F2">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE8AC;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Delete" Click="OnDeleteItem">
                     <MenuFlyoutItem.Icon>
@@ -57,6 +64,7 @@
             <KeyboardAccelerator Key="F" Modifiers="Control" Invoked="OnSearchAccelerator" />
             <KeyboardAccelerator Key="P" Modifiers="Control" Invoked="OnPlayAccelerator" />
             <KeyboardAccelerator Key="F5" Invoked="OnRefreshAccelerator" />
+            <KeyboardAccelerator Key="F2" Invoked="OnRenameAccelerator" />
         </Grid.KeyboardAccelerators>
 
         <Grid.RowDefinitions>
@@ -239,6 +247,14 @@
                                    VerticalAlignment="Center"
                                    Foreground="{ThemeResource YipTextSecondaryBrush}" />
                     </StackPanel>
+                    <TextBlock Grid.Column="2"
+                               Text="{x:Bind ViewModel.TakeSizeText, Mode=OneWay}"
+                               FontSize="{StaticResource YipFontMicro}"
+                               TextAlignment="Right"
+                               TextTrimming="CharacterEllipsis"
+                               VerticalAlignment="Center"
+                               Foreground="{ThemeResource YipTextTertiaryBrush}"
+                               AutomationProperties.Name="Recording size and free space" />
                     <StackPanel x:Name="ClipLamp" Grid.Column="3" Spacing="3" Opacity="0.18"
                                 Tapped="OnAcknowledgeClip"
                                 ToolTipService.ToolTip="Clipping detected. Click to reset."
@@ -368,6 +384,8 @@
                         SelectionMode="Single"
                         IsItemClickEnabled="True"
                         ItemClick="OnRecordingClick"
+                        CanDragItems="True"
+                        DragItemsStarting="OnRecordingsDragStarting"
                         Padding="6,0,6,8"
                         AutomationProperties.Name="Recordings">
                         <ListView.ItemContainerStyle>
