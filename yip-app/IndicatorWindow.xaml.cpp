@@ -9,6 +9,7 @@
 #include "ThemeColors.h"
 
 #include <DispatcherQueue.h>
+#include <commctrl.h>
 #include <dwmapi.h>
 #include <microsoft.ui.xaml.window.h>
 #include <windows.graphics.effects.interop.h>
@@ -736,6 +737,25 @@ void ProbeGooEffects(mucomp::Compositor const& c)
     probe(L"rimless", RimlessGooGraph<P>(4.0f));
     probe(L"goo", FusedGooGraph<P>(4.0f, kMissingToken, kMissingToken));
 }
+
+constexpr UINT_PTR kEraseSubclassId = 1;
+
+/// Erases the pill's HWND to black, which per-pixel alpha shows as transparent
+/// (see IndicatorWindow::ApplyBackdrop).
+LRESULT CALLBACK EraseBlackProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR /*id*/,
+                                DWORD_PTR /*refData*/)
+{
+    if (msg == WM_ERASEBKGND) {
+        RECT client{};
+        if (::GetClientRect(hwnd, &client)) {
+            ::FillRect(reinterpret_cast<HDC>(wParam), &client,
+                       static_cast<HBRUSH>(::GetStockObject(BLACK_BRUSH)));
+        }
+        return 1;
+    }
+    if (msg == WM_NCDESTROY) ::RemoveWindowSubclass(hwnd, &EraseBlackProc, kEraseSubclassId);
+    return ::DefSubclassProc(hwnd, msg, wParam, lParam);
+}
 } // namespace
 
 namespace winrt::yip::implementation {
@@ -1091,6 +1111,14 @@ void IndicatorWindow::ApplyBackdrop()
         blur.hRgnBlur = ::CreateRectRgn(-2, -2, -1, -1);
         (void)::DwmEnableBlurBehindWindow(m_hwnd, &blur);
         if (blur.hRgnBlur) ::DeleteObject(blur.hRgnBlur);
+
+        // With per-pixel alpha on, DWM reads the window's background as
+        // premultiplied, and GDI's erase writes alpha 0. The default erase
+        // paints the theme's window colour, so in light mode alpha-0 white was added over
+        // the desktop and the pill sat on an opaque white rectangle (in dark
+        // mode the near-black only hazed it). Black is the one colour that
+        // reads as nothing. Re-subclassing with the same id only replaces it.
+        ::SetWindowSubclass(m_hwnd, &EraseBlackProc, kEraseSubclassId, 0);
     }
 }
 
