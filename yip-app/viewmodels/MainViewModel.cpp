@@ -60,6 +60,9 @@ constexpr float kPlaybackLevelEpsilon = 1.0f / 88.0f;
 // How often the PEAK / RMS dB readouts refresh while recording.
 constexpr std::chrono::milliseconds kLabelInterval{100};
 
+// How often the take's size and the free space under it refresh.
+constexpr std::chrono::milliseconds kTakeSizeInterval{1000};
+
 /// Map an amplitude onto the meter's logarithmic 0..1 travel. A linear bar
 /// spends its whole length in the bottom fifth and tells you nothing.
 float MeterNorm(float amplitude)
@@ -201,6 +204,51 @@ std::wstring ToLower(std::wstring s)
     std::transform(s.begin(), s.end(), s.begin(),
                    [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
     return s;
+}
+
+enum class RecycleResult { Done, Cancelled, Failed };
+
+/// Move `paths` to the Recycle Bin in one shell operation. Where a file cannot
+/// be recycled (a network share, a drive with the bin turned off) the shell
+/// asks before destroying it rather than deleting it outright.
+RecycleResult Recycle(std::vector<fs::path> const& paths)
+{
+    // SHFileOperation wants NUL-separated paths ending in a second NUL.
+    std::wstring from;
+    for (const auto& p : paths) {
+        from += p.wstring();
+        from.push_back(L'\0');
+    }
+    from.push_back(L'\0');
+
+    SHFILEOPSTRUCTW op{};
+    op.wFunc = FO_DELETE;
+    op.pFrom = from.c_str();
+    op.fFlags = static_cast<FILEOP_FLAGS>(FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_WANTNUKEWARNING |
+                                          FOF_SILENT | FOF_NOERRORUI);
+    if (::SHFileOperationW(&op) != 0) return RecycleResult::Failed;
+    return op.fAnyOperationsAborted ? RecycleResult::Cancelled : RecycleResult::Done;
+}
+
+/// Characters Windows refuses in a file name.
+constexpr std::wstring_view kInvalidNameChars = L"\\/:*?\"<>|";
+
+/// Total bytes of a take on disk, counting the "(part N)" files a WAV rolls
+/// over into before the 4 GiB RIFF limit (audio-core's writer.rs).
+uint64_t TakeBytes(const fs::path& first)
+{
+    std::error_code ec;
+    uint64_t total = fs::file_size(first, ec);
+    if (ec) return 0;
+    const auto stem = first.stem().wstring();
+    const auto ext = first.extension().wstring();
+    for (int part = 2;; ++part) {
+        const auto next = first.parent_path() / (stem + L" (part " + std::to_wstring(part) + L")" + ext);
+        const auto size = fs::file_size(next, ec);
+        if (ec) break;
+        total += size;
+    }
+    return total;
 }
 
 std::wstring Utf8ToWide(const char* utf8)
@@ -521,6 +569,30 @@ void MainViewModel::Tick()
         m_elapsedText = text;
         Raise(L"ElapsedText");
     }
+
+    // Size on disk and room left. A stat per part and a volume query, so once
+    // a second rather than per meter tick — and at once when a take starts.
+    if (snapshot.recording == 0) {
+        SetTakeSizeText(L"");
+    } else if (m_takeSizeText.empty() || now - m_takeSizeStamp >= kTakeSizeInterval) {
+        m_takeSizeStamp = now;
+        const auto current = Utf8ToWide(rec_current_path());
+        if (!current.empty()) {
+            const fs::path path{current};
+            std::wstring size = FormatSize(TakeBytes(path));
+            std::error_code ec;
+            const auto space = fs::space(path.parent_path(), ec);
+            if (!ec) size += kDot + FormatSize(space.available) + L" free";
+            SetTakeSizeText(winrt::hstring{size});
+        }
+    }
+}
+
+void MainViewModel::SetTakeSizeText(winrt::hstring const& s)
+{
+    if (m_takeSizeText == s) return;
+    m_takeSizeText = s;
+    Raise(L"TakeSizeText");
 }
 
 void MainViewModel::ToggleRecording()
@@ -529,6 +601,7 @@ void MainViewModel::ToggleRecording()
         const auto status = rec_stop();
         m_isRecording = false;
         m_activeRecordingPath.reset();
+        SetTakeSizeText(L"");
         if (status != REC_STATUS_OK) {
             SetError(LastCoreError(L"Stop failed"));
         } else {
@@ -675,6 +748,8 @@ void MainViewModel::SyncRecordingState(bool recording)
     m_isRecording = recording;
     if (!recording) {
         m_activeRecordingPath.reset();
+        // Ended without a window ticking, the last reading would outlive it.
+        SetTakeSizeText(L"");
         RefreshRecordings();
         // A take stopped from the pill or the tray lands here, not in
         // ToggleRecording; without this the status line went on reading
@@ -737,18 +812,103 @@ bool MainViewModel::DeleteRecording(winrt::yip::viewmodels::RecordingEntry const
     // that is playing is one the user is deleting on purpose.
     if (m_playingPath && *m_playingPath == path) StopPlayback();
 
+    // To the Recycle Bin, not gone: one wrong click on Delete must not cost a
+    // take. The marker sidecar is meaningless without its take, so it goes too.
+    std::vector<fs::path> paths{path};
     std::error_code ec;
-    if (!fs::remove(path, ec) || ec) {
-        SetError(L"Could not delete that recording");
-        return false;
+    if (const auto sidecar = ::yip::markers::SidecarFor(path); fs::exists(sidecar, ec)) {
+        paths.push_back(sidecar);
     }
-    // The marker sidecar is meaningless without its take.
-    std::error_code sidecarEc;
-    fs::remove(::yip::markers::SidecarFor(path), sidecarEc);
+    switch (Recycle(paths)) {
+        case RecycleResult::Failed:
+            SetError(L"Could not delete that recording");
+            return false;
+        case RecycleResult::Cancelled:
+            SetStatus(L"Kept");
+            return false;
+        case RecycleResult::Done:
+            break;
+    }
 
     std::erase_if(m_rows, [&path](const Row& r) { return r.path == path; });
     ProjectRecordings();
-    SetStatus(winrt::hstring{L"Deleted " + path.filename().wstring()});
+    SetStatus(winrt::hstring{L"Moved " + path.filename().wstring() + L" to the Recycle Bin"});
+    return true;
+}
+
+bool MainViewModel::RenameRecording(winrt::yip::viewmodels::RecordingEntry const& entry,
+                                    winrt::hstring const& newName)
+{
+    if (!entry) return false;
+    const fs::path path{std::wstring{entry.FullPath()}};
+    if (m_activeRecordingPath && *m_activeRecordingPath == path) {
+        SetError(L"Stop the take before renaming it");
+        return false;
+    }
+
+    // The extension is not the user's to change: it is what the file is. A
+    // name typed with it on is taken as meant, not as "take.wav.wav". Windows
+    // drops trailing dots and spaces itself, so they are trimmed here first.
+    const auto ext = path.extension().wstring();
+    std::wstring stem{newName};
+    if (ToLower(fs::path{stem}.extension().wstring()) == ToLower(ext)) stem.resize(stem.size() - ext.size());
+    const auto first = stem.find_first_not_of(L' ');
+    const auto last = stem.find_last_not_of(L". ");
+    stem = (first == std::wstring::npos || last == std::wstring::npos || last < first)
+               ? std::wstring{}
+               : stem.substr(first, last - first + 1);
+    if (stem.empty()) {
+        SetError(L"A recording needs a name");
+        return false;
+    }
+    if (stem.find_first_of(kInvalidNameChars) != std::wstring::npos) {
+        SetError(L"A name cannot contain \\ / : * ? \" < > |");
+        return false;
+    }
+
+    const fs::path target = path.parent_path() / (stem + ext);
+    if (target == path) return true;
+    // fs::rename replaces an existing file, so a clash has to be caught here.
+    // `equivalent` lets a change of case through: on NTFS the "existing" file
+    // is the take itself.
+    std::error_code ec;
+    if (fs::exists(target, ec) && !fs::equivalent(target, path, ec)) {
+        SetError(L"A recording with that name already exists");
+        return false;
+    }
+
+    // Windows will not rename a file the decoder still has open. A take held
+    // by a closed window holds no file, so it keeps its place in the transport.
+    const bool loaded = m_playingPath && *m_playingPath == path;
+    if (loaded && IsPlaybackLive()) StopPlayback();
+
+    fs::rename(path, target, ec);
+    if (ec) {
+        SetError(L"Could not rename that recording");
+        return false;
+    }
+    // Markers follow their take; a sidecar left behind belongs to nothing.
+    std::error_code sidecarEc;
+    if (const auto sidecar = ::yip::markers::SidecarFor(path); fs::exists(sidecar, sidecarEc)) {
+        fs::rename(sidecar, ::yip::markers::SidecarFor(target), sidecarEc);
+    }
+
+    if (m_playingPath && *m_playingPath == path) {
+        m_playingPath = target;
+        m_playingFileName = winrt::hstring{target.filename().wstring()};
+        Raise(L"PlayingFileName");
+    }
+    // A rename keeps the write time, so the row keeps its place in the order.
+    for (auto& r : m_rows) {
+        if (r.path != path) continue;
+        r.path = target;
+        r.fileName = target.filename().wstring();
+        r.lowerName = ToLower(r.fileName);
+        break;
+    }
+    ProjectRecordings();
+    DismissError();
+    SetStatus(winrt::hstring{L"Renamed to " + target.filename().wstring()});
     return true;
 }
 

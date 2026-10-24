@@ -54,6 +54,8 @@ namespace yip.viewmodels
 
         // "00:00.0" while short, "1:02:03.4" past an hour.
         String ElapsedText{ get; };
+        // "12.3 MB · 210 GB free" while a take runs, empty otherwise.
+        String TakeSizeText{ get; };
 
         String StatusText{ get; };
         String ErrorText{ get; };
@@ -111,7 +113,11 @@ namespace yip.viewmodels
         // Hand the take to whatever the shell has registered for it. Playback
         // itself is native — this is the escape hatch, not the main path.
         void OpenRecordingExternally(RecordingEntry entry);
+        // Sends the take and its marker sidecar to the Recycle Bin.
         Boolean DeleteRecording(RecordingEntry entry);
+        // Rename keeps the extension and carries the marker sidecar along.
+        // False, with the reason in ErrorText, when the name is refused.
+        Boolean RenameRecording(RecordingEntry entry, String newName);
         void CopyRecordingPath(RecordingEntry entry);
 
         // ----- playback -----

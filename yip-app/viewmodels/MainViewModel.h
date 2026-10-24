@@ -120,6 +120,7 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     bool HasDropouts() const noexcept { return m_dropoutCount > 0; }
 
     winrt::hstring ElapsedText() const noexcept { return m_elapsedText; }
+    winrt::hstring TakeSizeText() const noexcept { return m_takeSizeText; }
 
     winrt::hstring StatusText() const noexcept { return m_statusText; }
     winrt::hstring ErrorText() const noexcept { return m_errorText; }
@@ -165,6 +166,7 @@ struct MainViewModel : MainViewModelT<MainViewModel> {
     void RevealRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
     void OpenRecordingExternally(winrt::yip::viewmodels::RecordingEntry const& entry);
     bool DeleteRecording(winrt::yip::viewmodels::RecordingEntry const& entry);
+    bool RenameRecording(winrt::yip::viewmodels::RecordingEntry const& entry, winrt::hstring const& newName);
     void CopyRecordingPath(winrt::yip::viewmodels::RecordingEntry const& entry);
 
     // ----- playback -----
@@ -215,6 +217,7 @@ private:
     std::filesystem::path NextRecordingPath() const;
     void SetStatus(winrt::hstring const& s);
     void SetError(winrt::hstring const& s);
+    void SetTakeSizeText(winrt::hstring const& s);
     // Read the last audio-core error, or `fallback` when there is none.
     static winrt::hstring LastCoreError(wchar_t const* fallback);
     // Rebuild the observable list from m_rows + m_filterText.
@@ -255,6 +258,9 @@ private:
     // When the peak-hold last fell; its fall is timed, not counted in ticks.
     std::chrono::steady_clock::time_point m_holdStamp{};
     winrt::hstring m_elapsedText{L"00:00.0"};
+    // "12.3 MB · 210 GB free" while recording, empty otherwise.
+    winrt::hstring m_takeSizeText{L""};
+    std::chrono::steady_clock::time_point m_takeSizeStamp{};
 
     winrt::hstring m_statusText{L"Ready"};
     winrt::hstring m_errorText{L""};

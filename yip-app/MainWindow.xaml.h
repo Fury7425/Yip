@@ -51,8 +51,13 @@ struct MainWindow : MainWindowT<MainWindow> {
                       winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     void OnCopyPathItem(winrt::Windows::Foundation::IInspectable const& sender,
                         winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+    void OnRenameItem(winrt::Windows::Foundation::IInspectable const& sender,
+                      winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
     winrt::fire_and_forget OnDeleteItem(winrt::Windows::Foundation::IInspectable const& sender,
                                         winrt::Microsoft::UI::Xaml::RoutedEventArgs const& args);
+    // Hand the selected file to the shell's drag, as a copy.
+    void OnRecordingsDragStarting(winrt::Windows::Foundation::IInspectable const& sender,
+                                  winrt::Microsoft::UI::Xaml::Controls::DragItemsStartingEventArgs const& args);
 
     // ----- playback transport -----
     void OnTogglePlayback(winrt::Windows::Foundation::IInspectable const& sender,
@@ -76,8 +81,14 @@ struct MainWindow : MainWindowT<MainWindow> {
     void OnPlayAccelerator(
         winrt::Microsoft::UI::Xaml::Input::KeyboardAccelerator const& sender,
         winrt::Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
+    void OnRenameAccelerator(
+        winrt::Microsoft::UI::Xaml::Input::KeyboardAccelerator const& sender,
+        winrt::Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args);
 
 private:
+    // Ask for a new name in a dialog, then hand it to the view model.
+    winrt::fire_and_forget PromptRename(winrt::yip::viewmodels::RecordingEntry entry);
+
     winrt::yip::viewmodels::MainViewModel m_viewModel{nullptr};
     winrt::Microsoft::UI::Dispatching::DispatcherQueueTimer m_meterTimer{nullptr};
     // Runs only while a take is loaded for playback, for the same reason the

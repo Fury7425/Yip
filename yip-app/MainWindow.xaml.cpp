@@ -19,12 +19,15 @@
 #include <winrt/Microsoft.UI.Composition.SystemBackdrops.h>
 #include <winrt/Microsoft.UI.Dispatching.h>
 #include <winrt/Microsoft.UI.Windowing.h>
+#include <winrt/Microsoft.UI.Xaml.Automation.h>
 #include <winrt/Microsoft.UI.Xaml.Controls.h>
 #include <winrt/Microsoft.UI.Xaml.Hosting.h>
 #include <winrt/Microsoft.UI.Xaml.Input.h>
 #include <winrt/Microsoft.UI.Xaml.Media.h>
 #include <winrt/Microsoft.UI.Xaml.Shapes.h>
+#include <winrt/Windows.ApplicationModel.DataTransfer.h>
 #include <winrt/Windows.Foundation.Numerics.h>
+#include <winrt/Windows.Storage.h>
 #include <winrt/Windows.System.h>
 
 #include <algorithm>
@@ -698,7 +701,14 @@ void MainWindow::UpdateEmptyState()
     // problems and want different sentences.
     const bool filtered = !m_viewModel.FilterText().empty();
     EmptyStateText().Text(filtered ? L"No matches" : L"No recordings yet");
-    EmptyStateHint().Text(filtered ? L"Try a different filter." : L"Press Record, or use the global hotkey.");
+    if (filtered) {
+        EmptyStateHint().Text(L"Try a different filter.");
+    } else if (m_viewModel.HotkeyVk() == 0) {
+        EmptyStateHint().Text(L"Press Record to make one.");
+    } else {
+        // The real shortcut, so the hint teaches it rather than pointing at it.
+        EmptyStateHint().Text(L"Press Record, or " + m_viewModel.HotkeyLabel() + L" from any app.");
+    }
 }
 
 void MainWindow::OnAcknowledgeClip(winrt::Windows::Foundation::IInspectable const& /*sender*/,
@@ -994,6 +1004,80 @@ void MainWindow::OnCopyPathItem(winrt::Windows::Foundation::IInspectable const& 
     if (auto entry = m_menuEntry) m_viewModel.CopyRecordingPath(entry);
 }
 
+void MainWindow::OnRenameItem(winrt::Windows::Foundation::IInspectable const& /*sender*/,
+                              winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
+{
+    if (auto entry = m_menuEntry) PromptRename(entry);
+}
+
+winrt::fire_and_forget MainWindow::PromptRename(winrt::yip::viewmodels::RecordingEntry entry)
+{
+    auto strong = get_strong();
+
+    // The extension is shown nowhere: it is not the user's to change.
+    winrt::TextBox box;
+    box.Text(std::filesystem::path{std::wstring{entry.FileName()}}.stem().wstring());
+    box.MaxLength(200);
+    winrt::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(box, L"New name");
+    // Whole name selected, so typing replaces it and the arrows edit it.
+    box.Loaded([](winrt::Windows::Foundation::IInspectable const& sender, winrt::RoutedEventArgs const&) {
+        auto self = sender.as<winrt::TextBox>();
+        self.SelectAll();
+        self.Focus(winrt::FocusState::Programmatic);
+    });
+
+    winrt::ContentDialog dialog;
+    dialog.XamlRoot(strong->Content().XamlRoot());
+    dialog.Title(winrt::box_value(winrt::hstring{L"Rename recording"}));
+    dialog.Content(box);
+    dialog.PrimaryButtonText(L"Rename");
+    dialog.CloseButtonText(L"Cancel");
+    // Enter in the box renames.
+    dialog.DefaultButton(winrt::ContentDialogButton::Primary);
+
+    const auto result = co_await dialog.ShowAsync();
+    if (result == winrt::ContentDialogResult::Primary) strong->m_viewModel.RenameRecording(entry, box.Text());
+    co_return;
+}
+
+void MainWindow::OnRecordingsDragStarting(
+    winrt::Windows::Foundation::IInspectable const& /*sender*/,
+    winrt::Microsoft::UI::Xaml::Controls::DragItemsStartingEventArgs const& args)
+{
+    namespace dt = winrt::Windows::ApplicationModel::DataTransfer;
+    if (args.Items().Size() == 0) {
+        args.Cancel(true);
+        return;
+    }
+    auto entry = args.Items().GetAt(0).try_as<winrt::yip::viewmodels::RecordingEntry>();
+    if (!entry) {
+        args.Cancel(true);
+        return;
+    }
+
+    // A copy, never a move: dropping a take into a chat must not take it out
+    // of the folder. The StorageFile is only fetched when a target asks for
+    // it, because that is async and this handler must return at once.
+    auto data = args.Data();
+    data.RequestedOperation(dt::DataPackageOperation::Copy);
+    data.SetDataProvider(
+        dt::StandardDataFormats::StorageItems(),
+        [path = entry.FullPath()](dt::DataProviderRequest request) -> winrt::fire_and_forget {
+            // Copied into the coroutine frame: the lambda's own capture is not
+            // guaranteed to outlive the first suspension.
+            const auto filePath = path;
+            auto deferral = request.GetDeferral();
+            try {
+                auto file = co_await winrt::Windows::Storage::StorageFile::GetFileFromPathAsync(filePath);
+                auto items = winrt::single_threaded_vector<winrt::Windows::Storage::IStorageItem>({file});
+                request.SetData(items.GetView());
+            } catch (winrt::hresult_error const&) {
+                // Gone or locked since the drag began; the target gets nothing.
+            }
+            deferral.Complete();
+        });
+}
+
 winrt::fire_and_forget MainWindow::OnDeleteItem(winrt::Windows::Foundation::IInspectable const& /*sender*/,
                                                 winrt::Microsoft::UI::Xaml::RoutedEventArgs const& /*args*/)
 {
@@ -1005,7 +1089,8 @@ winrt::fire_and_forget MainWindow::OnDeleteItem(winrt::Windows::Foundation::IIns
     winrt::Microsoft::UI::Xaml::Controls::ContentDialog dialog;
     dialog.XamlRoot(strong->Content().XamlRoot());
     dialog.Title(winrt::box_value(winrt::hstring{L"Delete recording?"}));
-    dialog.Content(winrt::box_value(entry.FileName()));
+    dialog.Content(winrt::box_value(winrt::hstring{std::wstring{entry.FileName()} +
+                                                   L"\n\nIt goes to the Recycle Bin."}));
     dialog.PrimaryButtonText(L"Delete");
     dialog.CloseButtonText(L"Cancel");
     dialog.DefaultButton(winrt::Microsoft::UI::Xaml::Controls::ContentDialogButton::Close);
@@ -1061,5 +1146,15 @@ void MainWindow::OnPlayAccelerator(
         return;
     }
     m_viewModel.TogglePlayback();
+}
+
+void MainWindow::OnRenameAccelerator(
+    winrt::Microsoft::UI::Xaml::Input::KeyboardAccelerator const& /*sender*/,
+    winrt::Microsoft::UI::Xaml::Input::KeyboardAcceleratorInvokedEventArgs const& args)
+{
+    args.Handled(true);
+    auto selected = RecordingsList().SelectedItem();
+    if (!selected) return;
+    if (auto entry = selected.try_as<winrt::yip::viewmodels::RecordingEntry>()) PromptRename(entry);
 }
 } // namespace winrt::yip::implementation
