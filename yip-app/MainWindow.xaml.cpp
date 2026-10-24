@@ -1035,8 +1035,25 @@ winrt::fire_and_forget MainWindow::PromptRename(winrt::yip::viewmodels::Recordin
     // Enter in the box renames.
     dialog.DefaultButton(winrt::ContentDialogButton::Primary);
 
+    // Taken before the dialog: a rename rebuilds every row, so the entry itself
+    // is gone afterwards. A rename keeps the write time, so the row keeps its
+    // place. ponytail: a name the filter no longer matches lands focus on the
+    // neighbour; look the row up by path if that ever matters.
+    uint32_t index = 0;
+    const bool listed = strong->m_viewModel.Recordings().IndexOf(entry, index);
+
     const auto result = co_await dialog.ShowAsync();
     if (result == winrt::ContentDialogResult::Primary) strong->m_viewModel.RenameRecording(entry, box.Text());
+
+    // The dialog hands focus back to the element that opened it, and that row
+    // (or menu) no longer exists, so it fell through to the Settings button.
+    auto list = strong->RecordingsList();
+    if (!listed || index >= list.Items().Size()) co_return;
+    list.SelectedIndex(static_cast<int32_t>(index));
+    list.UpdateLayout(); // realise the rebuilt row's container before focusing it
+    if (auto row = list.ContainerFromIndex(static_cast<int32_t>(index)).try_as<winrt::ListViewItem>()) {
+        row.Focus(winrt::FocusState::Programmatic);
+    }
     co_return;
 }
 
