@@ -31,6 +31,11 @@ const RMS_SMOOTHING: f32 = 0.25;
 /// exceed 1.0, so this is a report, not a limit.
 pub const CLIP_THRESHOLD: f32 = 0.999;
 
+/// Peak below which a packet counts as no signal at all: about -86 dBFS, just
+/// over one 16-bit step, so a muted input with converter dither still reads as
+/// muted while a real microphone in a quiet room does not.
+const SILENCE_FLOOR: f32 = 5e-5;
+
 /// Per-packet statistics gathered by the capture thread in one pass over the
 /// WASAPI buffer, before the data reaches the ring.
 #[derive(Debug, Clone, Copy, Default)]
@@ -64,6 +69,8 @@ pub struct SharedMeter {
     dropped_frames: AtomicU64,
     /// Frames handed to the ring.
     frames_captured: AtomicU64,
+    /// Length of the current unbroken run of no signal, in microseconds.
+    silent_us: AtomicU64,
     /// True once capture has produced its first packet. Lets the UI tell
     /// "silent" apart from "device still warming up".
     started: AtomicBool,
@@ -89,6 +96,7 @@ impl SharedMeter {
             overrun_count: AtomicU32::new(0),
             dropped_frames: AtomicU64::new(0),
             frames_captured: AtomicU64::new(0),
+            silent_us: AtomicU64::new(0),
             started: AtomicBool::new(false),
         }
     }
@@ -102,6 +110,7 @@ impl SharedMeter {
         self.overrun_count.store(0, Ordering::Relaxed);
         self.dropped_frames.store(0, Ordering::Relaxed);
         self.frames_captured.store(0, Ordering::Relaxed);
+        self.silent_us.store(0, Ordering::Relaxed);
         self.started.store(false, Ordering::Release);
     }
 
@@ -156,6 +165,23 @@ impl SharedMeter {
             self.frames_captured.fetch_add(frames, Ordering::Relaxed);
             self.started.store(true, Ordering::Release);
         }
+    }
+
+    /// Extend or end the run of no signal. **Capture thread only**, and only
+    /// for microphones: silence on a loopback just means nothing is playing.
+    pub fn track_silence(&self, peak: f32, frames: u64, sample_rate: u32) {
+        let run = if peak < SILENCE_FLOOR && sample_rate > 0 {
+            self.silent_us.load(Ordering::Relaxed) + frames * 1_000_000 / u64::from(sample_rate)
+        } else {
+            0
+        };
+        self.silent_us.store(run, Ordering::Relaxed);
+    }
+
+    /// How long the input has delivered no signal, without a break.
+    #[must_use]
+    pub fn silent_ms(&self) -> u64 {
+        self.silent_us.load(Ordering::Relaxed) / 1000
     }
 
     /// Record a packet the ring had no room for. `frames` is what was lost.
@@ -393,6 +419,17 @@ mod tests {
         assert!(m.peak() < 0.25, "an overrun must not read as a clip");
         assert_eq!(m.overrun_count(), 1);
         assert_eq!(m.dropped_frames(), 480);
+    }
+
+    #[test]
+    fn silence_run_grows_until_a_signal_breaks_it() {
+        let m = SharedMeter::new();
+        for _ in 0..100 {
+            m.track_silence(0.0, 480, SR);
+        }
+        assert_eq!(m.silent_ms(), 1000);
+        m.track_silence(0.01, 480, SR);
+        assert_eq!(m.silent_ms(), 0, "a quiet room is not a muted input");
     }
 
     #[test]

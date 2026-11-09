@@ -9,11 +9,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 use rtrb::Consumer;
 
+use crate::capture::free_bytes;
 use crate::error::YipError;
 use crate::format::{Encoding, PcmConverter, SampleDepth};
 use crate::mf::MfSink;
@@ -49,6 +50,15 @@ const PARK_SLACK: Duration = Duration::from_millis(10);
 /// the limit the take carries on in a numbered continuation file.
 const WAV_DATA_LIMIT: u64 = 0xFFF0_0000;
 
+/// How often a running take is made safe against the process or the machine
+/// dying, and the disk is checked for room. A crash costs at most this much of
+/// a WAV take.
+const CHECKPOINT_EVERY: Duration = Duration::from_secs(5);
+
+/// A take ends once the volume has less than this free, so finalising still
+/// has room to write. Far more than the audio written between two checks.
+const MIN_FREE_BYTES: u64 = 64 * 1024 * 1024;
+
 pub struct WriterConfig {
     pub path: PathBuf,
     pub sample_rate: u32,
@@ -78,6 +88,15 @@ impl Sink {
         }
     }
 
+    /// Encoded formats have nothing to do here: the sink writer offers no way
+    /// to make a file valid short of finalising it.
+    fn checkpoint(&mut self) -> Result<(), YipError> {
+        match self {
+            Self::Wav(sink) => sink.checkpoint(),
+            Self::Encoded(_) => Ok(()),
+        }
+    }
+
     fn finish(self) -> Result<(), YipError> {
         match self {
             Self::Wav(sink) => sink.writer.finalize().map_err(YipError::from),
@@ -88,6 +107,9 @@ impl Sink {
 
 struct WavSink {
     writer: WavWriter<BufWriter<File>>,
+    /// Second handle on the file `writer` owns, which `hound` will not lend
+    /// out, so a checkpoint can reach the disk and not just the OS cache.
+    durable: File,
     spec: WavSpec,
     depth: SampleDepth,
     conv: PcmConverter,
@@ -118,8 +140,10 @@ impl WavSink {
             sample_format,
         };
         let channels = cfg.channels.max(1);
+        let (writer, durable) = create_wav(&cfg.path, spec)?;
         Ok(Self {
-            writer: create_wav(&cfg.path, spec)?,
+            writer,
+            durable,
             spec,
             depth,
             conv: PcmConverter::new(depth),
@@ -157,19 +181,35 @@ impl WavSink {
     /// opened first, so a failure leaves the finished part intact.
     fn roll(&mut self) -> Result<(), YipError> {
         let next = self.part + 1;
-        let fresh = create_wav(&continuation_path(&self.path, next), self.spec)?;
+        let (fresh, durable) = create_wav(&continuation_path(&self.path, next), self.spec)?;
         let full = std::mem::replace(&mut self.writer, fresh);
+        self.durable = durable;
         self.part = next;
         self.part_bytes = 0;
         full.finalize()?;
         Ok(())
     }
+
+    /// Write the real lengths into the header, so the file reads back up to
+    /// this point even if nothing ever finalises it. Skipped between the
+    /// channels of a frame, where `hound` reports the header as ill-formed.
+    fn checkpoint(&mut self) -> Result<(), YipError> {
+        if self.in_frame != 0 {
+            return Ok(());
+        }
+        self.writer.flush()?;
+        // Best effort: some network volumes refuse this, and that is no
+        // reason to end a take that is writing fine.
+        let _ = self.durable.sync_data();
+        Ok(())
+    }
 }
 
-fn create_wav(path: &Path, spec: WavSpec) -> Result<WavWriter<BufWriter<File>>, YipError> {
+fn create_wav(path: &Path, spec: WavSpec) -> Result<(WavWriter<BufWriter<File>>, File), YipError> {
     let file = File::create(path)?;
+    let durable = file.try_clone()?;
     let buf = BufWriter::with_capacity(FILE_BUFFER_BYTES, file);
-    Ok(WavWriter::new(buf, spec)?)
+    Ok((WavWriter::new(buf, spec)?, durable))
 }
 
 /// `take.wav` -> `take (part 2).wav`, beside it.
@@ -219,20 +259,55 @@ pub fn run_writer(
         }
     };
     let samples_per_sec = u64::from(cfg.sample_rate) * u64::from(cfg.channels.max(1));
-    let result = drain(consumer, sink, &stop, samples_per_sec);
+    let room = || cfg.path.parent().and_then(free_bytes);
+    let result = drain(
+        consumer,
+        sink,
+        &stop,
+        samples_per_sec,
+        CHECKPOINT_EVERY,
+        &room,
+    );
     if result.is_err() && !stop.load(Ordering::Acquire) {
         on_fault();
     }
     result
 }
 
+/// Pump the ring into `sink`, then close it. It is closed after a failure too:
+/// an MP4 with no index is unreadable, so a take that hit a bad write keeps
+/// everything before it only if the sink still gets to finish. The failure
+/// that ended the take is the one reported.
 fn drain(
-    mut consumer: Consumer<f32>,
+    consumer: Consumer<f32>,
     mut sink: Sink,
     stop: &AtomicBool,
     samples_per_sec: u64,
+    checkpoint_every: Duration,
+    room: &dyn Fn() -> Option<u64>,
+) -> Result<u64, YipError> {
+    let result = pump(
+        consumer,
+        &mut sink,
+        stop,
+        samples_per_sec,
+        checkpoint_every,
+        room,
+    );
+    let finished = sink.finish();
+    result.and_then(|total| finished.map(|()| total))
+}
+
+fn pump(
+    mut consumer: Consumer<f32>,
+    sink: &mut Sink,
+    stop: &AtomicBool,
+    samples_per_sec: u64,
+    checkpoint_every: Duration,
+    room: &dyn Fn() -> Option<u64>,
 ) -> Result<u64, YipError> {
     let mut total: u64 = 0;
+    let mut last_checkpoint = Instant::now();
 
     loop {
         // Read the flag first: anything the capture thread pushed before
@@ -242,7 +317,7 @@ fn drain(
         let n = consumer.slots();
 
         if n == 0 && stopping {
-            break;
+            return Ok(total);
         }
         if n < MIN_DRAIN_SAMPLES && !stopping {
             // Let a few more packets pile up rather than paying the chunk
@@ -257,10 +332,17 @@ fn drain(
         sink.write(a, b)?;
         total += (a.len() + b.len()) as u64;
         chunk.commit_all();
-    }
 
-    sink.finish()?;
-    Ok(total)
+        if last_checkpoint.elapsed() >= checkpoint_every {
+            last_checkpoint = Instant::now();
+            if room().is_some_and(|free| free < MIN_FREE_BYTES) {
+                return Err(YipError::Io(
+                    "disk almost full, the take was saved up to this point".into(),
+                ));
+            }
+            sink.checkpoint()?;
+        }
+    }
 }
 
 /// How long `missing` samples take to arrive at `samples_per_sec`, plus
@@ -306,6 +388,54 @@ mod tests {
         assert_eq!(first.len(), 6, "first part holds three whole frames");
         let second = hound::WavReader::open(dir.path().join("take (part 2).wav")).unwrap();
         assert_eq!(second.len(), 4, "the rest carries on in part 2");
+    }
+
+    #[test]
+    fn checkpoint_leaves_a_readable_wav_if_nothing_finalises_it() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("take.wav");
+        let cfg = WriterConfig {
+            path: path.clone(),
+            sample_rate: 48_000,
+            channels: 2,
+            encoding: Encoding::Wav(SampleDepth::Int16),
+        };
+        let mut sink = WavSink::open(&cfg, SampleDepth::Int16, WAV_DATA_LIMIT).unwrap();
+        sink.write(&[0.25; 8], &[]).unwrap();
+        sink.checkpoint().unwrap();
+        // Half a frame: must be skipped rather than reported as a bad header.
+        sink.write(&[0.25], &[]).unwrap();
+        sink.checkpoint().unwrap();
+
+        // What a crash looks like: `hound`'s Drop would finalise the file.
+        std::mem::forget(sink);
+
+        let reader = hound::WavReader::open(&path).unwrap();
+        assert_eq!(reader.len(), 8, "header holds the last checkpoint");
+    }
+
+    #[test]
+    fn a_full_disk_ends_the_take_with_the_file_intact() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("t.wav");
+        let cfg = WriterConfig {
+            path: path.clone(),
+            sample_rate: 48_000,
+            channels: 1,
+            encoding: Encoding::Wav(SampleDepth::Float32),
+        };
+        let (mut p, c) = split(1024);
+        for _ in 0..512 {
+            p.push(0.5).unwrap();
+        }
+        let sink = Sink::open(&cfg).unwrap();
+        let stop = AtomicBool::new(true);
+
+        let result = drain(c, sink, &stop, 48_000, Duration::ZERO, &|| Some(0));
+
+        assert!(matches!(result, Err(YipError::Io(_))));
+        let reader = hound::WavReader::open(&path).unwrap();
+        assert_eq!(reader.len(), 512, "finalised despite the failure");
     }
 
     #[test]

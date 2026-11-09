@@ -9,6 +9,7 @@
 //!     `hound` or a Media Foundation encoder. Allowed to block on disk.
 //!   * **caller** — owns `Recorder`. `start()` and `stop()` only.
 
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -19,11 +20,12 @@ use windows::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
     AUDCLNT_STREAMFLAGS_EVENTCALLBACK, AUDCLNT_STREAMFLAGS_LOOPBACK,
-    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, IAudioCaptureClient, IAudioClient, WAVEFORMATEX,
-    WAVEFORMATEXTENSIBLE,
+    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, IAudioCaptureClient, IAudioClient, IAudioRenderClient,
+    IMMDevice, WAVEFORMATEX, WAVEFORMATEXTENSIBLE,
 };
 use windows::Win32::Media::KernelStreaming::WAVE_FORMAT_EXTENSIBLE;
 use windows::Win32::Media::Multimedia::{KSDATAFORMAT_SUBTYPE_IEEE_FLOAT, WAVE_FORMAT_IEEE_FLOAT};
+use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_MULTITHREADED, CoInitializeEx, CoTaskMemFree, CoUninitialize,
 };
@@ -31,7 +33,7 @@ use windows::Win32::System::Threading::{
     AvRevertMmThreadCharacteristics, AvSetMmThreadCharacteristicsW, CreateEventW,
     WaitForMultipleObjects,
 };
-use windows::core::Interface;
+use windows::core::{Interface, PCWSTR};
 
 use crate::devices::find_device;
 use crate::error::YipError;
@@ -250,6 +252,34 @@ impl Drop for Recorder {
 /// failure on its own.
 pub(crate) const DEVICE_PROBE_MS: u32 = 500;
 
+/// Buffer for the silent stream that keeps a loopback endpoint running. Its
+/// length does not matter: one fill is written and left to underrun.
+const KEEP_AWAKE_BUFFER_100NS: i64 = 10_000_000;
+
+/// Bytes the current user may still write to the volume holding `dir`, or
+/// `None` if the volume will not say. For the writer thread; here because this
+/// is the module allowed the `unsafe`.
+pub(crate) fn free_bytes(dir: &Path) -> Option<u64> {
+    let wide: Vec<u16> = dir
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut free: u64 = 0;
+    // SAFETY: `wide` is null-terminated and outlives the call; `free` is a
+    // valid out-slot.
+    unsafe {
+        GetDiskFreeSpaceExW(
+            PCWSTR(wide.as_ptr()),
+            Some(std::ptr::addr_of_mut!(free)),
+            None,
+            None,
+        )
+    }
+    .ok()?;
+    Some(free)
+}
+
 /// A Win32 event this module created. Closed on every exit path, including
 /// the early `?` returns that used to leak it.
 struct OwnedEvent(HANDLE);
@@ -300,6 +330,10 @@ struct Stream {
     audio_event: OwnedEvent,
     sample_rate: u32,
     channels: u16,
+    /// System audio rather than a microphone. Silence is normal here.
+    loopback: bool,
+    /// Holds the silent render stream open for as long as the capture runs.
+    _keep_awake: Option<IAudioClient>,
 }
 
 #[allow(clippy::too_many_arguments)] // bag of refs is shorter than a struct here
@@ -458,6 +492,13 @@ fn open_stream(device_id: &str, cfg: RecConfig, encoding: Encoding) -> Result<St
     // SAFETY: client initialised above.
     let capture: IAudioCaptureClient = unsafe { client.GetService::<IAudioCaptureClient>()? };
 
+    // A take without it still records, it just loses its silences as before.
+    let keep_awake = if is_render {
+        keep_endpoint_awake(&device, mix.0).ok()
+    } else {
+        None
+    };
+
     // SAFETY: client live; this transitions the engine to running.
     unsafe { client.Start()? };
 
@@ -467,7 +508,47 @@ fn open_stream(device_id: &str, cfg: RecConfig, encoding: Encoding) -> Result<St
         audio_event,
         sample_rate,
         channels,
+        loopback: is_render,
+        _keep_awake: keep_awake,
     })
+}
+
+/// Start a silent render stream on `device` and hand back its client.
+///
+/// Loopback only delivers packets while something is rendering, so with nothing
+/// playing the take would simply stop growing and its silences would vanish
+/// from the file. A stream of our own keeps the engine running, and capture
+/// then receives silent packets instead of nothing. One fill is enough: the
+/// stream underruns and stays active until its client is released.
+fn keep_endpoint_awake(
+    device: &IMMDevice,
+    mix: *const WAVEFORMATEX,
+) -> Result<IAudioClient, YipError> {
+    // SAFETY: standard activation of a WASAPI client.
+    let client: IAudioClient = unsafe { device.Activate::<IAudioClient>(CLSCTX_ALL, None)? };
+    // SAFETY: client live; `mix` is the caller's live engine format; no flags.
+    unsafe {
+        client.Initialize(
+            AUDCLNT_SHAREMODE_SHARED,
+            0,
+            KEEP_AWAKE_BUFFER_100NS,
+            0,
+            mix,
+            None,
+        )?;
+    }
+    // SAFETY: client initialised above.
+    let frames = unsafe { client.GetBufferSize()? };
+    // SAFETY: client initialised above.
+    let render: IAudioRenderClient = unsafe { client.GetService::<IAudioRenderClient>()? };
+    // SAFETY: the whole buffer is free before Start. The SILENT flag makes the
+    // engine ignore the buffer's contents, so the pointer is never touched.
+    unsafe {
+        render.GetBuffer(frames)?;
+        render.ReleaseBuffer(frames, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)?;
+        client.Start()?;
+    }
+    Ok(client)
 }
 
 /// The realtime part: drain packets into the ring until asked to stop or the
@@ -609,6 +690,9 @@ fn run_stream(
                 METER.note_overrun(dropped as u64);
             }
             METER.push_block(stats, (writable / samples_per_frame) as u64, sample_rate);
+            if !stream.loopback {
+                METER.track_silence(stats.peak, u64::from(packet_frames), sample_rate);
+            }
 
             // SAFETY: paired with GetBuffer above.
             unsafe { capture.ReleaseBuffer(packet_frames)? };

@@ -1204,7 +1204,16 @@ std::filesystem::path MainViewModel::NextRecordingPath() const
     localtime_s(&tm, &tt);
     wchar_t name[64];
     wcsftime(name, std::size(name), L"yip-%Y%m%d-%H%M%S", &tm);
-    return m_settings.output_folder / (std::wstring{name} + ::yip::audiofmt::Extension(m_settings.format));
+    const std::wstring stem{name};
+    const std::wstring ext{::yip::audiofmt::Extension(m_settings.format)};
+    auto path = m_settings.output_folder / (stem + ext);
+    // Names only resolve to the second and the writers truncate, so a take
+    // restarted inside the same second would otherwise replace the last one.
+    std::error_code ec;
+    for (int n = 2; std::filesystem::exists(path, ec); ++n) {
+        path = m_settings.output_folder / (stem + L"-" + std::to_wstring(n) + ext);
+    }
+    return path;
 }
 
 void MainViewModel::SetStatus(winrt::hstring const& s)

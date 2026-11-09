@@ -133,6 +133,9 @@ pub struct RecMeter {
     pub frames_captured: u64,
     /// Monotonic ms since `rec_start` succeeded. 0 when not recording.
     pub elapsed_ms: u64,
+    /// How long a microphone has delivered no signal, without a break. Always
+    /// 0 on a loopback device, where silence is normal.
+    pub silent_ms: u64,
 }
 
 /// One-call snapshot of playback, filled by [`play_state`].
@@ -548,6 +551,7 @@ pub unsafe extern "C" fn rec_meter(out: *mut RecMeter) -> RecStatus {
             dropped_frames: METER.dropped_frames(),
             frames_captured: METER.frames_captured(),
             elapsed_ms: session_elapsed_ms(),
+            silent_ms: METER.silent_ms(),
         };
         // SAFETY: caller guarantees `out` is a valid writable RecMeter.
         unsafe { ptr::write(out, snapshot) };
