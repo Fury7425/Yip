@@ -33,10 +33,10 @@ public:
     // Swap glyph and tooltip. Safe to call before the icon is on screen.
     void SetRecording(bool recording);
 
-    // Balloon over the icon. The one use is saying where the window went the
-    // first time it is closed to the tray: on Windows 11 a new icon starts life
-    // in the overflow flyout, so it cannot say that by being there. No-op until
-    // the icon is registered.
+    // Balloon over the icon. Says where the window went the first time it is
+    // closed to the tray (on Windows 11 a new icon starts life in the overflow
+    // flyout, so it cannot say that by being there) and warns of a take with no
+    // signal. No-op until the icon is registered.
     void ShowHint(const wchar_t* title, const wchar_t* body);
 
     // True once the shell has accepted the icon.
@@ -63,6 +63,7 @@ private:
     void RemoveIcon();
     void ApplyIconState();
     void ShowMenu(POINT anchor);
+    void CheckSilence();
     HICON CurrentIcon() const noexcept;
     const wchar_t* CurrentTip() const noexcept;
 
@@ -72,6 +73,8 @@ private:
     HICON m_iconRecording{nullptr};
     bool m_added{false};
     bool m_recording{false};
+    bool m_silent{false};
+    bool m_silenceHinted{false};
     int m_addAttempts{0};
 };
 } // namespace yip

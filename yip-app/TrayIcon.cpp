@@ -13,6 +13,13 @@ constexpr wchar_t kHostClass[] = L"YipTrayHostWindow";
 constexpr UINT kTrayCallback = WM_APP + 1;
 constexpr UINT kIconId = 1;
 constexpr UINT_PTR kRetryTimer = 1;
+constexpr UINT_PTR kSilenceTimer = 2;
+constexpr UINT kSilenceCheckMs = 1000;
+
+// Long enough that drawing breath or reading a line is not "no signal". The
+// tray is the one surface that exists with the window closed and the pill
+// hidden or reduced to a dot, which is when a muted mic goes unnoticed.
+constexpr uint64_t kSilenceWarnMs = 10000;
 
 constexpr UINT kCmdToggleRecording = 0x100;
 constexpr UINT kCmdShow = 0x101;
@@ -26,6 +33,7 @@ constexpr UINT kRetryIntervalMs = 1000;
 
 constexpr wchar_t kTipIdle[] = L"Yip — idle";
 constexpr wchar_t kTipRecording[] = L"Yip — recording";
+constexpr wchar_t kTipSilent[] = L"Yip — recording, no signal";
 
 // Broadcast by the shell when the taskbar is (re)created: explorer restarting
 // takes every notification icon with it and expects each owner to re-add.
@@ -105,14 +113,48 @@ HICON TrayIcon::CurrentIcon() const noexcept
 
 const wchar_t* TrayIcon::CurrentTip() const noexcept
 {
-    return m_recording ? kTipRecording : kTipIdle;
+    if (!m_recording) return kTipIdle;
+    return m_silent ? kTipSilent : kTipRecording;
 }
 
 void TrayIcon::SetRecording(bool recording)
 {
     if (m_recording == recording) return;
     m_recording = recording;
+    m_silent = false;
+    m_silenceHinted = false;
+    if (m_host) {
+        if (recording) {
+            ::SetTimer(m_host, kSilenceTimer, kSilenceCheckMs, nullptr);
+        } else {
+            ::KillTimer(m_host, kSilenceTimer);
+        }
+    }
     ApplyIconState();
+}
+
+void TrayIcon::CheckSilence()
+{
+    RecMeter meter{};
+    if (::rec_meter(&meter) != REC_STATUS_OK) return;
+
+    // A device that never delivers a packet is as silent as one delivering
+    // zeros, and leaves silent_ms at 0.
+    const bool noPackets = meter.started == 0 && meter.elapsed_ms >= kSilenceWarnMs;
+    const bool silent =
+        meter.recording != 0 && meter.paused == 0 && (noPackets || meter.silent_ms >= kSilenceWarnMs);
+
+    if (silent != m_silent) {
+        m_silent = silent;
+        ApplyIconState();
+    }
+    // Once a take: a noise-gated mic goes quiet at every pause, and the tooltip
+    // keeps reporting the current state anyway.
+    if (silent && !m_silenceHinted && m_added) {
+        m_silenceHinted = true;
+        ShowHint(L"Yip is recording silence",
+                 L"No signal from the input for 10 seconds. Check that the microphone is not muted.");
+    }
 }
 
 bool TrayIcon::AddIcon()
@@ -278,6 +320,10 @@ LRESULT TrayIcon::Handle(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             if (wParam == kRetryTimer) {
                 ::KillTimer(hwnd, kRetryTimer);
                 AddIcon();
+                return 0;
+            }
+            if (wParam == kSilenceTimer) {
+                CheckSilence();
                 return 0;
             }
             break;
